@@ -1,0 +1,28 @@
+{
+  "name": "maturity-analyzer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Deterministic web performance maturity analyzer (no LLM) — POC: Images + CDN topics",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "audit": "tsx src/cli/index.ts",
+    "collect": "tsx src/cli/collect.ts"
+  },
+  "dependencies": {
+    "commander": "^12.1.0",
+    "csv-parse": "^5.5.6",
+    "playwright": "^1.48.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}
