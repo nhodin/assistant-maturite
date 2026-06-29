@@ -106,6 +106,16 @@ export interface CollectOptions {
   cruxApiKey?: string;
   /** Hard navigation timeout in ms. */
   timeoutMs?: number;
+  /**
+   * Browser provider. "playwright" (default) = vanilla headless Chromium.
+   * "cloak" = CloakBrowser stealth Chromium, needed for WAF-protected sites
+   * (e.g. Akamai-blocked LVMH brand sites).
+   */
+  browser?: "playwright" | "cloak";
+  /** Proxy URL passed to the browser provider, e.g. "http://user:pass@host:port". */
+  proxy?: string;
+  /** Override headless mode. Defaults: playwright→true, cloak→false (stealth). */
+  headless?: boolean;
 }
 
 /** The single public entry point the collector must export. */

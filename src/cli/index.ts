@@ -95,6 +95,13 @@ program
   .option("--device <mobile|desktop>", "Emulation device", "mobile")
   .option("--no-cookies", "Skip cookie acceptance")
   .option("--crux-key <key>", "Google CrUX/PSI API key")
+  .option(
+    "--browser <playwright|cloak>",
+    "Browser provider (cloak = stealth Chromium for WAF-protected sites)",
+    "playwright",
+  )
+  .option("--proxy <url>", "Proxy URL, e.g. http://user:pass@host:port")
+  .option("--headless", "Force headless mode (cloak defaults to headed)")
   .option("--out <dir>", "Output directory", "out")
   .action(async (opts) => {
     const { collect, TOPICS } = await loadDeps();
@@ -121,6 +128,10 @@ program
     const device = (opts.device as string) === "desktop" ? "desktop" : "mobile";
     const acceptCookies = opts.cookies !== false; // commander: --no-cookies sets cookies=false
     const cruxApiKey = opts.cruxKey as string | undefined;
+    const browser =
+      (opts.browser as string) === "cloak" ? "cloak" : "playwright";
+    const proxy = opts.proxy as string | undefined;
+    const headless = opts.headless === true ? true : undefined;
 
     const siteResults = [];
 
@@ -142,6 +153,9 @@ program
             device,
             acceptCookies,
             cruxApiKey,
+            browser,
+            proxy,
+            headless,
           });
           pages.push(bundle);
 

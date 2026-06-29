@@ -2,7 +2,6 @@
  * Main collector — captures everything about a page and returns an EvidenceBundle.
  * Performs NO scoring; only data gathering.
  */
-import { chromium, devices } from "playwright";
 import type { CDPSession } from "playwright";
 import {
   EvidenceBundleSchema,
@@ -17,6 +16,7 @@ import {
 import { probeNetwork } from "./network";
 import { fetchCrux } from "./crux";
 import { parseHead } from "./head";
+import { openBrowser } from "./browser";
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -331,35 +331,12 @@ export const collect: CollectFn = async (
   let sliderDetected = false;
   let videoDetected = false;
 
-  // Anti-bot mitigation: hide the most obvious automation fingerprints so edge
-  // WAFs (Akamai/Cloudflare) are less likely to serve an "Access Denied" stub.
-  const browser = await chromium.launch({
-    headless: true,
-    args: [
-      "--disable-blink-features=AutomationControlled",
-      "--disable-features=IsolateOrigins,site-per-process",
-      "--no-sandbox",
-    ],
-  });
+  // Browser capture via the selected provider: vanilla Playwright (default) or
+  // CloakBrowser stealth (opts.browser === "cloak") for WAF-protected sites.
+  // The provider returns a Playwright-compatible BrowserContext either way.
+  const opened = await openBrowser(opts);
+  const { context } = opened;
   try {
-    const contextOptions =
-      device === "mobile"
-        ? {
-            ...devices["iPhone 13"],
-            locale: "en-US",
-            extraHTTPHeaders: {
-              "accept-language": "en-US,en;q=0.9",
-            },
-          }
-        : {
-            viewport: { width: 1280, height: 800 },
-            locale: "en-US",
-            extraHTTPHeaders: {
-              "accept-language": "en-US,en;q=0.9",
-            },
-          };
-
-    const context = await browser.newContext(contextOptions);
 
     // Hide navigator.webdriver before any page script runs (anti-bot mitigation).
     await context.addInitScript(() => {
@@ -670,7 +647,7 @@ export const collect: CollectFn = async (
 
     await context.close();
   } finally {
-    await browser.close();
+    await opened.close();
   }
 
   // ── Step 3: Fonts from raw HTML ──────────────────────────────────────────────
