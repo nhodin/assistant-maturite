@@ -80,29 +80,17 @@ export function parseHead(html: string): ParsedHead {
 
   if (!headSlice) return { order, tags };
 
-  /**
-   * Tokenize tags. We match:
-   *  - <script ...> ... </script>  (with content)
-   *  - <style ...> ... </style>    (with content)
-   *  - Self-closing or void tags: <meta .../>, <link .../>, <base .../>
-   *  - <title>...</title>
-   * We skip comments and processing instructions.
-   */
-  // Combined regex for head tags
-  const tagRe =
-    /<(script|style|title|meta|link|base)((?:\s[^>]*)?)(?:\/>|>)([\s\S]*?(?=<\/\1>|$))?(?:<\/\1>)?/gi;
+  // Match every OPENING tag of interest in document order. We deliberately ignore
+  // element content (script/style bodies) — only the opening tag + attributes are
+  // needed to build the order tokens, and scanning opening tags is far more robust
+  // than trying to also capture (and correctly terminate) inline script/style bodies.
+  const tagRe = /<(script|style|title|meta|link|base)\b([^>]*)>/gi;
 
   let m: RegExpExecArray | null;
   while ((m = tagRe.exec(headSlice)) !== null) {
     const tagName = m[1].toLowerCase();
     const attrStr = m[2] ?? "";
     const attrs = parseAttrs(attrStr);
-
-    // For script/style/title, store content as special key
-    const content = m[3];
-    if (content !== undefined && content.trim()) {
-      attrs["_content"] = content.trim().slice(0, 200); // store first 200 chars as hint
-    }
 
     tags.push({ tag: tagName, attrs });
 
