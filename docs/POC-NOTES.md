@@ -26,13 +26,24 @@ Référence audit manuel (2026-03-30) pour BULY : Images 70 / CDN 90 → **écar
 
 Prouvé que la capture complète fonctionne sur tout site qui rend réellement (bbc.com : 237 requêtes dont 71 images, LCP = vrai `<img>`).
 
-### Pistes de contournement (à décider)
-1. **Chrome réel/persistant non-headless** (profil utilisateur réel) — souvent suffisant contre Akamai ; c'est ce qui fait marcher l'audit manuel actuel via Chrome DevTools MCP.
-2. **Proxy résidentiel** + stealth (playwright-extra) pour des runs serveur.
+### Pistes de contournement (évaluées)
+1. **Chrome réel/persistant non-headless** (profil utilisateur réel) — souvent suffisant contre Akamai.
+2. **Proxy résidentiel** + stealth pour des runs serveur.
 3. **IP d'origine autorisée** (allowlist côté CDN/WAF) si accès interne LVMH possible.
+4. **CloakBrowser** (vrai Chromium patché, compatible Playwright) — ✅ **retenu et intégré**.
+
+### ✅ Résolu — CloakBrowser
+`Obscura` écarté (moteur Rust réécrit → échouerait au capteur Akamai ; la randomisation de fingerprint aggrave). `CloakBrowser` retenu : binaire Chromium patché signé (Ed25519 + SHA-256), API 100% compatible Playwright (`newContext`/`addInitScript`/`newCDPSession` OK).
+
+Intégré comme **fournisseur navigateur commutable** dans `src/collector/browser.ts`, sélectionnable par `--browser cloak` (Playwright reste le défaut). L'UA stealth de CloakBrowser est préservée (pas d'override d'émulation pour ne pas re-exposer l'automation).
+
+**Résultat (run cloak, IP locale résidentielle, sans proxy) :** les 3 sites Akamai entièrement capturés —
+MUFE 68 images / Givenchy 76 images (LCP `fetchpriority=high` détecté) / Kenzo 52 images. Scores désormais adossés à de vraies données.
+
+**Limites :** binaire tiers ~535 Mo (gratuit en v146, v148+ « Pro » payant) ; sans proxy résidentiel, un run depuis une IP datacenter (VPS) pourrait être re-bloqué par réputation IP → prévoir option `--proxy` (déjà câblée) pour la prod.
 
 ## Prochaines étapes
-- Décider de la stratégie anti-bot (ci-dessus) avant d'industrialiser la collecte.
+- Pour la prod sur VPS : valider CloakBrowser + proxy résidentiel (ou allowlist IP côté LVMH).
 - Étendre aux 10 thèmes restants (mêmes patterns).
 - Ajouter Lighthouse pour `coverage` CSS/JS (actuellement `null`).
 - API + UI (config des contrôles, runs, dashboard) — couche suivante du plan.
