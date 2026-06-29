@@ -186,28 +186,61 @@ async function tryAcceptCookies(
   return false;
 }
 
+// ── Auto-scroll (anti-bot / lazy-load mitigation) ───────────────────────────────
+// Headless never scrolls, so lazy-loaded images and SPA-deferred content never
+// request and LCP never settles. We scroll top→bottom in viewport-sized steps,
+// re-reading scrollHeight as it grows, then scroll back to top.
+async function autoScroll(page: import("playwright").Page): Promise<void> {
+  try {
+    const viewportH =
+      (await page.evaluate(() => window.innerHeight).catch(() => 0)) || 800;
+    const maxSteps = 25; // cap ~12s total (25 * 300ms + work)
+    let lastScrollY = -1;
+
+    for (let i = 0; i < maxSteps; i++) {
+      const { scrollY, scrollHeight } = await page
+        .evaluate(() => ({
+          scrollY: window.scrollY,
+          scrollHeight: document.body ? document.body.scrollHeight : 0,
+        }))
+        .catch(() => ({ scrollY: 0, scrollHeight: 0 }));
+
+      // Reached the bottom and no further growth — stop early.
+      if (scrollY + viewportH >= scrollHeight && scrollY === lastScrollY) break;
+      lastScrollY = scrollY;
+
+      await page.mouse.wheel(0, viewportH).catch(() => {});
+      await new Promise<void>((r) => setTimeout(r, 300));
+    }
+
+    // Back to top so above-the-fold LCP element is the settled one.
+    await page.evaluate(() => window.scrollTo(0, 0)).catch(() => {});
+    await new Promise<void>((r) => setTimeout(r, 300));
+  } catch {
+    // Best effort — scrolling failures must not abort capture.
+  }
+}
+
 // ── Performance init script (injected before navigation) ───────────────────────
 
 const PERF_INIT_SCRIPT = `
 (function() {
   window.__perf = {
     lcpTime: null,
-    lcpElementData: null,
+    lcpElement: null, // live reference to the latest LCP element (re-marked at the end)
     cls: 0,
     longTasks: [],
   };
 
-  // LCP observer
+  // LCP observer — keeps updating through the auto-scroll so the final entry wins.
   try {
     const lcpObs = new PerformanceObserver(function(list) {
       const entries = list.getEntries();
       if (entries.length > 0) {
         const entry = entries[entries.length - 1];
         window.__perf.lcpTime = entry.startTime;
-        // Mark the element so we can query it later
-        if (entry.element) {
-          entry.element.setAttribute('data-lcp-marker', '1');
-        }
+        // Stash the live element reference; we mark it just before extraction.
+        window.__perf.lcpElement = entry.element || null;
       }
     });
     lcpObs.observe({ type: 'largest-contentful-paint', buffered: true });
@@ -298,14 +331,44 @@ export const collect: CollectFn = async (
   let sliderDetected = false;
   let videoDetected = false;
 
-  const browser = await chromium.launch({ headless: true });
+  // Anti-bot mitigation: hide the most obvious automation fingerprints so edge
+  // WAFs (Akamai/Cloudflare) are less likely to serve an "Access Denied" stub.
+  const browser = await chromium.launch({
+    headless: true,
+    args: [
+      "--disable-blink-features=AutomationControlled",
+      "--disable-features=IsolateOrigins,site-per-process",
+      "--no-sandbox",
+    ],
+  });
   try {
     const contextOptions =
       device === "mobile"
-        ? { ...devices["iPhone 13"] }
-        : { viewport: { width: 1280, height: 800 } };
+        ? {
+            ...devices["iPhone 13"],
+            locale: "en-US",
+            extraHTTPHeaders: {
+              "accept-language": "en-US,en;q=0.9",
+            },
+          }
+        : {
+            viewport: { width: 1280, height: 800 },
+            locale: "en-US",
+            extraHTTPHeaders: {
+              "accept-language": "en-US,en;q=0.9",
+            },
+          };
 
     const context = await browser.newContext(contextOptions);
+
+    // Hide navigator.webdriver before any page script runs (anti-bot mitigation).
+    await context.addInitScript(() => {
+      try {
+        Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+      } catch {
+        // ignore
+      }
+    });
 
     // Inject perf observer script before any navigation
     await context.addInitScript(PERF_INIT_SCRIPT);
@@ -432,6 +495,16 @@ export const collect: CollectFn = async (
       }
     }
 
+    // ── Auto-scroll to trigger lazy-loading (anti-bot / lazy-load mitigation) ────
+    // Done AFTER cookie acceptance, BEFORE reading metrics/HTML so deferred images
+    // and SPA content actually request and LCP can settle on a real element.
+    await autoScroll(page);
+    try {
+      await page.waitForLoadState("networkidle", { timeout: 6000 });
+    } catch {
+      // Ignore — late assets may still be in flight; we captured what we could.
+    }
+
     // ── Rendered HTML ──────────────────────────────────────────────────────────
     try {
       renderedHtml = await page.content();
@@ -444,9 +517,20 @@ export const collect: CollectFn = async (
       const perfData = await page.evaluate(() => {
         const perf = (window as unknown as { __perf?: {
           lcpTime: number | null;
+          lcpElement: Element | null;
           cls: number;
           longTasks: { startTime: number; duration: number }[];
         } }).__perf;
+
+        // Mark the latest LCP element right now (after scroll + settle) so we
+        // extract the element that actually won, not a stale early one.
+        try {
+          if (perf?.lcpElement && perf.lcpElement.isConnected) {
+            perf.lcpElement.setAttribute("data-lcp-marker", "1");
+          }
+        } catch {
+          // ignore
+        }
 
         // TTFB from Navigation Timing
         let ttfbMs: number | null = null;
@@ -470,7 +554,13 @@ export const collect: CollectFn = async (
 
         try {
           const el = document.querySelector("[data-lcp-marker='1']") as HTMLElement | null;
-          if (el) {
+          // Be honest: BODY/HTML or a zero-size element is not a real LCP element.
+          // Returning null lets downstream "LCP is/isn't an image" logic stay truthful.
+          const rect = el?.getBoundingClientRect();
+          const hasSize = rect ? rect.width > 0 && rect.height > 0 : false;
+          const isStructural =
+            el?.tagName === "BODY" || el?.tagName === "HTML";
+          if (el && hasSize && !isStructural) {
             const tagName = el.tagName.toLowerCase();
             let src: string | undefined;
             if (el instanceof HTMLImageElement) {
