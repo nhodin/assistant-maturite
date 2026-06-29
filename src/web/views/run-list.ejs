@@ -1,0 +1,28 @@
+<%- include('partials/header', { title, active }) %>
+
+<h1>Runs</h1>
+<% if (activeRunId) { %><p class="muted">Run actif : <a href="/runs/<%= activeRunId %>">#<%= activeRunId %></a> en cours…</p><% } %>
+
+<table class="grid">
+  <thead><tr><th>#</th><th>Projet</th><th>Statut</th><th>Pages</th><th>Sites notés</th><th>Date</th><th></th></tr></thead>
+  <tbody>
+    <% runs.forEach(function(r){ %>
+      <tr>
+        <td><a href="/runs/<%= r.id %>">#<%= r.id %></a></td>
+        <td><%= r.project.name %></td>
+        <td><span class="badge b-<%= r.status %>"><%= r.status %></span></td>
+        <td><%= r.donePages %>/<%= r.totalPages %></td>
+        <td><%= r._count.runSiteScores %></td>
+        <td><%= fmtDate(r.createdAt) %></td>
+        <td class="actions">
+          <form method="post" action="/runs/<%= r.id %>/delete" onsubmit="return confirm('Supprimer ce run ?')">
+            <button class="danger" type="submit">Suppr.</button>
+          </form>
+        </td>
+      </tr>
+    <% }) %>
+    <% if (!runs.length) { %><tr><td colspan="7" class="muted">Aucun run.</td></tr><% } %>
+  </tbody>
+</table>
+
+<%- include('partials/footer') %>

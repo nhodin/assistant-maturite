@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title><%= typeof title !== 'undefined' ? title : 'Maturity Analyzer' %> — Maturity Analyzer</title>
+  <link rel="stylesheet" href="/public/app.css">
+  <script src="https://unpkg.com/htmx.org@2.0.3"></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/">🔬 Maturity Analyzer</a>
+    <nav>
+      <a href="/" class="<%= active==='dashboard'?'on':'' %>">Dashboard</a>
+      <a href="/inventory" class="<%= active==='inventory'?'on':'' %>">Inventory</a>
+      <a href="/projects" class="<%= active==='projects'?'on':'' %>">Projects</a>
+      <a href="/runs" class="<%= active==='runs'?'on':'' %>">Runs</a>
+      <a href="/settings" class="<%= active==='settings'?'on':'' %>">Settings</a>
+      <a href="/diagnostics" class="<%= active==='diagnostics'?'on':'' %>">Diagnostics</a>
+    </nav>
+  </header>
+  <main class="container">

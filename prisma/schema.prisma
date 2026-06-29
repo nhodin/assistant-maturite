@@ -1,0 +1,154 @@
+// Maturity Analyzer — persistence schema (MySQL).
+// Inventory (Site/Page) → Project (selection of pages) → Run (one execution) →
+// RunPage (per-page evidence) + RunSiteScore (aggregated per-site results).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+/// LVMH maisons categories used for global + per-category ranking.
+enum Category {
+  Beauty
+  Fragrances
+  WatchesJewelry // Watches & Jewelry
+  WineSpirits // Wine & Spirits
+  SR
+  Other
+}
+
+enum PageKind {
+  HP
+  PLP
+  PDP
+  OTHER
+}
+
+enum RunStatus {
+  PENDING
+  RUNNING
+  DONE
+  FAILED
+}
+
+/// A website in the inventory. Has one category and one or more pages.
+model Site {
+  id        Int      @id @default(autoincrement())
+  name      String
+  category  Category @default(Other)
+  homepage  String?  @db.Text
+  notes     String?  @db.Text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  pages         Page[]
+  runSiteScores RunSiteScore[]
+}
+
+/// A specific page (URL) of a site to audit.
+model Page {
+  id        Int      @id @default(autoincrement())
+  site      Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  siteId    Int
+  kind      PageKind @default(OTHER)
+  label     String?
+  url       String   @db.Text
+  createdAt DateTime @default(now())
+
+  projectPages ProjectPage[]
+  runPages     RunPage[]
+
+  @@index([siteId])
+}
+
+/// A campaign / iteration grouping a selection of pages to test repeatedly.
+model Project {
+  id          Int      @id @default(autoincrement())
+  name        String
+  description String?  @db.Text
+  createdAt   DateTime @default(now())
+
+  pages ProjectPage[]
+  runs  Run[]
+}
+
+/// Join: which pages are included in a project.
+model ProjectPage {
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId Int
+  page      Page    @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  pageId    Int
+
+  @@id([projectId, pageId])
+  @@index([pageId])
+}
+
+/// One execution of a project's pages at a point in time.
+model Run {
+  id            Int       @id @default(autoincrement())
+  project       Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId     Int
+  status        RunStatus @default(PENDING)
+  browser       String    @default("cloak") // playwright | cloak
+  device        String    @default("mobile")
+  acceptCookies Boolean   @default(true)
+  configJson    Json? // snapshot of the control config used for this run
+  totalPages    Int       @default(0)
+  donePages     Int       @default(0)
+  error         String?   @db.Text
+  startedAt     DateTime?
+  finishedAt    DateTime?
+  createdAt     DateTime  @default(now())
+
+  runPages      RunPage[]
+  runSiteScores RunSiteScore[]
+
+  @@index([projectId])
+}
+
+/// Per-page capture + status within a run. Stores the full EvidenceBundle.
+model RunPage {
+  id           Int       @id @default(autoincrement())
+  run          Run       @relation(fields: [runId], references: [id], onDelete: Cascade)
+  runId        Int
+  page         Page      @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  pageId       Int
+  url          String    @db.Text
+  status       RunStatus @default(PENDING)
+  evidenceJson Json? // captured EvidenceBundle (large)
+  error        String?   @db.Text
+  createdAt    DateTime  @default(now())
+
+  @@index([runId])
+  @@index([pageId])
+}
+
+/// Aggregated per-site result for a run (used for ranking + detail).
+model RunSiteScore {
+  id         Int      @id @default(autoincrement())
+  run        Run      @relation(fields: [runId], references: [id], onDelete: Cascade)
+  runId      Int
+  site       Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  siteId     Int
+  category   Category
+  overall    Int?
+  geo        Int?
+  china      Int?
+  topicsJson Json // TopicResult[] (per-topic scores + control evidence)
+
+  @@unique([runId, siteId])
+  @@index([runId])
+}
+
+/// Editable per-control configuration (Settings UI). Keyed by control id.
+model ControlConfig {
+  controlId      String   @id
+  enabled        Boolean  @default(true)
+  pointsOverride Int?
+  naForced       Boolean  @default(false)
+  updatedAt      DateTime @updatedAt
+}

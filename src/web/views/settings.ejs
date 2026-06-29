@@ -1,0 +1,40 @@
+<%- include('partials/header', { title, active }) %>
+
+<div class="head-row">
+  <h1>Settings — contrôles & notes</h1>
+  <form method="post" action="/settings/reset" onsubmit="return confirm('Réinitialiser tous les contrôles aux valeurs par défaut ?')">
+    <button class="danger" type="submit">Réinitialiser</button>
+  </form>
+</div>
+<p class="muted">Active/désactive chaque contrôle et ajuste ses points. Laisse le champ points vide pour garder la valeur par défaut. Le total effectif par thème est indiqué.</p>
+
+<form method="post" action="/settings">
+  <% topics.forEach(function(t){ %>
+    <fieldset class="ctl-topic">
+      <legend><%= t.topicId %>. <%= t.topicName %>
+        <span class="muted">· total effectif <strong class="<%= t.effectiveTotal===100?'':'warn' %>"><%= t.effectiveTotal %></strong>/100</span>
+        <% if (t.standalone) { %><span class="badge">standalone</span><% } %>
+        <% if (t.hasNA) { %><span class="badge">N/A possible</span><% } %>
+      </legend>
+      <table class="grid small ctl-table">
+        <thead><tr><th>Actif</th><th>Contrôle</th><th>Points</th><th>Défaut</th><th>N/A forcé</th><th>Description</th></tr></thead>
+        <tbody>
+          <% t.controls.forEach(function(c){ %>
+            <tr class="<%= c.enabled ? '' : 'disabled-row' %>">
+              <td><input type="checkbox" name="enabled_<%= c.id %>" <%= c.enabled?'checked':'' %>></td>
+              <td><code><%= c.id %></code><br><%= c.label %></td>
+              <td><input class="pts" type="number" min="0" name="points_<%= c.id %>" value="<%= c.pointsOverride===null?'':c.pointsOverride %>" placeholder="<%= c.defaultPoints %>"></td>
+              <td class="muted"><%= c.defaultPoints %></td>
+              <td><input type="checkbox" name="na_<%= c.id %>" <%= c.naForced?'checked':'' %>></td>
+              <td class="ev"><%= c.description %></td>
+            </tr>
+          <% }) %>
+        </tbody>
+      </table>
+    </fieldset>
+  <% }) %>
+
+  <div class="sticky-save"><button type="submit" class="btn-primary">💾 Enregistrer tous les réglages</button></div>
+</form>
+
+<%- include('partials/footer') %>

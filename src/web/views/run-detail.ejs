@@ -1,0 +1,70 @@
+<%- include('partials/header', { title, active }) %>
+
+<%
+  var TCOLS = [
+    {id:1,ab:'Img'},{id:2,ab:'Sld'},{id:3,ab:'Vid'},{id:4,ab:'3P'},{id:5,ab:'TTFB'},
+    {id:6,ab:'JS'},{id:7,ab:'CSS'},{id:8,ab:'CP'},{id:9,ab:'Fnt'},{id:10,ab:'CDN'}
+  ];
+  function tScore(topics, id){ var t=(topics||[]).find(function(x){return x.topicId===id}); return t? t.score : undefined; }
+%>
+
+<p><a href="/runs">← Runs</a></p>
+<div class="head-row">
+  <h1>Run #<%= run.id %></h1>
+  <span class="badge b-<%= run.status %>"><%= run.status %></span>
+</div>
+<p class="muted">
+  Projet « <%= run.project.name %> » · <%= run.browser %> · <%= run.device %> ·
+  <%= fmtDate(run.startedAt) %> → <%= fmtDate(run.finishedAt) %>
+</p>
+<% if (run.error) { %><div class="empty err"><%= run.error %></div><% } %>
+
+<% if (run.status === 'PENDING' || run.status === 'RUNNING') { %>
+  <%- include('partials/run-progress', { run }) %>
+<% } else { %>
+
+  <h2>Classement global</h2>
+  <div class="scroll-x">
+  <table class="grid matrix">
+    <thead>
+      <tr><th>#</th><th>Site</th><th>Cat.</th>
+        <% TCOLS.forEach(function(c){ %><th title="topic <%= c.id %>"><%= c.ab %></th><% }) %>
+        <th>Global</th><th>GEO</th><th>China</th></tr>
+    </thead>
+    <tbody>
+      <% ranking.forEach(function(s, i){ %>
+        <tr>
+          <td><%= i+1 %></td>
+          <td><a href="/runs/<%= run.id %>/sites/<%= s.siteId %>"><%= s.site.name %></a></td>
+          <td class="muted"><%= categoryLabel(s.category) %></td>
+          <% TCOLS.forEach(function(c){ var v=tScore(s.topicsJson, c.id); %>
+            <td><span class="score sm <%= scoreClass(v) %>"><%= fmtScore(v) %></span></td>
+          <% }) %>
+          <td><span class="score <%= scoreClass(s.overall) %>"><%= fmtScore(s.overall) %></span></td>
+          <td><span class="score <%= scoreClass(s.geo) %>"><%= fmtScore(s.geo) %></span></td>
+          <td><span class="score <%= scoreClass(s.china) %>"><%= fmtScore(s.china) %></span></td>
+        </tr>
+      <% }) %>
+      <% if (!ranking.length) { %><tr><td colspan="16" class="muted">Aucun score (toutes les pages ont échoué ?).</td></tr><% } %>
+    </tbody>
+  </table>
+  </div>
+
+  <h2>Capture des pages</h2>
+  <table class="grid small">
+    <thead><tr><th>Site</th><th>Type</th><th>URL</th><th>Statut</th></tr></thead>
+    <tbody>
+      <% run.runPages.forEach(function(rp){ %>
+        <tr>
+          <td><%= rp.page.site.name %></td>
+          <td><span class="badge"><%= rp.page.kind %></span></td>
+          <td class="url"><%= rp.url %></td>
+          <td><span class="badge b-<%= rp.status %>"><%= rp.status %></span><% if (rp.error) { %> <span class="muted" title="<%= rp.error %>">⚠</span><% } %></td>
+        </tr>
+      <% }) %>
+    </tbody>
+  </table>
+
+<% } %>
+
+<%- include('partials/footer') %>

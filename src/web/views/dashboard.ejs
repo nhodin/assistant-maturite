@@ -1,0 +1,75 @@
+<%- include('partials/header', { title, active }) %>
+
+<h1>Dashboard</h1>
+
+<div class="cards">
+  <a class="card" href="/inventory"><span class="num"><%= counts.sites %></span> sites</a>
+  <a class="card" href="/inventory"><span class="num"><%= counts.pages %></span> pages</a>
+  <a class="card" href="/projects"><span class="num"><%= counts.projects %></span> projets</a>
+  <a class="card" href="/runs"><span class="num"><%= counts.runs %></span> runs</a>
+</div>
+
+<% if (!latestRun) { %>
+  <div class="empty">
+    Aucun run terminé. Crée un <a href="/projects/new">projet</a> et lance un run.
+  </div>
+<% } else { %>
+  <p class="muted">Dernier run terminé : <strong>#<%= latestRun.id %></strong> —
+    projet « <%= latestRun.project.name %> » — <%= fmtDate(latestRun.finishedAt) %>
+    · <a href="/runs/<%= latestRun.id %>">voir le détail</a></p>
+
+  <h2>Classement global</h2>
+  <table class="grid">
+    <thead><tr><th>#</th><th>Site</th><th>Catégorie</th><th>Score global</th><th>GEO</th><th>China</th></tr></thead>
+    <tbody>
+      <% ranking.forEach(function(s, i){ %>
+        <tr>
+          <td><%= i+1 %></td>
+          <td><a href="/runs/<%= latestRun.id %>/sites/<%= s.siteId %>"><%= s.site.name %></a></td>
+          <td><%= categoryLabel(s.category) %></td>
+          <td><span class="score <%= scoreClass(s.overall) %>"><%= fmtScore(s.overall) %></span></td>
+          <td><span class="score <%= scoreClass(s.geo) %>"><%= fmtScore(s.geo) %></span></td>
+          <td><span class="score <%= scoreClass(s.china) %>"><%= fmtScore(s.china) %></span></td>
+        </tr>
+      <% }) %>
+    </tbody>
+  </table>
+
+  <h2>Par catégorie</h2>
+  <div class="cat-grid">
+    <% CATEGORIES.forEach(function(cat){ if (byCategory[cat] && byCategory[cat].length) { %>
+      <div class="cat-block">
+        <h3><%= categoryLabel(cat) %></h3>
+        <table class="grid small">
+          <tbody>
+            <% byCategory[cat].forEach(function(s, i){ %>
+              <tr>
+                <td><%= i+1 %></td>
+                <td><a href="/runs/<%= latestRun.id %>/sites/<%= s.siteId %>"><%= s.site.name %></a></td>
+                <td><span class="score <%= scoreClass(s.overall) %>"><%= fmtScore(s.overall) %></span></td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+    <% } }) %>
+  </div>
+<% } %>
+
+<h2>Runs récents</h2>
+<table class="grid">
+  <thead><tr><th>#</th><th>Projet</th><th>Statut</th><th>Date</th></tr></thead>
+  <tbody>
+    <% recentRuns.forEach(function(r){ %>
+      <tr>
+        <td><a href="/runs/<%= r.id %>">#<%= r.id %></a></td>
+        <td><%= r.project.name %></td>
+        <td><span class="badge b-<%= r.status %>"><%= r.status %></span></td>
+        <td><%= fmtDate(r.createdAt) %></td>
+      </tr>
+    <% }) %>
+    <% if (!recentRuns.length) { %><tr><td colspan="4" class="muted">Aucun run.</td></tr><% } %>
+  </tbody>
+</table>
+
+<%- include('partials/footer') %>

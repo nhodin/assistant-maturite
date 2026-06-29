@@ -49,5 +49,27 @@ npm install
 npx playwright install chromium   # one-time browser download
 npm run typecheck
 npm test
-npm run audit                     # full run over data/WEBSITES.csv → reports
+npm run audit                     # CLI run over data/WEBSITES.csv → out/ reports
 ```
+
+## Web app (UI + MySQL)
+
+Server-rendered dashboard (Fastify + EJS + HTMX) with MySQL persistence (Prisma).
+
+Features: **Inventory** (sites + pages, by category), **Projects** (select pages to test
+together), **Runs** (launch, live progress, history), per-run/per-site **detail** with
+control-level evidence, global + per-category **ranking**, **Settings** (enable/disable
+controls and re-point), and a **Diagnostics** panel (MySQL / headless / CloakBrowser / collect).
+
+Categories: Beauty, Fragrances, Watches & Jewelry, Wine & Spirits, SR, Other.
+
+```bash
+cp .env.example .env              # set DATABASE_URL (MySQL)
+npm run db:push                   # create tables (+ prisma generate)
+npm run db:seed-inventory         # optional: seed sites/pages from data/WEBSITES.csv
+npm run web                       # → http://localhost:5173
+```
+
+Data model: `Site → Page` (inventory) · `Project → ProjectPage` (selection) ·
+`Run → RunPage` (per-page capture) + `RunSiteScore` (aggregated, ranked). Control
+configuration lives in `ControlConfig`, edited from the Settings page.

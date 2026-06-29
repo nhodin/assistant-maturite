@@ -1,0 +1,59 @@
+<%- include('partials/header', { title, active }) %>
+
+<p><a href="/projects">← Projects</a></p>
+<h1><%= project.name %></h1>
+<% if (project.description) { %><p class="muted"><%= project.description %></p><% } %>
+
+<div class="two-col">
+  <section>
+    <h2>Lancer un run</h2>
+    <form method="post" action="/projects/<%= project.id %>/run" class="run-form">
+      <label>Navigateur
+        <select name="browser">
+          <option value="cloak">CloakBrowser (anti-bot, recommandé)</option>
+          <option value="playwright">Playwright (headless)</option>
+        </select>
+      </label>
+      <label>Device
+        <select name="device">
+          <option value="mobile">Mobile</option>
+          <option value="desktop">Desktop</option>
+        </select>
+      </label>
+      <label class="chk"><input type="checkbox" name="acceptCookies" checked> Accepter les cookies</label>
+      <button type="submit" class="btn-primary" <%= project.pages.length ? '' : 'disabled' %>>▶ Lancer (<%= project.pages.length %> pages)</button>
+    </form>
+
+    <h2>Pages (<%= project.pages.length %>)</h2>
+    <table class="grid small">
+      <tbody>
+        <% project.pages.forEach(function(pp){ %>
+          <tr>
+            <td><span class="badge"><%= pp.page.kind %></span></td>
+            <td><%= pp.page.site.name %></td>
+            <td class="url"><%= pp.page.url %></td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>Runs de ce projet</h2>
+    <table class="grid">
+      <thead><tr><th>#</th><th>Statut</th><th>Date</th></tr></thead>
+      <tbody>
+        <% project.runs.forEach(function(r){ %>
+          <tr>
+            <td><a href="/runs/<%= r.id %>">#<%= r.id %></a></td>
+            <td><span class="badge b-<%= r.status %>"><%= r.status %></span></td>
+            <td><%= fmtDate(r.createdAt) %></td>
+          </tr>
+        <% }) %>
+        <% if (!project.runs.length) { %><tr><td colspan="3" class="muted">Aucun run encore.</td></tr><% } %>
+      </tbody>
+    </table>
+  </section>
+</div>
+
+<%- include('partials/footer') %>

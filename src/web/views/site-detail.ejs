@@ -1,0 +1,50 @@
+<%- include('partials/header', { title, active }) %>
+
+<p><a href="/inventory">← Inventory</a></p>
+<h1><%= site.name %></h1>
+
+<details class="addbox">
+  <summary>Modifier le site</summary>
+  <form method="post" action="/inventory/sites/<%= site.id %>/edit" class="form-row">
+    <input name="name" value="<%= site.name %>" required>
+    <select name="category">
+      <% CATEGORIES.forEach(function(c){ %><option value="<%= c %>" <%= site.category===c?'selected':'' %>><%= categoryLabel(c) %></option><% }) %>
+    </select>
+    <input name="homepage" value="<%= site.homepage || '' %>" placeholder="homepage">
+    <button type="submit">Enregistrer</button>
+  </form>
+</details>
+
+<h2>Pages</h2>
+<details class="addbox" open>
+  <summary>Ajouter une page</summary>
+  <form method="post" action="/inventory/sites/<%= site.id %>/pages" class="form-row">
+    <select name="kind">
+      <% PAGE_KINDS.forEach(function(k){ %><option value="<%= k %>"><%= k %></option><% }) %>
+    </select>
+    <input name="label" placeholder="Libellé (optionnel)">
+    <input name="url" placeholder="https://…" required style="flex:2">
+    <button type="submit">Ajouter</button>
+  </form>
+</details>
+
+<table class="grid">
+  <thead><tr><th>Type</th><th>Libellé</th><th>URL</th><th></th></tr></thead>
+  <tbody>
+    <% site.pages.forEach(function(p){ %>
+      <tr>
+        <td><span class="badge"><%= p.kind %></span></td>
+        <td><%= p.label || '—' %></td>
+        <td class="url"><%= p.url %></td>
+        <td class="actions">
+          <form method="post" action="/inventory/pages/<%= p.id %>/delete">
+            <button class="danger" type="submit">Suppr.</button>
+          </form>
+        </td>
+      </tr>
+    <% }) %>
+    <% if (!site.pages.length) { %><tr><td colspan="4" class="muted">Aucune page.</td></tr><% } %>
+  </tbody>
+</table>
+
+<%- include('partials/footer') %>

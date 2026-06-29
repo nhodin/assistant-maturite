@@ -1,0 +1,39 @@
+<%- include('partials/header', { title, active }) %>
+
+<p><a href="/projects">← Projects</a></p>
+<h1>Nouveau projet</h1>
+
+<form method="post" action="/projects">
+  <div class="form-row">
+    <input name="name" placeholder="Nom du projet (ex. Audit Q3 2026)" required style="flex:2">
+  </div>
+  <div class="form-row">
+    <input name="description" placeholder="Description (optionnel)" style="flex:1">
+  </div>
+
+  <h2>Sélection des pages</h2>
+  <% if (!sites.length) { %>
+    <div class="empty">Aucun site dans l'inventaire. <a href="/inventory">Ajoute des sites et pages</a> d'abord.</div>
+  <% } %>
+  <% sites.forEach(function(s){ %>
+    <% if (s.pages.length) { %>
+      <fieldset class="site-pick">
+        <legend><%= s.name %> <span class="muted">· <%= categoryLabel(s.category) %></span>
+          <label class="pickall"><input type="checkbox" onclick="this.closest('fieldset').querySelectorAll('input[name=pageIds]').forEach(c=>c.checked=this.checked)"> tout</label>
+        </legend>
+        <% s.pages.forEach(function(p){ %>
+          <label class="page-check">
+            <input type="checkbox" name="pageIds" value="<%= p.id %>">
+            <span class="badge"><%= p.kind %></span> <%= p.label || p.url %>
+          </label>
+        <% }) %>
+      </fieldset>
+    <% } %>
+  <% }) %>
+
+  <div class="form-row" style="margin-top:1rem">
+    <button type="submit" class="btn-primary">Créer le projet</button>
+  </div>
+</form>
+
+<%- include('partials/footer') %>

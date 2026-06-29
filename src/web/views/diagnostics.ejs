@@ -1,0 +1,39 @@
+<%- include('partials/header', { title, active }) %>
+
+<h1>Diagnostics</h1>
+<p class="muted">Teste les composants de la chaîne sans lancer un run complet.</p>
+
+<section class="diag">
+  <h2>Base de données (MySQL)</h2>
+  <button hx-post="/diagnostics/mysql" hx-target="#diag-mysql" hx-indicator="#diag-mysql">Tester la connexion</button>
+  <div id="diag-mysql" class="diag-slot"></div>
+</section>
+
+<section class="diag">
+  <h2>Navigateur</h2>
+  <form hx-post="/diagnostics/browser" hx-target="#diag-browser" hx-indicator="#diag-browser">
+    <select name="browser">
+      <option value="playwright">Playwright (headless)</option>
+      <option value="cloak">CloakBrowser (stealth)</option>
+    </select>
+    <button type="submit">Lancer un test (example.com)</button>
+  </form>
+  <div id="diag-browser" class="diag-slot"></div>
+</section>
+
+<section class="diag">
+  <h2>Collecte d'une URL</h2>
+  <form hx-post="/diagnostics/collect" hx-target="#diag-collect" hx-indicator="#diag-collect">
+    <input name="url" placeholder="https://…" required style="flex:2">
+    <select name="browser">
+      <option value="cloak">CloakBrowser</option>
+      <option value="playwright">Playwright</option>
+    </select>
+    <button type="submit">Collecter &amp; résumer</button>
+  </form>
+  <div id="diag-collect" class="diag-slot"></div>
+</section>
+
+<p class="muted">⏳ Les tests navigateur/collecte peuvent prendre 10–60 s (téléchargement, anti-bot, scroll).</p>
+
+<%- include('partials/footer') %>

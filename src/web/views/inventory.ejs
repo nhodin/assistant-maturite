@@ -1,0 +1,37 @@
+<%- include('partials/header', { title, active }) %>
+
+<h1>Inventory</h1>
+<p class="muted">Sites et pages disponibles. Sélectionne-les ensuite dans un projet.</p>
+
+<details class="addbox" open>
+  <summary>Ajouter un site</summary>
+  <form method="post" action="/inventory/sites" class="form-row">
+    <input name="name" placeholder="Nom du site" required>
+    <select name="category">
+      <% CATEGORIES.forEach(function(c){ %><option value="<%= c %>"><%= categoryLabel(c) %></option><% }) %>
+    </select>
+    <input name="homepage" placeholder="https://… (optionnel)">
+    <button type="submit">Ajouter</button>
+  </form>
+</details>
+
+<table class="grid">
+  <thead><tr><th>Site</th><th>Catégorie</th><th>Pages</th><th></th></tr></thead>
+  <tbody>
+    <% sites.forEach(function(s){ %>
+      <tr>
+        <td><a href="/inventory/sites/<%= s.id %>"><%= s.name %></a></td>
+        <td><%= categoryLabel(s.category) %></td>
+        <td><%= s._count.pages %></td>
+        <td class="actions">
+          <form method="post" action="/inventory/sites/<%= s.id %>/delete" onsubmit="return confirm('Supprimer ce site et ses pages ?')">
+            <button class="danger" type="submit">Suppr.</button>
+          </form>
+        </td>
+      </tr>
+    <% }) %>
+    <% if (!sites.length) { %><tr><td colspan="4" class="muted">Aucun site. Ajoute-en un ci-dessus.</td></tr><% } %>
+  </tbody>
+</table>
+
+<%- include('partials/footer') %>

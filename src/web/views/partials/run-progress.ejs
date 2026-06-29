@@ -1,0 +1,9 @@
+<div id="run-progress" class="progress-box"
+     hx-get="/runs/<%= run.id %>/status" hx-trigger="load delay:2s" hx-swap="outerHTML">
+  <div class="spinner"></div>
+  <div>
+    <strong>Capture en cours…</strong>
+    <span class="muted"><%= run.donePages %> / <%= run.totalPages %> pages</span>
+    <div class="bar"><div class="bar-fill" style="width: <%= run.totalPages ? Math.round(run.donePages / run.totalPages * 100) : 0 %>%"></div></div>
+  </div>
+</div>
