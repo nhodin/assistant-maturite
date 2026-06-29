@@ -9,7 +9,7 @@ POC de l'évaluateur de maturité **sans LLM**. Chaîne validée de bout en bout
 - **Thèmes pilotes** `src/topics` : **Images** (8 contrôles) + **CDN** (7 contrôles), fonctions pures.
 - **Moteur** `src/engine` : config activable/repointable, agrégation HP/PLP/PDP, score global = moyenne thèmes 1–10, GEO/China à part, export MD + CSV (format de colonnes fixe de `../CLAUDE.md`).
 - **CLI** `src/cli/index.ts` : lit `data/WEBSITES.csv`, audite, écrit `out/<date>-maturity.{md,csv}`, archive les bundles dans `evidence/`.
-- **Tests** : 85 tests verts (vitest).
+- **Tests** : 245 tests verts (vitest) — couverture **par contrôle** pour les 12 thèmes (pass + fail + cas limites) + tests moteur + test de métadonnées (somme=100, standalone/N-A, ids uniques).
 
 ## Résultats (run 2026-06-29, voir `out/`)
 | Site | Images | CDN | Overall | Capture |
