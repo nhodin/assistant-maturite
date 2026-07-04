@@ -1,8 +1,14 @@
 <%- include('partials/header', { title, active }) %>
 
 <p><a href="/projects">← Projects</a></p>
-<h1><%= project.name %></h1>
+<h1><%= project.name %> <% if (project.mode === 'MONITORING') { %><span class="badge b-monitor">Suivi webperf</span><% } %></h1>
 <p class="muted"><% if (project.client) { %>Client : <strong><%= project.client.name %></strong><% } else { %><span>Sans client</span><% } %><% if (project.description) { %> · <%= project.description %><% } %></p>
+
+<% if (flash === 'crux_started') { %>
+  <div class="flash ok">Cycle de suivi lancé : CrUX collecté et run démarré.</div>
+<% } else if (flash === 'busy') { %>
+  <div class="flash warn">Un run est déjà en cours — réessayez une fois qu'il est terminé.</div>
+<% } %>
 
 <section>
   <h2>Évolution des notes</h2>
@@ -47,6 +53,99 @@
   <% } %>
 </section>
 
+<% if (project.mode === 'MONITORING') { %>
+<section>
+  <h2>Suivi webperf</h2>
+  <div class="two-col">
+    <div>
+      <form method="post" action="/projects/<%= project.id %>/monitoring" class="run-form">
+        <label>Mode
+          <select name="mode">
+            <option value="MONITORING" selected>Suivi webperf (récurrent)</option>
+            <option value="STANDARD">Standard (désactiver le suivi)</option>
+          </select>
+        </label>
+        <label>Fréquence
+          <select name="monitorFrequency">
+            <option value="DAILY" <%= project.monitorFrequency === 'DAILY' ? 'selected' : '' %>>Quotidien</option>
+            <option value="WEEKLY" <%= project.monitorFrequency === 'WEEKLY' ? 'selected' : '' %>>Hebdomadaire</option>
+          </select>
+        </label>
+        <button type="submit" class="btn">Enregistrer</button>
+      </form>
+      <p class="muted small">
+        Prochain cycle : <% if (project.monitorNextAt) { %><%= fmtDate(project.monitorNextAt) %><% } else { %>—<% } %>
+        · Dernier : <% if (project.monitorLastAt) { %><%= fmtDate(project.monitorLastAt) %><% } else { %>jamais<% } %>
+      </p>
+    </div>
+    <div>
+      <form method="post" action="/projects/<%= project.id %>/monitor-now">
+        <button type="submit" class="btn-primary">⟳ Collecter maintenant</button>
+      </form>
+      <p class="muted small">Collecte CrUX immédiate + lancement d'un run de maturité.</p>
+    </div>
+  </div>
+
+  <h3>Dernières valeurs CrUX (terrain, mobile)</h3>
+  <% if (cruxLatest && cruxLatest.length) { %>
+    <table class="grid small">
+      <thead><tr><th>Périmètre</th><th>LCP</th><th>TTFB</th><th>INP</th><th>CLS</th><th>FCP</th><th>Relevé</th></tr></thead>
+      <tbody>
+        <% cruxLatest.forEach(function(c){ %>
+          <tr>
+            <td><%= c.label %></td>
+            <td><% if (c.lcpMs != null) { %><%= (c.lcpMs/1000).toFixed(2) %> s<% } else { %>—<% } %></td>
+            <td><% if (c.ttfbMs != null) { %><%= c.ttfbMs %> ms<% } else { %>—<% } %></td>
+            <td><% if (c.inpMs != null) { %><%= c.inpMs %> ms<% } else { %>—<% } %></td>
+            <td><% if (c.cls != null) { %><%= c.cls.toFixed(2) %><% } else { %>—<% } %></td>
+            <td><% if (c.fcpMs != null) { %><%= (c.fcpMs/1000).toFixed(2) %> s<% } else { %>—<% } %></td>
+            <td class="muted"><%= fmtDate(c.collectedAt) %></td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  <% } else { %>
+    <p class="empty">Aucune donnée CrUX collectée pour le moment.</p>
+  <% } %>
+
+  <% if (cruxTrends && cruxTrends.length) { %>
+    <h3>Tendances CrUX</h3>
+    <% cruxTrends.forEach(function(chart){ %>
+      <div class="chart-card">
+        <h4 class="chart-title"><%= chart.label %></h4>
+        <svg class="trend" viewBox="0 0 <%= chart.width %> <%= chart.height %>" role="img"
+             aria-label="Tendance <%= chart.label %>">
+          <% chart.yTicks.forEach(function(t){ %>
+            <line class="grid" x1="<%= chart.pad.l %>" y1="<%= t.y %>"
+                  x2="<%= chart.width - chart.pad.r %>" y2="<%= t.y %>"></line>
+            <text class="axis" x="<%= chart.pad.l - 6 %>" y="<%= t.y + 3 %>" text-anchor="end"><%= t.label %></text>
+          <% }) %>
+          <% chart.xLabels.forEach(function(x){ %>
+            <text class="axis" x="<%= x.x %>" y="<%= chart.height - chart.pad.b + 16 %>" text-anchor="middle"><%= x.label %></text>
+          <% }) %>
+          <% chart.series.forEach(function(s){ %>
+            <% if (s.path) { %>
+              <path d="<%= s.path %>" fill="none" stroke="<%= s.color %>"
+                    stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"></path>
+            <% } %>
+            <% s.points.forEach(function(p){ %>
+              <circle cx="<%= p.cx %>" cy="<%= p.cy %>" r="3" fill="<%= s.color %>">
+                <title><%= p.title %></title>
+              </circle>
+            <% }) %>
+          <% }) %>
+        </svg>
+        <div class="chart-legend">
+          <% chart.series.forEach(function(s){ %>
+            <span class="lg"><span class="swatch" style="background: <%= s.color %>"></span><%= s.label %></span>
+          <% }) %>
+        </div>
+      </div>
+    <% }) %>
+  <% } %>
+</section>
+<% } %>
+
 <div class="two-col">
   <section>
     <h2>Lancer un run</h2>
@@ -84,16 +183,17 @@
   <section>
     <h2>Runs de ce projet</h2>
     <table class="grid">
-      <thead><tr><th>#</th><th>Statut</th><th>Date</th></tr></thead>
+      <thead><tr><th>#</th><th>Statut</th><th>Source</th><th>Date</th></tr></thead>
       <tbody>
         <% project.runs.forEach(function(r){ %>
           <tr>
             <td><a href="/runs/<%= r.id %>">#<%= r.id %></a></td>
             <td><span class="badge b-<%= r.status %>"><%= r.status %></span></td>
+            <td class="muted"><%= r.source === 'scheduled' ? 'Planifié' : 'Manuel' %></td>
             <td><%= fmtDate(r.createdAt) %></td>
           </tr>
         <% }) %>
-        <% if (!project.runs.length) { %><tr><td colspan="3" class="muted">Aucun run encore.</td></tr><% } %>
+        <% if (!project.runs.length) { %><tr><td colspan="4" class="muted">Aucun run encore.</td></tr><% } %>
       </tbody>
     </table>
   </section>

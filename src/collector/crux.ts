@@ -18,7 +18,30 @@ interface CruxResponse {
       experimental_time_to_first_byte?: CruxMetric;
       cumulative_layout_shift?: CruxMetric;
       interaction_to_next_paint?: CruxMetric;
+      first_contentful_paint?: CruxMetric;
     };
+  };
+}
+
+/** p75 field metrics for a single CrUX record (all optional — CrUX may omit any). */
+export interface CruxMetrics {
+  lcpMs?: number;
+  ttfbMs?: number;
+  inpMs?: number;
+  cls?: number;
+  fcpMs?: number;
+}
+
+/** Pure parse of a CrUX `queryRecord` JSON payload into p75 metrics. */
+export function parseCruxMetrics(data: CruxResponse | null | undefined): CruxMetrics | null {
+  const metrics = data?.record?.metrics;
+  if (!metrics) return null;
+  return {
+    lcpMs: p75(metrics.largest_contentful_paint),
+    ttfbMs: p75(metrics.experimental_time_to_first_byte),
+    inpMs: p75(metrics.interaction_to_next_paint),
+    cls: p75(metrics.cumulative_layout_shift),
+    fcpMs: p75(metrics.first_contentful_paint),
   };
 }
 
@@ -59,6 +82,38 @@ export async function fetchCrux(
       inpMs: p75(metrics.interaction_to_next_paint),
       source: "crux",
     };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Fetch p75 CrUX field metrics for either a specific `url` or an `origin`
+ * (PHONE form factor). Returns null when no apiKey is provided, on a non-OK
+ * response (a 404 = "no CrUX data for this URL/origin" is common), or on error.
+ */
+export async function fetchCruxMetrics(
+  key: { url?: string; origin?: string },
+  apiKey?: string,
+): Promise<CruxMetrics | null> {
+  if (!apiKey) return null;
+  if (!key.url && !key.origin) return null;
+
+  try {
+    const body: Record<string, unknown> = { formFactor: "PHONE" };
+    if (key.url) body.url = key.url;
+    else body.origin = key.origin;
+
+    const res = await fetch(`${CRUX_ENDPOINT}?key=${apiKey}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+    if (!res.ok) return null;
+
+    const data = (await res.json()) as CruxResponse;
+    return parseCruxMetrics(data);
   } catch {
     return null;
   }

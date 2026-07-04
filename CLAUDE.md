@@ -111,11 +111,26 @@ data/WEBSITES.csv      # seed source (website;url_hp;url_plp;url_pdp)
     Standard's encoding-sniffing rule — a later charset declaration forces the browser to
     re-parse the whole document from scratch.
 
+- **Webperf monitoring mode** (2026-07): a Project with `mode=MONITORING` is re-run on a
+  fixed frequency (DAILY/WEEKLY) by an in-process scheduler (`web/monitor.ts`, started by
+  `web/server.ts`, 60 s tick). Each cycle collects CrUX field p75s (LCP/TTFB/INP/CLS/FCP)
+  for every distinct site **origin** and every project **page** URL (persisted as
+  `CruxSnapshot` rows; `collector/crux.ts:fetchCruxMetrics` queries by `{origin}` or `{url}`),
+  then starts a maturity Run tagged `source="scheduled"`. The scheduler respects the
+  one-run-at-a-time constraint (skips the tick and retries; `monitorNextAt` only advances
+  when the cycle actually ran). The project detail page shows a latest-CrUX table and
+  per-metric trend charts (`web/crux-trend.ts`, pure like `web/trend.ts`) plus a
+  "Collecter maintenant" button. Monitoring only runs while `npm run web` is up.
+  The web runner also passes `CRUX_API_KEY` (.env) to the collector, so topic 11 (GEO)
+  uses field data in UI runs.
+
 ## Data model (Prisma / MySQL)
 
-`Site → Page` (inventory, Site has a Category) · `Project → ProjectPage` (page selection) ·
-`Run → RunPage` (per-page capture + slim evidence) + `RunSiteScore` (aggregated per-site,
-ranked) · `ControlConfig` (enable/points/naForced, edited in Settings).
+`Site → Page` (inventory, Site has a Category) · `Project → ProjectPage` (page selection;
+Project has `mode` STANDARD/MONITORING + monitor frequency/next-due) · `Run → RunPage`
+(per-page capture + slim evidence; Run has `source` manual/scheduled) + `RunSiteScore`
+(aggregated per-site, ranked) · `CruxSnapshot` (per-project CrUX p75 samples, scope
+ORIGIN or PAGE) · `ControlConfig` (enable/points/naForced, edited in Settings).
 Categories: Beauty, Fragrances, WatchesJewelry, WineSpirits, SR, Other.
 
 ## Commands

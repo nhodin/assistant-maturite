@@ -35,6 +35,24 @@ enum RunStatus {
   FAILED
 }
 
+/// Whether a project is a one-off (STANDARD) or a recurring webperf monitor.
+enum ProjectMode {
+  STANDARD
+  MONITORING
+}
+
+/// How often a MONITORING project re-runs its cycle.
+enum MonitorFrequency {
+  DAILY
+  WEEKLY
+}
+
+/// Scope of a CrUX field-data snapshot: an origin or a specific page URL.
+enum CruxScope {
+  ORIGIN
+  PAGE
+}
+
 /// A client / organization that owns sites and projects (e.g. LVMH, Conforama, Groupama).
 model Client {
   id        Int      @id @default(autoincrement())
@@ -78,8 +96,9 @@ model Page {
   url       String   @db.Text
   createdAt DateTime @default(now())
 
-  projectPages ProjectPage[]
-  runPages     RunPage[]
+  projectPages  ProjectPage[]
+  runPages      RunPage[]
+  cruxSnapshots CruxSnapshot[]
 
   @@index([siteId])
 }
@@ -95,10 +114,41 @@ model Project {
   client   Client? @relation(fields: [clientId], references: [id], onDelete: SetNull)
   clientId Int?
 
-  pages ProjectPage[]
-  runs  Run[]
+  // Webperf monitoring ("suivi webperf"). STANDARD projects only run on demand;
+  // MONITORING projects are re-run + CrUX-sampled by the scheduler on a frequency.
+  mode             ProjectMode      @default(STANDARD)
+  monitorFrequency MonitorFrequency @default(DAILY)
+  monitorNextAt    DateTime? // when the next cycle is due (null = never scheduled)
+  monitorLastAt    DateTime? // when the last cycle actually executed
+
+  pages         ProjectPage[]
+  runs          Run[]
+  cruxSnapshots CruxSnapshot[]
 
   @@index([clientId])
+}
+
+/// A CrUX field-data sample for a monitored project, taken at a point in time.
+/// One row per (origin | page URL) per collection cycle. Only inserted when CrUX
+/// returned data (no all-null rows).
+model CruxSnapshot {
+  id          Int       @id @default(autoincrement())
+  project     Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId   Int
+  scope       CruxScope
+  // For PAGE scope, the page this sample belongs to. Null for ORIGIN scope.
+  page        Page?     @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  pageId      Int?
+  urlKey      String    @db.Text // the origin or page URL queried
+  lcpMs       Int?
+  ttfbMs      Int?
+  inpMs       Int?
+  cls         Float?
+  fcpMs       Int?
+  collectedAt DateTime  @default(now())
+
+  @@index([projectId, collectedAt])
+  @@index([pageId])
 }
 
 /// Join: which pages are included in a project.
@@ -119,6 +169,7 @@ model Run {
   projectId     Int
   status        RunStatus @default(PENDING)
   browser       String    @default("cloak") // playwright | cloak
+  source        String    @default("manual") // manual | scheduled
   device        String    @default("mobile")
   acceptCookies Boolean   @default(true)
   configJson    Json? // snapshot of the control config used for this run

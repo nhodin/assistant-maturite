@@ -29,7 +29,12 @@ async function tryCapture(
 ): Promise<CaptureAttempt> {
   let bundle: EvidenceBundle;
   try {
-    bundle = await collect(url, { browser, device, acceptCookies });
+    bundle = await collect(url, {
+      browser,
+      device,
+      acceptCookies,
+      cruxApiKey: process.env.CRUX_API_KEY,
+    });
   } catch (err) {
     return { ok: false, reason: String(err).slice(0, 500), bundle: null };
   }

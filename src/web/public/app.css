@@ -62,6 +62,12 @@ table.grid tr:last-child td { border-bottom: none; }
 .b-RUNNING { background: #bbdefb; color: #0d47a1; }
 .b-PENDING { background: #eceff1; color: #607d8b; }
 .b-FAILED { background: #ffcdd2; color: #c62828; }
+.b-monitor { background: #ede7f6; color: #4527a0; }
+.flash { border-radius: 8px; padding: .5rem .75rem; margin: .5rem 0; font-size: 14px; }
+.flash.ok { background: #e8f5e9; color: #1b5e20; }
+.flash.warn { background: #fff3e0; color: #e65100; }
+.chart-title { margin: 0 0 .25rem; font-size: 14px; }
+.muted.small, .small { font-size: 12px; }
 .ok { color: var(--ok); font-weight: 700; }
 .ko { color: var(--ko); font-weight: 700; }
 

@@ -25,6 +25,21 @@
     <input name="description" placeholder="Description (optionnel)" style="flex:1">
   </div>
 
+  <div class="form-row" style="gap:1.5rem;align-items:flex-end">
+    <label>Mode
+      <select name="mode" id="modeSelect" onchange="document.getElementById('freqRow').style.display = this.value==='MONITORING' ? '' : 'none'">
+        <option value="STANDARD">Standard (à la demande)</option>
+        <option value="MONITORING">Suivi webperf (récurrent)</option>
+      </select>
+    </label>
+    <label id="freqRow" style="display:none">Fréquence
+      <select name="monitorFrequency">
+        <option value="DAILY">Quotidien</option>
+        <option value="WEEKLY">Hebdomadaire</option>
+      </select>
+    </label>
+  </div>
+
   <h2>Sélection des pages</h2>
   <% if (!sites.length) { %>
     <div class="empty">Aucun site pour ce client. <a href="/inventory?client=<%= selectedClientId %>">Ajoute des sites et pages</a> d'abord.</div>

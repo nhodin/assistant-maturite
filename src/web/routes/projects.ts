@@ -1,8 +1,19 @@
 import type { FastifyInstance } from "fastify";
+import type { MonitorFrequency, ProjectMode } from "@prisma/client";
 import { prisma } from "../db";
 import { startRun } from "../runner";
+import { runMonitoringCycle } from "../monitor";
 import { parseClientId, listClients } from "../clients";
 import { buildProjectTrend, type TrendRunInput, type TrendPageDef } from "../trend";
+import { buildCruxTrends, type CruxSnapshotInput } from "../crux-trend";
+
+function parseMode(v: unknown): ProjectMode {
+  return v === "MONITORING" ? "MONITORING" : "STANDARD";
+}
+
+function parseFrequency(v: unknown): MonitorFrequency {
+  return v === "WEEKLY" ? "WEEKLY" : "DAILY";
+}
 
 function toIdArray(v: unknown): number[] {
   if (v === undefined || v === null) return [];
@@ -63,11 +74,17 @@ export async function projectRoutes(app: FastifyInstance) {
     if (!b?.name?.trim() || pageIds.length === 0 || clientId === null) {
       return reply.redirect(clientId !== null ? `/projects/new?client=${clientId}` : "/projects/new");
     }
+    const mode = parseMode(b.mode);
+    const monitorFrequency = parseFrequency(b.monitorFrequency);
     const project = await prisma.project.create({
       data: {
         name: String(b.name).trim(),
         description: b.description ? String(b.description).trim() : null,
         clientId,
+        mode,
+        monitorFrequency,
+        // Monitoring projects run their first cycle ASAP.
+        monitorNextAt: mode === "MONITORING" ? new Date() : null,
         pages: { create: pageIds.map((pageId) => ({ pageId })) },
       },
     });
@@ -121,11 +138,74 @@ export async function projectRoutes(app: FastifyInstance) {
       .reverse(); // chronological for the x-axis
     const trend = buildProjectTrend(trendRuns, pageDefs);
 
+    // Webperf monitoring: CrUX snapshots for the latest-values table + trend charts.
+    let cruxTrends: ReturnType<typeof buildCruxTrends> = [];
+    let cruxLatest: {
+      scope: string;
+      label: string;
+      urlKey: string;
+      lcpMs: number | null;
+      ttfbMs: number | null;
+      inpMs: number | null;
+      cls: number | null;
+      fcpMs: number | null;
+      collectedAt: Date;
+    }[] = [];
+
+    if (project.mode === "MONITORING") {
+      const snapshots = await prisma.cruxSnapshot.findMany({
+        where: { projectId: id },
+        orderBy: { collectedAt: "asc" },
+        include: { page: { include: { site: true } } },
+      });
+
+      // Label helper for a snapshot's scope.
+      const labelFor = (s: (typeof snapshots)[number]): string => {
+        if (s.scope === "ORIGIN") return `Origine · ${s.urlKey}`;
+        if (s.page) return `${s.page.kind} · ${s.page.site.name}`;
+        return s.urlKey;
+      };
+      const keyFor = (s: (typeof snapshots)[number]): string =>
+        s.scope === "ORIGIN" ? `origin:${s.urlKey}` : `page:${s.pageId}`;
+
+      // Trend charts: one series per scope (origins first, then pages).
+      const trendInput: CruxSnapshotInput[] = snapshots.map((s) => ({
+        scopeKey: keyFor(s),
+        scopeLabel: labelFor(s),
+        date: s.collectedAt,
+        lcpMs: s.lcpMs,
+        ttfbMs: s.ttfbMs,
+        inpMs: s.inpMs,
+        cls: s.cls,
+      }));
+      cruxTrends = buildCruxTrends(trendInput);
+
+      // Latest-value table: last snapshot per scope (origins first, then pages).
+      const latestByKey = new Map<string, (typeof snapshots)[number]>();
+      for (const s of snapshots) latestByKey.set(keyFor(s), s); // asc order → last wins
+      cruxLatest = [...latestByKey.values()]
+        .sort((a, b) => (a.scope === b.scope ? 0 : a.scope === "ORIGIN" ? -1 : 1))
+        .map((s) => ({
+          scope: s.scope,
+          label: labelFor(s),
+          urlKey: s.urlKey,
+          lcpMs: s.lcpMs,
+          ttfbMs: s.ttfbMs,
+          inpMs: s.inpMs,
+          cls: s.cls,
+          fcpMs: s.fcpMs,
+          collectedAt: s.collectedAt,
+        }));
+    }
+
     return reply.view("project-detail", {
       active: "projects",
       title: project.name,
       project,
       trend,
+      cruxTrends,
+      cruxLatest,
+      flash: (req.query as any)?.flash ?? null,
     });
   });
 
@@ -143,6 +223,7 @@ export async function projectRoutes(app: FastifyInstance) {
       data: {
         projectId: id,
         status: "PENDING",
+        source: "manual",
         browser: b.browser === "playwright" ? "playwright" : "cloak",
         device: b.device === "desktop" ? "desktop" : "mobile",
         acceptCookies: b.acceptCookies === "on" || b.acceptCookies === "true",
@@ -164,6 +245,38 @@ export async function projectRoutes(app: FastifyInstance) {
       });
     }
     return reply.redirect(`/runs/${run.id}`);
+  });
+
+  // Update monitoring settings (mode + frequency) from the project detail page.
+  app.post("/projects/:id/monitoring", async (req, reply) => {
+    const id = Number((req.params as any).id);
+    const b = req.body as any;
+    const mode = parseMode(b.mode);
+    const monitorFrequency = parseFrequency(b.monitorFrequency);
+    const project = await prisma.project.findUnique({ where: { id } });
+    if (!project) return reply.redirect("/projects");
+    // Turning monitoring ON (from off) schedules the first cycle immediately.
+    const monitorNextAt =
+      mode === "MONITORING"
+        ? project.mode === "MONITORING"
+          ? project.monitorNextAt
+          : new Date()
+        : null;
+    await prisma.project.update({
+      where: { id },
+      data: { mode, monitorFrequency, monitorNextAt },
+    });
+    return reply.redirect(`/projects/${id}`);
+  });
+
+  // Trigger one monitoring cycle now (CrUX collection + scheduled run).
+  app.post("/projects/:id/monitor-now", async (req, reply) => {
+    const id = Number((req.params as any).id);
+    const res = await runMonitoringCycle(id);
+    const flash = res.started
+      ? `crux_started`
+      : `busy`;
+    return reply.redirect(`/projects/${id}?flash=${flash}`);
   });
 
   app.post("/projects/:id/delete", async (req, reply) => {

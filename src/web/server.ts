@@ -18,6 +18,7 @@ import { projectRoutes } from "./routes/projects";
 import { runRoutes } from "./routes/runs";
 import { settingsRoutes } from "./routes/settings";
 import { diagnosticsRoutes } from "./routes/diagnostics";
+import { startScheduler } from "./monitor";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -46,6 +47,8 @@ async function main() {
 
   const port = Number(process.env.PORT ?? 5173);
   await app.listen({ port, host: "0.0.0.0" });
+  // Start the webperf-monitoring scheduler (re-runs + CrUX sampling for MONITORING projects).
+  startScheduler();
   console.log(`\n  Maturity Analyzer UI → http://localhost:${port}\n`);
 }
 
