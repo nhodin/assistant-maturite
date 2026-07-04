@@ -22,12 +22,24 @@ function countImgsWithAttr(html: string, attr: string): number {
   return imgTags.filter((tag) => new RegExp(`\\b${attr}\\s*=`, "i").test(tag)).length
 }
 
+/** The value of a tag's style="..." attribute, or "" if absent. */
+function styleAttrValue(tag: string): string {
+  const m = /\bstyle\s*=\s*"([^"]*)"|\bstyle\s*=\s*'([^']*)'/i.exec(tag)
+  return m ? (m[1] ?? m[2] ?? "") : ""
+}
+
 function countImgsWithBothDimensions(html: string): number {
   const imgTags = html.match(/<img\b[^>]*>/gi) ?? []
   return imgTags.filter((tag) => {
-    const hasWidth = /\bwidth\s*=/i.test(tag)
-    const hasHeight = /\bheight\s*=/i.test(tag)
-    const hasAspectRatio = /aspect-ratio/i.test(tag)
+    const style = styleAttrValue(tag)
+    // HTML attributes (width=/height=) OR equivalent CSS properties set inline
+    // (style="width:...;height:...") — both fix the box before the image loads.
+    const hasWidth = /\bwidth\s*=/i.test(tag) || /(?:^|;)\s*width\s*:/i.test(style)
+    const hasHeight = /\bheight\s*=/i.test(tag) || /(?:^|;)\s*height\s*:/i.test(style)
+    // aspect-ratio as a genuine CSS property (requires the colon) rather than a
+    // loose substring match, which would false-positive on class names like
+    // "aspect-ratio-container" that carry no actual aspect-ratio declaration.
+    const hasAspectRatio = /aspect-ratio\s*:/i.test(style)
     return (hasWidth && hasHeight) || hasAspectRatio
   }).length
 }
@@ -115,7 +127,8 @@ const fixedHeightControl: Control = {
   id: "images.fixedheight",
   topicId: 1,
   label: "Fixed width & height on images (CLS prevention)",
-  description: "≥60% of <img> elements have both width and height attributes (or aspect-ratio).",
+  description:
+    "≥60% of <img> elements have both width and height reserved — via HTML attributes, equivalent inline CSS (style=\"width:...;height:...\"), or an inline aspect-ratio declaration.",
   defaultPoints: 10,
   evaluate(e) {
     const imgTags = e.rawHtml.match(/<img\b[^>]*>/gi) ?? []
@@ -200,19 +213,21 @@ const compressedControl: Control = {
   },
 }
 
+function findImagePreloadDirective(linkHeader: string): string | undefined {
+  return linkHeader.split(",").find((d) => {
+    return /rel\s*=\s*["']?preload["']?/i.test(d) && /as\s*=\s*["']?image["']?/i.test(d)
+  })
+}
+
 const earlyHintControl: Control = {
   id: "images.earlyhint",
   topicId: 1,
   label: "Early hint / Link preload for LCP image",
-  description: "Main response Link header contains rel=preload; as=image.",
+  description: "Main response Link header, or a 103 Early Hints response, contains rel=preload; as=image.",
   defaultPoints: 5,
   evaluate(e) {
     const linkHeader = e.mainResponseHeaders["link"] ?? ""
-    // Split by comma to handle multiple link directives
-    const directives = linkHeader.split(",")
-    const preloadImageDirective = directives.find((d) => {
-      return /rel\s*=\s*["']?preload["']?/i.test(d) && /as\s*=\s*["']?image["']?/i.test(d)
-    })
+    const preloadImageDirective = findImagePreloadDirective(linkHeader)
     if (preloadImageDirective) {
       const snippet = preloadImageDirective.trim().substring(0, 120)
       return {
@@ -220,10 +235,19 @@ const earlyHintControl: Control = {
         evidence: `Link header contains image preload: ${snippet}`,
       }
     }
+    const earlyHintsLink = e.earlyHints?.["link"] ?? ""
+    const earlyHintsPreloadImage = findImagePreloadDirective(earlyHintsLink)
+    if (earlyHintsPreloadImage) {
+      const snippet = earlyHintsPreloadImage.trim().substring(0, 120)
+      return {
+        passed: true,
+        evidence: `103 Early Hints Link header contains image preload: ${snippet}`,
+      }
+    }
     return {
       passed: false,
       evidence: linkHeader
-        ? `Link header present but no image preload directive: ${linkHeader.substring(0, 80)}`
+        ? `No Link header preload; header present but no image preload directive: ${linkHeader.substring(0, 80)}`
         : "No Link preload header",
     }
   },

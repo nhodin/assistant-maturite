@@ -56,15 +56,19 @@ describe("css.order", () => {
 })
 
 describe("css.nosvgfonts", () => {
-  it("PASS — no data URIs in inline CSS", () => {
-    const e = makeEvidence({ rawHtml: `<style>.a{color:red}</style>` })
+  it("PASS — no data URIs in inline or external CSS", () => {
+    const e = makeEvidence({
+      css: { hasInlinedSvgOrFontDataUri: false, externalStylesheetsParsed: 2 },
+    })
     expect(ctrl("css.nosvgfonts").evaluate(e).passed).toBe(true)
   })
-  it("FAIL — inline data:image/svg in CSS", () => {
+  it("FAIL — data:image/svg detected (inline or external stylesheet)", () => {
     const e = makeEvidence({
-      rawHtml: `<style>.a{background:url(data:image/svg+xml;base64,xx)}</style>`,
+      css: { hasInlinedSvgOrFontDataUri: true, externalStylesheetsParsed: 1 },
     })
-    expect(ctrl("css.nosvgfonts").evaluate(e).passed).toBe(false)
+    const result = ctrl("css.nosvgfonts").evaluate(e)
+    expect(result.passed).toBe(false)
+    expect(result.evidence).toContain("external stylesheet")
   })
 })
 
@@ -79,6 +83,15 @@ describe("css.criticalinline", () => {
     const e = makeEvidence({ rawHtml: `<head></head>` })
     expect(ctrl("css.criticalinline").evaluate(e).passed).toBe(false)
   })
+  it("FAIL — @import detected (even with enough inline CSS)", () => {
+    const e = makeEvidence({
+      rawHtml: `<head><style>${"a{color:red}".repeat(60)}</style></head>`,
+      css: { hasInlinedSvgOrFontDataUri: false, externalStylesheetsParsed: 1, hasAtImport: true },
+    })
+    const result = ctrl("css.criticalinline").evaluate(e)
+    expect(result.passed).toBe(false)
+    expect(result.evidence).toContain("@import")
+  })
 })
 
 describe("css.preload", () => {
@@ -87,6 +100,14 @@ describe("css.preload", () => {
       mainResponseHeaders: { link: `<a.css>; rel=preload; as=style` },
     })
     expect(ctrl("css.preload").evaluate(e).passed).toBe(true)
+  })
+  it("PASS — 103 Early Hints Link header preload as=style", () => {
+    const e = makeEvidence({
+      earlyHints: { link: `<a.css>; rel=preload; as=style` },
+    })
+    const result = ctrl("css.preload").evaluate(e)
+    expect(result.passed).toBe(true)
+    expect(result.evidence).toContain("Early Hints")
   })
   it("FAIL — no Link header", () => {
     expect(ctrl("css.preload").evaluate(makeEvidence()).passed).toBe(false)
@@ -100,5 +121,9 @@ describe("css.unused", () => {
   it("PASS — unused < 30%", () => {
     const e = makeEvidence({ coverage: { cssUnusedPct: 10, jsUnusedPct: null } })
     expect(ctrl("css.unused").evaluate(e).passed).toBe(true)
+  })
+  it("FAIL — unused >= 30%", () => {
+    const e = makeEvidence({ coverage: { cssUnusedPct: 35, jsUnusedPct: null } })
+    expect(ctrl("css.unused").evaluate(e).passed).toBe(false)
   })
 })

@@ -30,6 +30,17 @@ export const NetworkRequestSchema = z.object({
   responseHeaders: HeaderMapSchema,
   /** Resolved MIME type from the content-type response header (no charset). */
   mimeType: z.string(),
+  /**
+   * Load-vs-interaction phase, set by the collector from the request's send time.
+   * - "load": initiated during the quiet initial page load (incl. cookie acceptance),
+   *   before any synthetic user/browser interaction.
+   * - "interaction": initiated ONLY after the collector dispatched synthetic
+   *   user-intent events (mousemove/pointer/touch/keydown/wheel) and let the browser
+   *   go idle — i.e. event-based ("fine-tuned") deferred loading.
+   * Optional for backward-compat with evidence captured before this field existed;
+   * a missing phase is treated as "load" by every control.
+   */
+  phase: z.enum(["load", "interaction"]).optional(),
 });
 
 /** A significant tag inside <head>, in document order. */
@@ -83,10 +94,26 @@ export const PerfMetricsSchema = z.object({
   totalBytes: z.number(),
 });
 
-/** Optional in the POC — collector may leave these null. */
+/** Coverage tracking is best-effort — the collector may leave these null when
+ *  CDP rule-usage tracking is unavailable for a given capture. */
 export const CoverageMetricsSchema = z.object({
   cssUnusedPct: z.number().nullable(),
   jsUnusedPct: z.number().nullable(),
+});
+
+/**
+ * Derived facts about ALL stylesheets seen (inline <style> blocks + external
+ * stylesheet responses fetched via CDP during capture). Only booleans/counts are
+ * kept — the raw CSS text itself is never persisted (see EvidenceBundle size
+ * constraints in app/CLAUDE.md).
+ */
+export const CssAuditSchema = z.object({
+  /** data:image/svg or data:font/data:application/font URI found in any stylesheet. */
+  hasInlinedSvgOrFontDataUri: z.boolean(),
+  /** Count of distinct external stylesheet responses whose body was fetched and scanned. */
+  externalStylesheetsParsed: z.number(),
+  /** @import found in any stylesheet — forces a serial, render-blocking fetch chain. */
+  hasAtImport: z.boolean(),
 });
 
 /** Network-layer facts gathered by Node probes (outside the browser). */
@@ -135,6 +162,19 @@ export const EvidenceBundleSchema = z.object({
   perf: PerfMetricsSchema,
   coverage: CoverageMetricsSchema,
   fonts: z.array(FontFaceSchema),
+  /** Optional for backward-compat with evidence captured before external CSS was
+   *  fetched; a missing value defaults to "nothing captured" (not "nothing found"). */
+  css: CssAuditSchema.default({
+    hasInlinedSvgOrFontDataUri: false,
+    externalStylesheetsParsed: 0,
+    hasAtImport: false,
+  }),
+  /**
+   * Lowercased response headers of a 103 Early Hints interim response observed
+   * while fetching the main document, or null if none was sent/observed.
+   * Optional for backward-compat with evidence captured before this field existed.
+   */
+  earlyHints: HeaderMapSchema.nullable().default(null),
   field: CruxDataSchema.nullable(),
   network: NetworkProbeSchema,
   features: PageFeaturesSchema,
@@ -149,6 +189,7 @@ export type FontFace = z.infer<typeof FontFaceSchema>;
 export type LcpElement = z.infer<typeof LcpElementSchema>;
 export type PerfMetrics = z.infer<typeof PerfMetricsSchema>;
 export type CoverageMetrics = z.infer<typeof CoverageMetricsSchema>;
+export type CssAudit = z.infer<typeof CssAuditSchema>;
 export type NetworkProbe = z.infer<typeof NetworkProbeSchema>;
 export type CruxData = z.infer<typeof CruxDataSchema>;
 export type PageFeatures = z.infer<typeof PageFeaturesSchema>;

@@ -45,6 +45,8 @@ const BASE: EvidenceBundle = {
   },
   coverage: { cssUnusedPct: null, jsUnusedPct: null },
   fonts: [],
+  css: { hasInlinedSvgOrFontDataUri: false, externalStylesheetsParsed: 0, hasAtImport: false },
+  earlyHints: null,
   field: null,
   network: { tlsVersion: null, alpn: null, ipv6: null, http3: null },
   features: {

@@ -107,14 +107,32 @@ const delayNext: Control = {
   id: "slider.delaynext",
   topicId: 2,
   label: "Delay next slide loading after onload",
-  description: "Deferred loading of next slide images after page onload.",
+  description:
+    "At least one image is fetched ONLY after a synthetic user/browser interaction (phase=interaction), not during initial load — deferred next-slide loading.",
   defaultPoints: 15,
   appliesTo: sliderGate,
-  evaluate(_e) {
+  evaluate(e) {
+    // Image URLs already fetched during the quiet initial load.
+    const loadedImgs = new Set<string>()
+    for (const req of e.requests) {
+      if (req.resourceType !== "image") continue
+      if (req.phase === "interaction") continue
+      loadedImgs.add(req.url)
+    }
+
+    const deferred = e.requests.filter(
+      (req) =>
+        req.resourceType === "image" &&
+        req.phase === "interaction" &&
+        !loadedImgs.has(req.url),
+    )
+
+    const passed = deferred.length > 0
     return {
-      passed: false,
-      evidence:
-        "cannot verify deferred next-slide loading statically (POC limitation)",
+      passed,
+      evidence: passed
+        ? `${deferred.length} image(s) loaded only after user/browser interaction (deferred next-slide loading)`
+        : "no slider image loaded only after synthetic user/browser interaction",
     }
   },
 }

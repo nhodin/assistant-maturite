@@ -19,6 +19,13 @@ const CATEGORY_BY_NAME: Record<string, Cat> = {
 };
 
 async function main() {
+  // Seeded maisons are LVMH brands → attach them to the LVMH client (created if missing).
+  const lvmh = await prisma.client.upsert({
+    where: { name: "LVMH" },
+    update: {},
+    create: { name: "LVMH" },
+  });
+
   const csvPath = path.resolve("data", "WEBSITES.csv");
   const content = fs.readFileSync(csvPath, "utf-8");
   const rows = parse(content, {
@@ -48,6 +55,7 @@ async function main() {
       data: {
         name,
         category: CATEGORY_BY_NAME[name] ?? "Other",
+        clientId: lvmh.id,
         homepage: r["url_hp"] ?? null,
         pages: { create: pages.map((p) => ({ kind: p.kind, url: p.url })) },
       },

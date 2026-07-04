@@ -158,6 +158,46 @@ describe("images.fixedheight", () => {
     const result = ctrl("images.fixedheight").evaluate(e)
     expect(result.passed).toBe(true)
   })
+
+  it("counts inline CSS width/height (style attribute) as reserved dimensions", () => {
+    const e = makeEvidence({
+      rawHtml: [
+        '<img src="a.jpg" style="width:400px;height:300px">',
+        '<img src="b.jpg" style="width: 200px; height: 150px;">',
+        '<img src="c.jpg" width="100" height="80">',
+        '<img src="d.jpg">',
+      ].join(""),
+    })
+    const result = ctrl("images.fixedheight").evaluate(e)
+    expect(result.passed).toBe(true)
+    expect(result.evidence).toContain("3/4")
+  })
+
+  it("counts inline aspect-ratio CSS (with colon) as reserved dimensions", () => {
+    const e = makeEvidence({
+      rawHtml: [
+        '<img src="a.jpg" style="aspect-ratio: 16 / 9">',
+        '<img src="b.jpg" style="aspect-ratio:1/1">',
+        '<img src="c.jpg" width="100" height="80">',
+        '<img src="d.jpg">',
+      ].join(""),
+    })
+    const result = ctrl("images.fixedheight").evaluate(e)
+    expect(result.passed).toBe(true)
+    expect(result.evidence).toContain("3/4")
+  })
+
+  it("does NOT count a class name merely containing the substring aspect-ratio", () => {
+    const e = makeEvidence({
+      rawHtml: [
+        '<img src="a.jpg" class="aspect-ratio-container">',
+        '<img src="b.jpg">',
+      ].join(""),
+    })
+    const result = ctrl("images.fixedheight").evaluate(e)
+    expect(result.passed).toBe(false)
+    expect(result.evidence).toContain("0/2")
+  })
 })
 
 // ── images.lcpnotlazy ────────────────────────────────────────────────────────
@@ -278,6 +318,15 @@ describe("images.earlyhint", () => {
     })
     const result = ctrl("images.earlyhint").evaluate(e)
     expect(result.passed).toBe(true)
+  })
+
+  it("passes when only a 103 Early Hints response has the image preload", () => {
+    const e = makeEvidence({
+      earlyHints: { link: "</hero.avif>; rel=preload; as=image" },
+    })
+    const result = ctrl("images.earlyhint").evaluate(e)
+    expect(result.passed).toBe(true)
+    expect(result.evidence).toContain("Early Hints")
   })
 
   it("fails when no Link header present", () => {

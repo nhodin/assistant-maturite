@@ -231,13 +231,39 @@ const eventBasedControl: Control = {
   topicId: 4,
   label: "Event-based loading of third parties",
   description:
-    "Cannot verify event-based third-party loading from static HTML / network log.",
+    "At least one third-party provider (analytics/chat/pixel/SDK) is fetched ONLY after a synthetic user/browser interaction (phase=interaction), not during initial load — i.e. fine-tuned event-based loading.",
   defaultPoints: 10,
-  evaluate(_e: EvidenceBundle) {
+  evaluate(e: EvidenceBundle) {
+    // Third-party hosts already present during the quiet initial load.
+    const loadHosts = new Set<string>()
+    for (const req of e.requests) {
+      if (req.phase === "interaction") continue
+      if (!isThirdParty(req.url, e.finalUrl)) continue
+      const h = host(req.url)
+      if (h) loadHosts.add(h)
+    }
+
+    // Third-party requests initiated only after interaction, from a host not seen
+    // during load, that look like an actual provider (categorized OR an executable
+    // /beacon resource — script/xhr/fetch). Lazy CDN images don't count.
+    const deferred = new Set<string>()
+    for (const req of e.requests) {
+      if (req.phase !== "interaction") continue
+      if (!isThirdParty(req.url, e.finalUrl)) continue
+      const h = host(req.url)
+      if (!h || loadHosts.has(h)) continue
+      const looksLikeProvider =
+        categoryForHost(h) !== null ||
+        ["script", "xhr", "fetch"].includes(req.resourceType)
+      if (looksLikeProvider) deferred.add(h)
+    }
+
+    const passed = deferred.size > 0
     return {
-      passed: false,
-      evidence:
-        "cannot verify event-based third-party loading statically (POC limitation)",
+      passed,
+      evidence: passed
+        ? `${deferred.size} third-party provider(s) deferred to user/browser interaction: ${[...deferred].slice(0, 5).join(", ")}`
+        : "no third-party provider loaded only after synthetic user/browser interaction",
     }
   },
 }

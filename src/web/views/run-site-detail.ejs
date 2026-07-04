@@ -2,32 +2,107 @@
 
 <p><a href="/runs/<%= score.runId %>">← Run #<%= score.runId %></a></p>
 <h1><%= score.site.name %></h1>
-<p class="muted"><%= categoryLabel(score.category) %> ·
-  Global <span class="score <%= scoreClass(score.overall) %>"><%= fmtScore(score.overall) %></span>
-  GEO <span class="score <%= scoreClass(score.geo) %>"><%= fmtScore(score.geo) %></span>
-  China <span class="score <%= scoreClass(score.china) %>"><%= fmtScore(score.china) %></span>
-</p>
+<p class="muted"><%= categoryLabel(score.category) %></p>
+
+<%
+  var pgs = pages || [];
+  var hasPageScores = pgs.some(function(p){ return p.topics && p.topics.length; });
+  function pTopic(p, id){ return (p.topics || []).find(function(t){ return t.topicId === id; }); }
+  function pCtrl(pt, cid){ return pt ? (pt.controls || []).find(function(c){ return c.controlId === cid; }) : undefined; }
+%>
+
+<h2>Synthèse</h2>
+<div class="scroll-x">
+<table class="grid small">
+  <thead>
+    <tr>
+      <th></th>
+      <% if (hasPageScores) { pgs.forEach(function(p){ %><th title="<%= p.url %>"><%= p.label %></th><% }); } %>
+      <th>Site</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Global</strong></td>
+      <% if (hasPageScores) { pgs.forEach(function(p){ %>
+        <td><span class="score sm <%= scoreClass(p.overall) %>"><%= fmtScore(p.overall) %></span></td>
+      <% }); } %>
+      <td><span class="score <%= scoreClass(score.overall) %>"><%= fmtScore(score.overall) %></span></td>
+    </tr>
+    <tr>
+      <td>GEO</td>
+      <% if (hasPageScores) { pgs.forEach(function(p){ %>
+        <td><span class="score sm <%= scoreClass(p.geo) %>"><%= fmtScore(p.geo) %></span></td>
+      <% }); } %>
+      <td><span class="score <%= scoreClass(score.geo) %>"><%= fmtScore(score.geo) %></span></td>
+    </tr>
+    <tr>
+      <td>China</td>
+      <% if (hasPageScores) { pgs.forEach(function(p){ %>
+        <td><span class="score sm <%= scoreClass(p.china) %>"><%= fmtScore(p.china) %></span></td>
+      <% }); } %>
+      <td><span class="score <%= scoreClass(score.china) %>"><%= fmtScore(score.china) %></span></td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<% if (!hasPageScores) { %>
+  <p class="muted">Détail par page indisponible (run antérieur à l'ajout du score par page). Seul le score site agrégé est affiché.</p>
+<% } %>
 
 <% (topics || []).forEach(function(t){ %>
   <h2><%= t.topicId %>. <%= t.name %> —
-    <span class="score <%= scoreClass(t.score) %>"><%= fmtScore(t.score) %><% if (t.score!==null){ %>/100<% } %></span>
+    <span class="score <%= scoreClass(t.score) %>"><%= fmtScore(t.score) %><% if (t.score !== null){ %>/100<% } %></span>
   </h2>
   <% if (t.score === null) { %>
     <p class="muted">N/A — aucun élément applicable détecté.</p>
   <% } else { %>
-    <table class="grid small">
-      <thead><tr><th>Critère</th><th>Pts</th><th></th><th>Évidence</th></tr></thead>
+    <div class="scroll-x">
+    <table class="grid small crit">
+      <thead>
+        <tr>
+          <th>Critère</th>
+          <% if (hasPageScores) { pgs.forEach(function(p){ %><th title="<%= p.url %>"><%= p.label %></th><% }); } %>
+          <th>Site (pts)</th>
+          <th>Évidence</th>
+        </tr>
+      </thead>
       <tbody>
-        <% (t.controls||[]).forEach(function(c){ %>
+        <tr class="topic-row">
+          <td><strong>Score topic</strong></td>
+          <% if (hasPageScores) { pgs.forEach(function(p){ var pt = pTopic(p, t.topicId); var sc = pt ? pt.score : null; %>
+            <td><span class="score sm <%= scoreClass(sc) %>"><%= pt ? fmtScore(pt.score) : '—' %></span></td>
+          <% }); } %>
+          <td><span class="score sm <%= scoreClass(t.score) %>"><%= fmtScore(t.score) %></span></td>
+          <td></td>
+        </tr>
+        <% (t.controls || []).forEach(function(c){ %>
           <tr>
             <td><%= c.label %></td>
-            <td><% if (c.applicable) { %><%= c.pointsAwarded %>/<%= c.maxPoints %><% } else { %>—<% } %></td>
-            <td><% if (!c.applicable) { %><span class="muted">N/A</span><% } else if (c.passed) { %><span class="ok">✓</span><% } else { %><span class="ko">✗</span><% } %></td>
-            <td class="ev"><%= c.evidence %></td>
+            <% if (hasPageScores) { pgs.forEach(function(p){ var pc = pCtrl(pTopic(p, t.topicId), c.controlId); %>
+              <td>
+                <% if (!pc || !pc.applicable) { %><span class="muted">N/A</span>
+                <% } else if (pc.passed) { %><span class="ok" title="<%= pc.evidence %>">✓</span>
+                <% } else { %><span class="ko" title="<%= pc.evidence %>">✗</span><% } %>
+              </td>
+            <% }); } %>
+            <td>
+              <% if (c.applicable) { %><%= c.pointsAwarded %>/<%= c.maxPoints %>
+              <% } else { %><span class="muted">N/A</span><% } %>
+            </td>
+            <td class="ev">
+              <% if (hasPageScores) { pgs.forEach(function(p){ var pc = pCtrl(pTopic(p, t.topicId), c.controlId); %>
+                <div><span class="muted"><%= p.label %>:</span>
+                  <% if (!pc || !pc.applicable) { %>N/A<% } else { %><%= pc.evidence %><% } %>
+                </div>
+              <% }); } else { %>—<% } %>
+            </td>
           </tr>
         <% }) %>
       </tbody>
     </table>
+    </div>
   <% } %>
 <% }) %>
 

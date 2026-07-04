@@ -8,7 +8,7 @@
  */
 import type { EvidenceBundle } from "../core"
 import type { Control, TopicModule } from "../core"
-import { parseTags, headSlice, sameSite, requestsOfType } from "./util"
+import { parseTags, headSlice, sameSite, requestsOfType, host } from "./util"
 
 const videoGate = (e: EvidenceBundle): boolean => e.features.videoDetected === true
 
@@ -170,18 +170,46 @@ const selfHosted: Control = {
   },
 }
 
+/** Hosts that signal a video player (script bundles or iframe embeds). */
+const VIDEO_HOST_HINTS = [...VIDEO_PLAYER_DOMAINS, ...THIRD_PARTY_VIDEO_DOMAINS]
+
+function isVideoPlayerHost(url: string): boolean {
+  const h = host(url)
+  if (!h) return false
+  return VIDEO_HOST_HINTS.some((d) => h === d || h.endsWith("." + d))
+}
+
 const playerJs: Control = {
   id: "video.playerjs",
   topicId: 3,
   label: "Fine-tune video player JS loading",
-  description: "Deferred or event-based loading of video player scripts.",
+  description:
+    "Video player scripts/iframes load ONLY after a synthetic user/browser interaction (phase=interaction) — facade/deferred pattern — instead of eagerly during initial load.",
   defaultPoints: 10,
   appliesTo: videoGate,
-  evaluate(_e) {
+  evaluate(e) {
+    // Video-player hosts already fetched eagerly during the quiet initial load.
+    const loadedEarly = new Set<string>()
+    for (const req of e.requests) {
+      if (req.phase === "interaction") continue
+      if (isVideoPlayerHost(req.url)) loadedEarly.add(host(req.url))
+    }
+
+    const deferred = e.requests.filter(
+      (req) =>
+        req.phase === "interaction" &&
+        ["script", "document", "xhr", "fetch"].includes(req.resourceType) &&
+        isVideoPlayerHost(req.url) &&
+        !loadedEarly.has(host(req.url)),
+    )
+
+    const passed = deferred.length > 0
+    const hosts = [...new Set(deferred.map((r) => host(r.url)))]
     return {
-      passed: false,
-      evidence:
-        "cannot verify video-player JS tuning statically (POC limitation)",
+      passed,
+      evidence: passed
+        ? `${deferred.length} video player request(s) deferred to user/browser interaction: ${hosts.slice(0, 4).join(", ")}`
+        : "no video player script/iframe loaded only after synthetic user/browser interaction",
     }
   },
 }

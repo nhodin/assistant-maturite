@@ -26,6 +26,8 @@ h2 { font-size: 1.1rem; margin: 1.5rem 0 .5rem; }
 h3 { font-size: .95rem; margin: .5rem 0; }
 .muted { color: var(--muted); }
 .head-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.filter-bar { display: flex; align-items: center; gap: .5rem; margin: .5rem 0 1rem; }
+.filter-bar label { display: flex; align-items: center; gap: .4rem; font-size: 13px; color: var(--muted); }
 
 .cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin: 1rem 0; }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
@@ -80,6 +82,14 @@ button[disabled] { opacity: .5; cursor: not-allowed; }
   padding: .5rem .8rem; margin: .5rem 0 1rem; }
 .addbox summary { cursor: pointer; font-weight: 600; }
 
+/* Criteria detail table (run-site-detail): wider Critère column, compact wrapping evidence. */
+.crit { width: 100%; table-layout: fixed; }
+.crit th:first-child { width: 24%; }
+.crit th:last-child { width: 46%; }
+.crit .ev { font-size: 11px; line-height: 1.35; color: var(--muted);
+  overflow-wrap: anywhere; word-break: break-word; white-space: normal; }
+.crit .ev div { margin: .12rem 0; }
+
 .empty { background: #fff; border: 1px dashed var(--line); border-radius: 8px; padding: 1.5rem;
   text-align: center; color: var(--muted); }
 .empty.err { border-color: #f1c4c4; color: var(--ko); }
@@ -120,5 +130,20 @@ button[disabled] { opacity: .5; cursor: not-allowed; }
 .diag-ok { background: #e8f5e9; color: #1b5e20; }
 .diag-fail { background: #ffebee; color: #c62828; }
 .diag-result pre { margin: .4rem 0 0; white-space: pre-wrap; font-size: 12px; }
+
+/* Project score-evolution chart */
+.chart-card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  padding: 1rem; margin: .5rem 0 1rem; }
+.chart-card .trend { width: 100%; height: auto; display: block; }
+.trend .grid { stroke: var(--line); stroke-width: 1; }
+.trend .axis { fill: var(--muted); font-size: 11px; }
+.trend path { transition: stroke-width .15s; }
+.trend circle { cursor: pointer; }
+.trend circle:hover { stroke: #fff; stroke-width: 1.5; }
+.chart-legend { display: flex; flex-wrap: wrap; gap: .25rem 1rem; margin-top: .6rem;
+  font-size: 12px; color: var(--muted); }
+.chart-legend .lg { display: inline-flex; align-items: center; gap: .35rem; }
+.chart-legend .lg-strong { color: var(--ink); font-weight: 600; }
+.chart-legend .swatch { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
 
 @media (max-width: 800px) { .cards, .two-col { grid-template-columns: 1fr 1fr; } }

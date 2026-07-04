@@ -35,6 +35,18 @@ enum RunStatus {
   FAILED
 }
 
+/// A client / organization that owns sites and projects (e.g. LVMH, Conforama, Groupama).
+model Client {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique
+  notes     String?  @db.Text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sites    Site[]
+  projects Project[]
+}
+
 /// A website in the inventory. Has one category and one or more pages.
 model Site {
   id        Int      @id @default(autoincrement())
@@ -45,8 +57,15 @@ model Site {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // Owning client. Nullable in DB (so existing rows survive `db push`); the UI always
+  // requires one. Deleting a client detaches its sites rather than cascading.
+  client   Client? @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  clientId Int?
+
   pages         Page[]
   runSiteScores RunSiteScore[]
+
+  @@index([clientId])
 }
 
 /// A specific page (URL) of a site to audit.
@@ -72,8 +91,14 @@ model Project {
   description String?  @db.Text
   createdAt   DateTime @default(now())
 
+  // Owning client (nullable in DB, required in the UI; see Site.clientId).
+  client   Client? @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  clientId Int?
+
   pages ProjectPage[]
   runs  Run[]
+
+  @@index([clientId])
 }
 
 /// Join: which pages are included in a project.
@@ -110,7 +135,8 @@ model Run {
   @@index([projectId])
 }
 
-/// Per-page capture + status within a run. Stores the full EvidenceBundle.
+/// Per-page capture + status within a run. Stores the full EvidenceBundle
+/// and the per-page score (each criterion binary: full points or 0).
 model RunPage {
   id           Int       @id @default(autoincrement())
   run          Run       @relation(fields: [runId], references: [id], onDelete: Cascade)
@@ -120,6 +146,11 @@ model RunPage {
   url          String    @db.Text
   status       RunStatus @default(PENDING)
   evidenceJson Json? // captured EvidenceBundle (large)
+  // Per-page scores. Null on legacy runs captured before per-page scoring existed.
+  overall      Int?
+  geo          Int?
+  china        Int?
+  topicsJson   Json? // TopicResult[] for this single page
   error        String?   @db.Text
   createdAt    DateTime  @default(now())
 

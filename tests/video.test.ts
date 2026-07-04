@@ -79,8 +79,49 @@ describe("video.selfhosted", () => {
 })
 
 describe("video.playerjs", () => {
-  it("always FAIL (POC limitation)", () => {
-    expect(ctrl("video.playerjs").evaluate(makeEvidence()).passed).toBe(false)
+  const mkReq = (
+    url: string,
+    resourceType: string,
+    phase: "load" | "interaction",
+  ) => ({
+    url,
+    resourceType,
+    status: 200,
+    fromCache: false,
+    encodedBytes: 1000,
+    decodedBytes: 1000,
+    requestHeaders: {},
+    responseHeaders: {},
+    mimeType: "",
+    phase,
+  })
+
+  it("PASS — YouTube iframe loads only after interaction (facade)", () => {
+    const e = makeEvidence({
+      finalUrl: "https://example.com/",
+      requests: [
+        mkReq("https://www.youtube.com/embed/abc", "document", "interaction"),
+      ],
+    })
+    expect(ctrl("video.playerjs").evaluate(e).passed).toBe(true)
+  })
+
+  it("FAIL — player script loaded eagerly during initial load", () => {
+    const e = makeEvidence({
+      finalUrl: "https://example.com/",
+      requests: [
+        mkReq("https://www.youtube.com/iframe_api.js", "script", "load"),
+      ],
+    })
+    expect(ctrl("video.playerjs").evaluate(e).passed).toBe(false)
+  })
+
+  it("FAIL — no video player request after interaction", () => {
+    const e = makeEvidence({
+      finalUrl: "https://example.com/",
+      requests: [mkReq("https://example.com/app.js", "script", "interaction")],
+    })
+    expect(ctrl("video.playerjs").evaluate(e).passed).toBe(false)
   })
 })
 

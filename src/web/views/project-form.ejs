@@ -3,7 +3,21 @@
 <p><a href="/projects">← Projects</a></p>
 <h1>Nouveau projet</h1>
 
+<%# Client picker: changing it reloads the form filtered to that client's sites. %>
+<form method="get" action="/projects/new" class="filter-bar">
+  <label>Client
+    <select name="client" onchange="this.form.submit()" required>
+      <option value="" disabled <%= selectedClientId ? '' : 'selected' %>>— Choisir un client —</option>
+      <% clients.forEach(function(c){ %><option value="<%= c.id %>" <%= String(selectedClientId)===String(c.id)?'selected':'' %>><%= c.name %></option><% }) %>
+    </select>
+  </label>
+  <noscript><button type="submit">Choisir</button></noscript>
+</form>
+<% if (!clients.length) { %><div class="empty">Aucun client. Crée d'abord un <a href="/clients">client</a>.</div><% } %>
+
+<% if (selectedClientId) { %>
 <form method="post" action="/projects">
+  <input type="hidden" name="clientId" value="<%= selectedClientId %>">
   <div class="form-row">
     <input name="name" placeholder="Nom du projet (ex. Audit Q3 2026)" required style="flex:2">
   </div>
@@ -13,7 +27,7 @@
 
   <h2>Sélection des pages</h2>
   <% if (!sites.length) { %>
-    <div class="empty">Aucun site dans l'inventaire. <a href="/inventory">Ajoute des sites et pages</a> d'abord.</div>
+    <div class="empty">Aucun site pour ce client. <a href="/inventory?client=<%= selectedClientId %>">Ajoute des sites et pages</a> d'abord.</div>
   <% } %>
   <% sites.forEach(function(s){ %>
     <% if (s.pages.length) { %>
@@ -35,5 +49,6 @@
     <button type="submit" class="btn-primary">Créer le projet</button>
   </div>
 </form>
+<% } %>
 
 <%- include('partials/footer') %>

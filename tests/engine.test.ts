@@ -220,8 +220,8 @@ describe("3. N/A topic → score null, excluded from overall", () => {
 
 /* ══════════════════════════════════════════════════════════════════════════ */
 
-describe("4. Site aggregation: control passing on page 2 counts as passed", () => {
-  it("passes when control fails on page 1 but passes on page 2", () => {
+describe("4. Site aggregation: proportional average per criterion", () => {
+  it("awards proportional points when a control passes on 1 of 2 pages", () => {
     // Control passes only if rawHtml contains "MAGIC"
     const conditionalTopic: TopicModule = {
       id: 7,
@@ -232,6 +232,48 @@ describe("4. Site aggregation: control passing on page 2 counts as passed", () =
     };
 
     const page1 = makeEvidence({ rawHtml: "<!doctype html><body>nothing</body>" });
+    const page2 = makeEvidence({ rawHtml: "<!doctype html><body>MAGIC</body>" });
+
+    const cfg = defaultConfig([conditionalTopic]);
+    const result = scoreSite("site", [page1, page2], [conditionalTopic], cfg);
+
+    const ctrl = result.topics[0].controls[0];
+    // passes on 1 of 2 applicable pages → round(30 × 1/2) = 15
+    expect(ctrl.pointsAwarded).toBe(15);
+    // "passed" at site level means validated on EVERY applicable page
+    expect(ctrl.passed).toBe(false);
+    expect(result.topics[0].score).toBe(15);
+  });
+
+  it("rounds the proportional average (2 of 3 pages → 20)", () => {
+    const conditionalTopic: TopicModule = {
+      id: 7,
+      name: "Conditional",
+      hasNA: false,
+      standalone: false,
+      controls: [makeControl("cond.c1", 7, 30, passIfMarker("MAGIC"))],
+    };
+
+    const page1 = makeEvidence({ rawHtml: "<!doctype html><body>MAGIC</body>" });
+    const page2 = makeEvidence({ rawHtml: "<!doctype html><body>MAGIC</body>" });
+    const page3 = makeEvidence({ rawHtml: "<!doctype html><body>nothing</body>" });
+
+    const cfg = defaultConfig([conditionalTopic]);
+    const result = scoreSite("site", [page1, page2, page3], [conditionalTopic], cfg);
+
+    // round(30 × 2/3) = 20
+    expect(result.topics[0].controls[0].pointsAwarded).toBe(20);
+  });
+
+  it("awards full points when the control passes on every page", () => {
+    const conditionalTopic: TopicModule = {
+      id: 7,
+      name: "Conditional",
+      hasNA: false,
+      standalone: false,
+      controls: [makeControl("cond.c1", 7, 30, passIfMarker("MAGIC"))],
+    };
+    const page1 = makeEvidence({ rawHtml: "<!doctype html><body>MAGIC</body>" });
     const page2 = makeEvidence({ rawHtml: "<!doctype html><body>MAGIC</body>" });
 
     const cfg = defaultConfig([conditionalTopic]);
@@ -260,6 +302,29 @@ describe("4. Site aggregation: control passing on page 2 counts as passed", () =
     const ctrl = result.topics[0].controls[0];
     expect(ctrl.passed).toBe(false);
     expect(ctrl.pointsAwarded).toBe(0);
+  });
+
+  it("exposes a per-page breakdown with binary control scores", () => {
+    const conditionalTopic: TopicModule = {
+      id: 7,
+      name: "Conditional",
+      hasNA: false,
+      standalone: false,
+      controls: [makeControl("cond.c1", 7, 30, passIfMarker("MAGIC"))],
+    };
+    const page1 = makeEvidence({ rawHtml: "<!doctype html><body>nothing</body>" });
+    const page2 = makeEvidence({ rawHtml: "<!doctype html><body>MAGIC</body>" });
+
+    const cfg = defaultConfig([conditionalTopic]);
+    const result = scoreSite("site", [page1, page2], [conditionalTopic], cfg);
+
+    expect(result.pages).toHaveLength(2);
+    // page 1: control fails → 0 pts (binary)
+    expect(result.pages[0].topics[0].controls[0].pointsAwarded).toBe(0);
+    expect(result.pages[0].topics[0].score).toBe(0);
+    // page 2: control passes → full 30 pts (binary)
+    expect(result.pages[1].topics[0].controls[0].pointsAwarded).toBe(30);
+    expect(result.pages[1].topics[0].score).toBe(30);
   });
 });
 

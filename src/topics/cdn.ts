@@ -5,6 +5,7 @@
  */
 import type { EvidenceBundle, NetworkRequest } from "../core"
 import type { Control, TopicModule } from "../core"
+import { isFirstParty } from "./util"
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -65,13 +66,16 @@ const brotliControl: Control = {
   topicId: 10,
   label: "Brotli compression on HTML and text resources",
   description:
-    "Main HTML uses br (or zstd) encoding AND most CSS/JS responses also use br/zstd.",
+    "Main HTML uses br (or zstd) encoding AND most same-domain CSS/JS responses also use br/zstd.",
   defaultPoints: 20,
   evaluate(e) {
     const htmlEncoding = e.mainResponseHeaders["content-encoding"] ?? ""
     const htmlModern = /\b(br|zstd)\b/i.test(htmlEncoding)
 
-    const texts = textResources(e).filter((r) => r.resourceType !== "document")
+    // Evaluate primarily on the main domain: only first-party CSS/JS count.
+    const texts = textResources(e)
+      .filter((r) => r.resourceType !== "document")
+      .filter((r) => isFirstParty(r.url, e.finalUrl))
     const modernTexts = texts.filter((r) => /\b(br|zstd)\b/i.test(r.responseHeaders["content-encoding"] ?? ""))
     const textRatio = texts.length === 0 ? 1 : modernTexts.length / texts.length
     const passed = htmlModern && textRatio > 0.5
@@ -81,8 +85,8 @@ const brotliControl: Control = {
       : `HTML encoding: "${htmlEncoding}" (not br/zstd)`
     const textNote =
       texts.length === 0
-        ? "no external text resources"
-        : `${modernTexts.length}/${texts.length} CSS/JS use br/zstd`
+        ? "no same-domain text resources"
+        : `${modernTexts.length}/${texts.length} same-domain CSS/JS use br/zstd`
 
     return {
       passed,
@@ -169,7 +173,7 @@ const zstdControl: Control = {
   id: "cdn.zstd",
   topicId: 10,
   label: "Zstandard compression",
-  description: "Any document/CSS/JS response uses content-encoding: zstd.",
+  description: "Main HTML or a same-domain CSS/JS response uses content-encoding: zstd.",
   defaultPoints: 10,
   evaluate(e) {
     // Check main HTML first
@@ -177,16 +181,16 @@ const zstdControl: Control = {
     if (/\bzstd\b/i.test(htmlEncoding)) {
       return { passed: true, evidence: `Main HTML uses zstd encoding (${htmlEncoding})` }
     }
-    // Check text resources
-    const texts = textResources(e)
+    // Evaluate primarily on the main domain: only first-party CSS/JS count.
+    const texts = textResources(e).filter((r) => isFirstParty(r.url, e.finalUrl))
     const zstdResource = texts.find((r) => /\bzstd\b/i.test(r.responseHeaders["content-encoding"] ?? ""))
     if (zstdResource) {
       return {
         passed: true,
-        evidence: `Resource ${zstdResource.url} uses zstd encoding`,
+        evidence: `Same-domain resource ${zstdResource.url} uses zstd encoding`,
       }
     }
-    return { passed: false, evidence: "No zstd content-encoding found in document or text resources" }
+    return { passed: false, evidence: "No zstd content-encoding found on main HTML or same-domain CSS/JS" }
   },
 }
 

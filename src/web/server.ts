@@ -12,6 +12,7 @@ import fastifyStatic from "@fastify/static";
 import ejs from "ejs";
 import { viewHelpers } from "./helpers";
 import { dashboardRoutes } from "./routes/dashboard";
+import { clientRoutes } from "./routes/clients";
 import { inventoryRoutes } from "./routes/inventory";
 import { projectRoutes } from "./routes/projects";
 import { runRoutes } from "./routes/runs";
@@ -36,6 +37,7 @@ async function main() {
   });
 
   await app.register(dashboardRoutes);
+  await app.register(clientRoutes);
   await app.register(inventoryRoutes);
   await app.register(projectRoutes);
   await app.register(runRoutes);

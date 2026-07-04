@@ -114,13 +114,31 @@ const eventBasedControl: Control = {
   topicId: 6,
   label: "Event-based JS loading",
   description:
-    "Cannot verify event-based JS loading from static HTML.",
+    "At least one first-party script is fetched ONLY after a synthetic user/browser interaction (phase=interaction), not during initial load — deferred/idle event-based loading.",
   defaultPoints: 15,
-  evaluate(_e: EvidenceBundle) {
+  evaluate(e: EvidenceBundle) {
+    // First-party script URLs already fetched during the quiet initial load.
+    const loadedScripts = new Set<string>()
+    for (const req of e.requests) {
+      if (req.resourceType !== "script") continue
+      if (req.phase === "interaction") continue
+      loadedScripts.add(req.url)
+    }
+
+    const deferred = e.requests.filter(
+      (req) =>
+        req.resourceType === "script" &&
+        req.phase === "interaction" &&
+        isFirstParty(req.url, e.finalUrl) &&
+        !loadedScripts.has(req.url),
+    )
+
+    const passed = deferred.length > 0
     return {
-      passed: false,
-      evidence:
-        "cannot verify event-based JS loading statically (POC limitation)",
+      passed,
+      evidence: passed
+        ? `${deferred.length} first-party script(s) loaded only after user/browser interaction`
+        : "no first-party script loaded only after synthetic user/browser interaction",
     }
   },
 }

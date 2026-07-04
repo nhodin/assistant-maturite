@@ -70,8 +70,47 @@ describe("js.endofbody", () => {
 })
 
 describe("js.eventbased", () => {
-  it("always FAIL (POC limitation)", () => {
-    expect(ctrl("js.eventbased").evaluate(makeEvidence()).passed).toBe(false)
+  const mkReq = (
+    url: string,
+    phase: "load" | "interaction",
+  ) => ({
+    url,
+    resourceType: "script",
+    status: 200,
+    fromCache: false,
+    encodedBytes: 1000,
+    decodedBytes: 1000,
+    requestHeaders: {},
+    responseHeaders: {},
+    mimeType: "text/javascript",
+    phase,
+  })
+
+  it("PASS — first-party script loads only after interaction", () => {
+    const e = makeEvidence({
+      finalUrl: "https://example.com/",
+      requests: [
+        mkReq("https://example.com/main.js", "load"),
+        mkReq("https://example.com/chat-widget.js", "interaction"),
+      ],
+    })
+    expect(ctrl("js.eventbased").evaluate(e).passed).toBe(true)
+  })
+
+  it("FAIL — interaction-phase script is third-party", () => {
+    const e = makeEvidence({
+      finalUrl: "https://example.com/",
+      requests: [mkReq("https://cdn.thirdparty.com/x.js", "interaction")],
+    })
+    expect(ctrl("js.eventbased").evaluate(e).passed).toBe(false)
+  })
+
+  it("FAIL — no interaction-phase scripts", () => {
+    const e = makeEvidence({
+      finalUrl: "https://example.com/",
+      requests: [mkReq("https://example.com/main.js", "load")],
+    })
+    expect(ctrl("js.eventbased").evaluate(e).passed).toBe(false)
   })
 })
 

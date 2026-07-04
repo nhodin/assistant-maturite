@@ -1,14 +1,30 @@
 import type { FastifyInstance } from "fastify";
 import { prisma } from "../db";
 import { activeRun } from "../runner";
+import { parseClientId, listClients } from "../clients";
 
 export async function runRoutes(app: FastifyInstance) {
-  app.get("/runs", async (_req, reply) => {
-    const runs = await prisma.run.findMany({
-      orderBy: { createdAt: "desc" },
-      include: { project: true, _count: { select: { runSiteScores: true } } },
+  app.get("/runs", async (req, reply) => {
+    const clientId = parseClientId((req.query as any)?.client);
+    const [runs, clients] = await Promise.all([
+      prisma.run.findMany({
+        where: clientId !== null ? { project: { clientId } } : undefined,
+        orderBy: { createdAt: "desc" },
+        include: {
+          project: { include: { client: true } },
+          _count: { select: { runSiteScores: true } },
+        },
+      }),
+      listClients(),
+    ]);
+    return reply.view("run-list", {
+      active: "runs",
+      title: "Runs",
+      runs,
+      clients,
+      selectedClientId: clientId,
+      activeRunId: activeRun(),
     });
-    return reply.view("run-list", { active: "runs", title: "Runs", runs, activeRunId: activeRun() });
   });
 
   app.get("/runs/:id", async (req, reply) => {
@@ -58,11 +74,29 @@ export async function runRoutes(app: FastifyInstance) {
       include: { site: true, run: true },
     });
     if (!score) return reply.code(404).send("No score for this site/run");
+
+    // Per-page scores for the column breakdown (in capture order).
+    const runPages = await prisma.runPage.findMany({
+      where: { runId: id, page: { siteId } },
+      include: { page: true },
+      orderBy: { id: "asc" },
+    });
+    const pages = runPages.map((rp) => ({
+      label: rp.page.label || rp.page.kind,
+      url: rp.url,
+      status: rp.status,
+      overall: rp.overall,
+      geo: rp.geo,
+      china: rp.china,
+      topics: (rp.topicsJson as any[]) ?? [],
+    }));
+
     return reply.view("run-site-detail", {
       active: "runs",
       title: `${score.site.name} — Run #${id}`,
       score,
       topics: score.topicsJson as any[],
+      pages,
     });
   });
 

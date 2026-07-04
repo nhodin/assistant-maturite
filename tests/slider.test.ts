@@ -233,14 +233,41 @@ describe("slider.delaynext", () => {
   const control = ctrl("slider.delaynext")
   expect(control.defaultPoints).toBe(15)
 
-  it("always FAIL with POC limitation evidence", () => {
+  const mkImg = (url: string, phase: "load" | "interaction") => ({
+    url,
+    resourceType: "image",
+    status: 200,
+    fromCache: false,
+    encodedBytes: 5000,
+    decodedBytes: 5000,
+    requestHeaders: {},
+    responseHeaders: {},
+    mimeType: "image/webp",
+    phase,
+  })
+
+  it("PASS — a next-slide image loads only after interaction", () => {
     const e = makeEvidence({
       features: { sliderDetected: true, videoDetected: false, cookieAccepted: false },
-      rawHtml: `<html><body><div class="slider"></div></body></html>`,
+      requests: [
+        mkImg("https://example.com/slide-1.webp", "load"),
+        mkImg("https://example.com/slide-2.webp", "interaction"),
+      ],
     })
     const result = control.evaluate(e)
-    expect(result.passed).toBe(false)
-    expect(result.evidence).toMatch(/POC limitation/i)
+    expect(result.passed).toBe(true)
+    expect(result.evidence).toMatch(/deferred next-slide/i)
+  })
+
+  it("FAIL — all slider images loaded during initial load", () => {
+    const e = makeEvidence({
+      features: { sliderDetected: true, videoDetected: false, cookieAccepted: false },
+      requests: [
+        mkImg("https://example.com/slide-1.webp", "load"),
+        mkImg("https://example.com/slide-2.webp", "load"),
+      ],
+    })
+    expect(control.evaluate(e).passed).toBe(false)
   })
 })
 

@@ -59,8 +59,13 @@
           <td><%= rp.page.site.name %></td>
           <td><span class="badge"><%= rp.page.kind %></span></td>
           <td class="url"><%= rp.url %></td>
-          <td><span class="badge b-<%= rp.status %>"><%= rp.status %></span><% if (rp.error) { %> <span class="muted" title="<%= rp.error %>">⚠</span><% } %></td>
+          <td><span class="badge b-<%= rp.status %>"><%= rp.status %></span></td>
         </tr>
+        <% if (rp.error) { %>
+          <tr>
+            <td colspan="4" class="ev <%= rp.status === 'FAILED' ? 'ko' : 'muted' %>"><%= rp.error %></td>
+          </tr>
+        <% } %>
       <% }) %>
     </tbody>
   </table>

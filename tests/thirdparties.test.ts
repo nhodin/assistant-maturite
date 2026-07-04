@@ -269,24 +269,70 @@ describe("tp.limit", () => {
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
-// tp.eventbased  (10 pts) — always fails (POC limitation)
+// tp.eventbased  (10 pts) — phase-based detection of deferred third parties
 // ─────────────────────────────────────────────────────────────────────────────
+function req(
+  url: string,
+  resourceType: string,
+  phase: "load" | "interaction" = "load",
+) {
+  return {
+    url,
+    resourceType,
+    status: 200,
+    fromCache: false,
+    encodedBytes: 1000,
+    decodedBytes: 1000,
+    requestHeaders: {},
+    responseHeaders: {},
+    mimeType: "",
+    phase,
+  }
+}
+
 describe("tp.eventbased", () => {
-  it("FAIL always — POC limitation", () => {
-    const e = makeEvidence()
+  it("PASS — a third-party provider loads only after interaction", () => {
+    const e = makeEvidence({
+      finalUrl: "https://example.com/",
+      requests: [
+        req("https://example.com/app.js", "script", "load"),
+        req("https://www.google-analytics.com/g/collect", "xhr", "interaction"),
+      ],
+    })
     const { passed, evidence } = ctrl["tp.eventbased"]!.evaluate(e)
-    expect(passed).toBe(false)
-    expect(evidence).toMatch(/POC limitation/)
+    expect(passed).toBe(true)
+    expect(evidence).toMatch(/google-analytics\.com/)
   })
 
-  it("FAIL even with rich bundle", () => {
+  it("FAIL — same 3P host already present during load", () => {
     const e = makeEvidence({
-      rawHtml: `<html><head></head><body>
-        <script>window.addEventListener('load', () => { /* load analytics */ })</script>
-      </body></html>`,
+      finalUrl: "https://example.com/",
+      requests: [
+        req("https://www.googletagmanager.com/gtag/js", "script", "load"),
+        req("https://www.googletagmanager.com/g/collect", "xhr", "interaction"),
+      ],
     })
     const { passed } = ctrl["tp.eventbased"]!.evaluate(e)
     expect(passed).toBe(false)
+  })
+
+  it("FAIL — only a lazy 3P image loads after interaction (not a provider)", () => {
+    const e = makeEvidence({
+      finalUrl: "https://example.com/",
+      requests: [req("https://cdn.other.com/photo.jpg", "image", "interaction")],
+    })
+    const { passed } = ctrl["tp.eventbased"]!.evaluate(e)
+    expect(passed).toBe(false)
+  })
+
+  it("FAIL — no interaction-phase requests (nothing deferred)", () => {
+    const e = makeEvidence({
+      finalUrl: "https://example.com/",
+      requests: [req("https://www.google-analytics.com/g/collect", "xhr", "load")],
+    })
+    const { passed, evidence } = ctrl["tp.eventbased"]!.evaluate(e)
+    expect(passed).toBe(false)
+    expect(evidence).toMatch(/no third-party provider/)
   })
 })
 

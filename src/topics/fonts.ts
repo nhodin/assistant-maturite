@@ -3,10 +3,11 @@
  * topicId: 9 | hasNA: false | standalone: false
  * Max points: 30+10+10+10+10+20+10 = 100
  *
- * NOTE: e.fonts is parsed from INLINE <style> @font-face only (external CSS is not
- * fetched in the POC). Criteria that depend on @font-face descriptors (font-display,
- * size-adjust, unicode-range) are therefore best-effort and say so when no inline
- * @font-face was captured.
+ * e.fonts combines @font-face rules parsed from inline <style> blocks AND from
+ * external stylesheet bodies fetched over CDP during capture (see
+ * collector/index.ts), so criteria depending on @font-face descriptors
+ * (font-display, size-adjust, unicode-range) are not blind to fonts declared in
+ * an external stylesheet — the common case.
  */
 import type { EvidenceBundle } from "../core"
 import type { Control, TopicModule } from "../core"
@@ -112,7 +113,7 @@ const fontDisplayControl: Control = {
     if (e.fonts.length === 0) {
       return {
         passed: false,
-        evidence: "No inline @font-face captured (external CSS not parsed in POC)",
+        evidence: "No @font-face rule captured (inline or external stylesheet)",
       }
     }
     const good = e.fonts.filter((f) => {
@@ -122,7 +123,7 @@ const fontDisplayControl: Control = {
     const passed = good.length === e.fonts.length
     return {
       passed,
-      evidence: `${good.length}/${e.fonts.length} inline @font-face use font-display swap/optional`,
+      evidence: `${good.length}/${e.fonts.length} @font-face rule(s) use font-display swap/optional`,
     }
   },
 }
@@ -189,7 +190,7 @@ const fallbackControl: Control = {
       passed,
       evidence: passed
         ? "Adjusted fallback font metrics detected (size-adjust/ascent-override/descent-override)"
-        : "No adjusted fallback font metrics detected (note: external CSS not parsed in POC)",
+        : "No adjusted fallback font metrics detected in inline or external CSS",
     }
   },
 }
@@ -218,7 +219,7 @@ const subsettingControl: Control = {
     }
     return {
       passed: false,
-      evidence: "No unicode-range or locale-subset font files detected (note: external CSS not parsed in POC)",
+      evidence: "No unicode-range or locale-subset font files detected in inline or external CSS",
     }
   },
 }

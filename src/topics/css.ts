@@ -92,28 +92,22 @@ const noSvgFontsControl: Control = {
   id: "css.nosvgfonts",
   topicId: 7,
   label: "No inlined SVG or base64 fonts in CSS",
-  description: "Inline <style> blocks do not contain data:image/svg or data:font/data:application/font URIs.",
+  description: "Neither inline <style> blocks nor fetched external stylesheets contain data:image/svg or data:font/data:application/font URIs.",
   defaultPoints: 20,
   evaluate(e: EvidenceBundle) {
-    const inlineCSS = inlineStyleBlocks(e.rawHtml)
-    // SVG data URIs in CSS
-    const svgPattern = /data:image\/svg/i
-    // Base64 font data URIs (covers data:font/*, data:application/font-*, data:application/x-font-*)
-    const fontPattern = /data:(?:font|application\/(?:x-)?font)/i
-    const hasSvg = svgPattern.test(inlineCSS)
-    const hasFont = fontPattern.test(inlineCSS)
-    if (!hasSvg && !hasFont) {
+    const scope =
+      e.css.externalStylesheetsParsed > 0
+        ? `inline <style> and ${e.css.externalStylesheetsParsed} external stylesheet(s)`
+        : "inline <style> blocks (no external stylesheet captured)"
+    if (!e.css.hasInlinedSvgOrFontDataUri) {
       return {
         passed: true,
-        evidence: "No data:image/svg or data:font URIs found in inline <style> blocks (note: external CSS not parsed in POC)",
+        evidence: `No data:image/svg or data:font URIs found in ${scope}`,
       }
     }
-    const found: string[] = []
-    if (hasSvg) found.push("data:image/svg")
-    if (hasFont) found.push("data:font/data:application/font")
     return {
       passed: false,
-      evidence: `Inlined ${found.join(" and ")} URI(s) detected in inline <style> blocks`,
+      evidence: `data:image/svg or data:font/data:application/font URI(s) detected in ${scope}`,
     }
   },
 }
@@ -122,52 +116,67 @@ const criticalInlineControl: Control = {
   id: "css.criticalinline",
   topicId: 7,
   label: "Inlined critical CSS",
-  description: "At least one non-trivial <style> block in <head> (total inline CSS ≥500 chars).",
+  description:
+    "At least one non-trivial <style> block in <head> (total inline CSS ≥500 chars), and no @import rule (which would force a serial, render-blocking fetch chain in either inline or external CSS).",
   defaultPoints: 10,
   evaluate(e: EvidenceBundle) {
     const headHtml = headSlice(e.rawHtml)
     const inlineCSS = inlineStyleBlocks(headHtml)
     const len = inlineCSS.trim().length
-    const passed = len >= 500
+    const hasEnoughInlineCss = len >= 500
+
+    if (e.css.hasAtImport) {
+      return {
+        passed: false,
+        evidence: `@import rule detected in inline or external CSS — forces a serial, render-blocking fetch chain (${len} chars of inline CSS in <head>)`,
+      }
+    }
+
     return {
-      passed,
-      evidence: passed
-        ? `${len} chars of inline CSS in <head> (≥500 threshold — critical CSS likely inlined)`
+      passed: hasEnoughInlineCss,
+      evidence: hasEnoughInlineCss
+        ? `${len} chars of inline CSS in <head>, no @import (≥500 threshold — critical CSS likely inlined)`
         : `Only ${len} chars of inline CSS in <head> (< 500 threshold — no significant critical CSS)`,
     }
   },
 }
 
+function findCssPreloadDirective(linkHeader: string): string | undefined {
+  return linkHeader.split(",").find((d) => {
+    const hasPreload = /rel\s*=\s*["']?preload["']?/i.test(d)
+    const hasStyle = /as\s*=\s*["']?style["']?/i.test(d)
+    return hasPreload && hasStyle
+  })
+}
+
 const preloadControl: Control = {
   id: "css.preload",
   topicId: 7,
-  label: "CSS preload in response headers",
-  description: "Main response Link header contains rel=preload and as=style.",
+  label: "CSS preload in response headers or 103 Early Hints",
+  description: "Main response Link header, or a 103 Early Hints response, contains rel=preload and as=style.",
   defaultPoints: 10,
   evaluate(e: EvidenceBundle) {
     const linkHeader = header(e.mainResponseHeaders, "link") ?? ""
-    if (!linkHeader) {
-      return {
-        passed: false,
-        evidence: "No Link response header found",
-      }
-    }
-    // Split by comma to handle multiple link directives
-    const directives = linkHeader.split(",")
-    const cssPreload = directives.find((d) => {
-      const hasPreload = /rel\s*=\s*["']?preload["']?/i.test(d)
-      const hasStyle = /as\s*=\s*["']?style["']?/i.test(d)
-      return hasPreload && hasStyle
-    })
+    const cssPreload = findCssPreloadDirective(linkHeader)
     if (cssPreload) {
       return {
         passed: true,
         evidence: `Link header contains CSS preload: ${cssPreload.trim().substring(0, 120)}`,
       }
     }
+    const earlyHintsLink = e.earlyHints ? (header(e.earlyHints, "link") ?? "") : ""
+    const earlyHintsCssPreload = findCssPreloadDirective(earlyHintsLink)
+    if (earlyHintsCssPreload) {
+      return {
+        passed: true,
+        evidence: `103 Early Hints Link header contains CSS preload: ${earlyHintsCssPreload.trim().substring(0, 120)}`,
+      }
+    }
     return {
       passed: false,
-      evidence: `Link header present but no CSS preload (as=style) directive found: ${linkHeader.substring(0, 80)}`,
+      evidence: linkHeader
+        ? `Link header present but no CSS preload (as=style) directive found: ${linkHeader.substring(0, 80)}`
+        : "No CSS preload found in the main response Link header or a 103 Early Hints response",
     }
   },
 }
@@ -183,7 +192,7 @@ const unusedControl: Control = {
     if (pct === null) {
       return {
         passed: false,
-        evidence: "Unused CSS not measured (CSS coverage unavailable in POC)",
+        evidence: "Unused CSS not measured (CSS coverage tracking unavailable for this capture)",
       }
     }
     const passed = pct < 30

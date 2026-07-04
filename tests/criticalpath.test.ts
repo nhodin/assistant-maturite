@@ -52,6 +52,27 @@ describe("cp.headorder", () => {
     })
     expect(ctrl("cp.headorder").evaluate(e).passed).toBe(false)
   })
+
+  it("PASS — meta[charset] within the first 1024 bytes", () => {
+    const e = makeEvidence({
+      head: { order: ["meta[charset]", "meta[viewport]"], tags: [] },
+      rawHtml: `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"></head></html>`,
+    })
+    const result = ctrl("cp.headorder").evaluate(e)
+    expect(result.passed).toBe(true)
+    expect(result.evidence).toContain("byte offset")
+  })
+
+  it("FAIL — meta[charset] present but past the 1024-byte budget", () => {
+    const padding = `<!-- ${"x".repeat(1100)} -->`
+    const e = makeEvidence({
+      head: { order: ["meta[charset]", "meta[viewport]"], tags: [] },
+      rawHtml: `<!doctype html><html><head>${padding}<meta charset="utf-8"><meta name="viewport" content="width=device-width"></head></html>`,
+    })
+    const result = ctrl("cp.headorder").evaluate(e)
+    expect(result.passed).toBe(false)
+    expect(result.evidence).toContain("re-parse")
+  })
 })
 
 describe("cp.limitresources", () => {
@@ -97,7 +118,13 @@ describe("cp.preloadheader", () => {
 })
 
 describe("cp.earlyhints", () => {
-  it("always FAIL (POC limitation)", () => {
+  it("FAIL — no 103 Early Hints observed", () => {
     expect(ctrl("cp.earlyhints").evaluate(makeEvidence()).passed).toBe(false)
+  })
+  it("PASS — 103 Early Hints observed", () => {
+    const e = makeEvidence({ earlyHints: { link: "<a.css>; rel=preload; as=style" } })
+    const result = ctrl("cp.earlyhints").evaluate(e)
+    expect(result.passed).toBe(true)
+    expect(result.evidence).toContain("Early Hints")
   })
 })

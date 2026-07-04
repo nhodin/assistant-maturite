@@ -3,6 +3,7 @@
  * Keep topic-specific data (e.g. GFW domain lists, 3rd-party category maps) in the
  * relevant topic file; this module holds only generic parsing/URL utilities.
  */
+import { getDomain } from "tldts";
 import type { HeaderMap, NetworkRequest } from "../core";
 
 /** Hostname (lowercased) of a URL, or "" if unparseable. Handles protocol-relative
@@ -17,10 +18,16 @@ export function host(url: string): string {
 }
 
 /**
- * Naive registrable domain = last two labels (e.g. "a.b.example.com" → "example.com").
- * NOTE: does not handle multi-part TLDs like "co.uk" — acceptable heuristic for the POC.
+ * Registrable domain (eTLD+1) via the Public Suffix List, e.g. "a.b.example.co.uk"
+ * → "example.co.uk". Falls back to the last-two-labels heuristic for hostnames
+ * `tldts` can't resolve (e.g. bare IPs, single-label hosts like "localhost").
  */
 export function registrableDomain(hostname: string): string {
+  // allowPrivateDomains: private PSL entries (github.io, vercel.app, ...) host
+  // unrelated tenants on subdomains, so treat them like a real eTLD for our
+  // first/third-party comparisons instead of collapsing them all into one site.
+  const domain = getDomain(hostname, { allowPrivateDomains: true });
+  if (domain) return domain;
   const parts = hostname.split(".").filter(Boolean);
   return parts.length <= 2 ? hostname : parts.slice(-2).join(".");
 }
@@ -30,6 +37,15 @@ export function sameSite(a: string, b: string): boolean {
   const ha = host(a);
   const hb = host(b);
   return ha !== "" && hb !== "" && registrableDomain(ha) === registrableDomain(hb);
+}
+
+/**
+ * True if `reqUrl` belongs to the page's own domain ("main domain" / first-party).
+ * A relative or unparseable URL has no host of its own, so it resolves against the
+ * page origin and is therefore treated as first-party.
+ */
+export function isFirstParty(reqUrl: string, pageUrl: string): boolean {
+  return host(reqUrl) === "" || sameSite(reqUrl, pageUrl);
 }
 
 /** True if `reqUrl` is on a different registrable domain than `pageUrl` (third-party). */

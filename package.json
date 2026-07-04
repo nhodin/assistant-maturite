@@ -12,10 +12,13 @@
     "test": "vitest run",
     "audit": "tsx src/cli/index.ts",
     "collect": "tsx src/cli/collect.ts",
+    "spike:cloudflare": "tsx src/cli/spike-cloudflare-browser.ts",
     "web": "tsx src/web/server.ts",
     "db:push": "prisma db push",
     "db:studio": "prisma studio",
-    "db:seed-inventory": "tsx src/web/seed.ts"
+    "db:seed-clients": "tsx src/web/seed-clients.ts",
+    "db:seed-inventory": "tsx src/web/seed.ts",
+    "db:purge-runs": "tsx src/web/purge-runs.ts"
   },
   "dependencies": {
     "@fastify/formbody": "^8.0.2",
@@ -31,6 +34,7 @@
     "playwright": "^1.48.0",
     "playwright-core": "^1.61.1",
     "prisma": "^6.19.3",
+    "tldts": "^7.4.5",
     "zod": "^3.23.8"
   },
   "devDependencies": {

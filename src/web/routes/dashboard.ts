@@ -1,25 +1,31 @@
 import type { FastifyInstance } from "fastify";
 import { prisma } from "../db";
+import { parseClientId, listClients } from "../clients";
 
 export async function dashboardRoutes(app: FastifyInstance) {
-  app.get("/", async (_req, reply) => {
+  app.get("/", async (req, reply) => {
+    const clientId = parseClientId((req.query as any)?.client);
+    const runClientWhere = clientId !== null ? { project: { clientId } } : {};
+
     const latestRun = await prisma.run.findFirst({
-      where: { status: "DONE" },
+      where: { status: "DONE", ...runClientWhere },
       orderBy: { createdAt: "desc" },
-      include: { project: true, runSiteScores: { include: { site: true } } },
+      include: { project: { include: { client: true } }, runSiteScores: { include: { site: true } } },
     });
 
     const recentRuns = await prisma.run.findMany({
+      where: runClientWhere,
       orderBy: { createdAt: "desc" },
       take: 8,
-      include: { project: true },
+      include: { project: { include: { client: true } } },
     });
 
+    const clients = await listClients();
     const counts = {
-      sites: await prisma.site.count(),
-      pages: await prisma.page.count(),
-      projects: await prisma.project.count(),
-      runs: await prisma.run.count(),
+      sites: await prisma.site.count({ where: clientId !== null ? { clientId } : undefined }),
+      pages: await prisma.page.count({ where: clientId !== null ? { site: { clientId } } : undefined }),
+      projects: await prisma.project.count({ where: clientId !== null ? { clientId } : undefined }),
+      runs: await prisma.run.count({ where: clientId !== null ? { project: { clientId } } : undefined }),
     };
 
     let ranking: any[] = [];
@@ -41,6 +47,8 @@ export async function dashboardRoutes(app: FastifyInstance) {
       byCategory,
       recentRuns,
       counts,
+      clients,
+      selectedClientId: clientId,
     });
   });
 }

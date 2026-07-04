@@ -78,13 +78,40 @@ export interface ControlResult {
 export interface TopicResult {
   topicId: number;
   name: string;
-  /** null when the topic is N/A across all evaluated pages. */
+  /**
+   * null when the topic is N/A across all evaluated pages.
+   * On a PageResult this is the binary per-page score (sum of awarded points).
+   * On a SiteResult this is the proportional average across pages (sum of each
+   * criterion's average), capped at 100.
+   */
   score: number | null;
   controls: ControlResult[];
 }
 
+/**
+ * Score of a SINGLE page (one EvidenceBundle). Each control is binary here
+ * (full points or 0); the site-level average is computed across these.
+ */
+export interface PageResult {
+  /** Requested URL of the page. */
+  url: string;
+  /** Optional caller-supplied label (HP/PLP/PDP). The engine leaves it undefined. */
+  label?: string;
+  topics: TopicResult[];
+  /** Average of topics 1–10 for this page, excluding N/A. */
+  overall: number | null;
+  /** Topic 11 standalone. */
+  geo: number | null;
+  /** Topic 12 standalone. */
+  china: number | null;
+}
+
 export interface SiteResult {
   site: string;
+  /**
+   * Per-topic site scores. Each criterion is the PROPORTIONAL AVERAGE of its
+   * per-page results: `round(points × passedPages / applicablePages)`.
+   */
   topics: TopicResult[];
   /** Average of topics 1–10, excluding N/A. */
   overall: number | null;
@@ -92,6 +119,8 @@ export interface SiteResult {
   geo: number | null;
   /** Topic 12 standalone. */
   china: number | null;
+  /** Per-page breakdown, in input order. */
+  pages: PageResult[];
 }
 
 /* ── Collector contract (implemented in src/collector) ────────────────────── */

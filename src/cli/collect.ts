@@ -7,7 +7,7 @@
 import { writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
 import { fileURLToPath } from "url";
-import { collect } from "../collector/index";
+import { collect, assessCaptureHealth } from "../collector/index";
 
 const __filename = fileURLToPath(import.meta.url);
 const projectRoot = join(__filename, "..", "..", "..");
@@ -58,6 +58,38 @@ async function main(): Promise<void> {
   }, {});
   for (const [type, count] of Object.entries(byType).sort()) {
     console.log(`  ${type.padEnd(15)} ${count}`);
+  }
+  console.log("");
+  console.log("── Phase (event-based loading) ────────────────────────────");
+  const interactionReqs = bundle.requests.filter(
+    (r) => r.phase === "interaction",
+  );
+  console.log(`Load phase:       ${bundle.requests.length - interactionReqs.length}`);
+  console.log(`Interaction phase:${interactionReqs.length}`);
+  const pageHost = (() => {
+    try {
+      return new URL(bundle.finalUrl).hostname.replace(/^www\./, "");
+    } catch {
+      return "";
+    }
+  })();
+  const deferredThirdParties = [
+    ...new Set(
+      interactionReqs
+        .map((r) => {
+          try {
+            return new URL(
+              r.url.startsWith("//") ? "https:" + r.url : r.url,
+            ).hostname;
+          } catch {
+            return "";
+          }
+        })
+        .filter((h) => h && !h.endsWith(pageHost)),
+    ),
+  ];
+  if (deferredThirdParties.length > 0) {
+    console.log(`Deferred 3P hosts: ${deferredThirdParties.slice(0, 12).join(", ")}`);
   }
   console.log("");
   console.log("── Performance ────────────────────────────────────────────");
@@ -113,6 +145,10 @@ async function main(): Promise<void> {
     const v = bundle.mainResponseHeaders[h];
     if (v) console.log(`  ${h}: ${v}`);
   }
+  console.log("");
+  console.log("── Capture health ──────────────────────────────────────────");
+  const health = assessCaptureHealth(bundle);
+  console.log(health.ok ? "OK — looks like a real page render." : `REJECTED — ${health.reason}`);
   console.log("═".repeat(60));
 
   // Write to evidence/<host>.json

@@ -7,6 +7,10 @@
   <summary>Modifier le site</summary>
   <form method="post" action="/inventory/sites/<%= site.id %>/edit" class="form-row">
     <input name="name" value="<%= site.name %>" required>
+    <select name="clientId" required>
+      <option value="" disabled <%= site.clientId ? '' : 'selected' %>>— Client —</option>
+      <% clients.forEach(function(c){ %><option value="<%= c.id %>" <%= site.clientId===c.id?'selected':'' %>><%= c.name %></option><% }) %>
+    </select>
     <select name="category">
       <% CATEGORIES.forEach(function(c){ %><option value="<%= c %>" <%= site.category===c?'selected':'' %>><%= categoryLabel(c) %></option><% }) %>
     </select>

@@ -2,7 +2,50 @@
 
 <p><a href="/projects">← Projects</a></p>
 <h1><%= project.name %></h1>
-<% if (project.description) { %><p class="muted"><%= project.description %></p><% } %>
+<p class="muted"><% if (project.client) { %>Client : <strong><%= project.client.name %></strong><% } else { %><span>Sans client</span><% } %><% if (project.description) { %> · <%= project.description %><% } %></p>
+
+<section>
+  <h2>Évolution des notes</h2>
+  <% if (trend) { %>
+    <div class="chart-card">
+      <svg class="trend" viewBox="0 0 <%= trend.width %> <%= trend.height %>" role="img"
+           aria-label="Évolution de la note globale et des pages par run">
+        <!-- horizontal gridlines + y-axis labels -->
+        <% trend.yTicks.forEach(function(t){ %>
+          <line class="grid" x1="<%= trend.pad.l %>" y1="<%= t.y %>"
+                x2="<%= trend.width - trend.pad.r %>" y2="<%= t.y %>"></line>
+          <text class="axis" x="<%= trend.pad.l - 6 %>" y="<%= t.y + 3 %>" text-anchor="end"><%= t.value %></text>
+        <% }) %>
+        <!-- x-axis run labels -->
+        <% trend.xLabels.forEach(function(x){ %>
+          <text class="axis" x="<%= x.x %>" y="<%= trend.height - trend.pad.b + 16 %>" text-anchor="middle"><%= x.label %></text>
+        <% }) %>
+        <!-- one polyline + markers per series -->
+        <% trend.series.forEach(function(s){ %>
+          <% if (s.path) { %>
+            <path d="<%= s.path %>" fill="none" stroke="<%= s.color %>"
+                  stroke-width="<%= s.isGlobal ? 3 : 1.8 %>"
+                  stroke-linejoin="round" stroke-linecap="round"></path>
+          <% } %>
+          <% s.points.forEach(function(p){ %>
+            <circle cx="<%= p.cx %>" cy="<%= p.cy %>" r="<%= s.isGlobal ? 4 : 3 %>" fill="<%= s.color %>">
+              <title><%= p.title %></title>
+            </circle>
+          <% }) %>
+        <% }) %>
+      </svg>
+      <div class="chart-legend">
+        <% trend.series.forEach(function(s){ %>
+          <span class="lg<%= s.isGlobal ? ' lg-strong' : '' %>">
+            <span class="swatch" style="background: <%= s.color %>"></span><%= s.label %>
+          </span>
+        <% }) %>
+      </div>
+    </div>
+  <% } else { %>
+    <p class="empty">Aucun run terminé pour le moment — lancez un run pour voir l’évolution des notes.</p>
+  <% } %>
+</section>
 
 <div class="two-col">
   <section>

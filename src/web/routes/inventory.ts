@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { prisma } from "../db";
 import { CATEGORIES, PAGE_KINDS } from "../categories";
+import { parseClientId, listClients } from "../clients";
 
 function asCategory(v: unknown): any {
   return CATEGORIES.includes(v as any) ? v : "Other";
@@ -11,12 +12,23 @@ function asKind(v: unknown): any {
 
 export async function inventoryRoutes(app: FastifyInstance) {
   // ── Sites list ──────────────────────────────────────────────────────────────
-  app.get("/inventory", async (_req, reply) => {
-    const sites = await prisma.site.findMany({
-      orderBy: [{ category: "asc" }, { name: "asc" }],
-      include: { _count: { select: { pages: true } } },
+  app.get("/inventory", async (req, reply) => {
+    const clientId = parseClientId((req.query as any)?.client);
+    const [sites, clients] = await Promise.all([
+      prisma.site.findMany({
+        where: clientId !== null ? { clientId } : undefined,
+        orderBy: [{ category: "asc" }, { name: "asc" }],
+        include: { _count: { select: { pages: true } }, client: true },
+      }),
+      listClients(),
+    ]);
+    return reply.view("inventory", {
+      active: "inventory",
+      title: "Inventory",
+      sites,
+      clients,
+      selectedClientId: clientId,
     });
-    return reply.view("inventory", { active: "inventory", title: "Inventory", sites });
   });
 
   app.post("/inventory/sites", async (req, reply) => {
@@ -26,6 +38,7 @@ export async function inventoryRoutes(app: FastifyInstance) {
         data: {
           name: String(b.name).trim(),
           category: asCategory(b.category),
+          clientId: parseClientId(b.clientId),
           homepage: b.homepage ? String(b.homepage).trim() : null,
           notes: b.notes ? String(b.notes).trim() : null,
         },
@@ -43,12 +56,15 @@ export async function inventoryRoutes(app: FastifyInstance) {
   // ── Site detail (pages) ───────────────────────────────────────────────────────
   app.get("/inventory/sites/:id", async (req, reply) => {
     const id = Number((req.params as any).id);
-    const site = await prisma.site.findUnique({
-      where: { id },
-      include: { pages: { orderBy: { id: "asc" } } },
-    });
+    const [site, clients] = await Promise.all([
+      prisma.site.findUnique({
+        where: { id },
+        include: { pages: { orderBy: { id: "asc" } }, client: true },
+      }),
+      listClients(),
+    ]);
     if (!site) return reply.code(404).send("Site not found");
-    return reply.view("site-detail", { active: "inventory", title: site.name, site });
+    return reply.view("site-detail", { active: "inventory", title: site.name, site, clients });
   });
 
   app.post("/inventory/sites/:id/edit", async (req, reply) => {
@@ -59,6 +75,7 @@ export async function inventoryRoutes(app: FastifyInstance) {
       data: {
         name: String(b.name ?? "").trim() || undefined,
         category: asCategory(b.category),
+        clientId: parseClientId(b.clientId),
         homepage: b.homepage ? String(b.homepage).trim() : null,
         notes: b.notes ? String(b.notes).trim() : null,
       },

@@ -3,24 +3,32 @@
 <h1>Inventory</h1>
 <p class="muted">Sites et pages disponibles. Sélectionne-les ensuite dans un projet.</p>
 
+<%- include('partials/client-filter', { clients, selectedClientId, basePath: '/inventory' }) %>
+
 <details class="addbox" open>
   <summary>Ajouter un site</summary>
   <form method="post" action="/inventory/sites" class="form-row">
     <input name="name" placeholder="Nom du site" required>
+    <select name="clientId" required>
+      <option value="" disabled <%= selectedClientId ? '' : 'selected' %>>— Client —</option>
+      <% clients.forEach(function(c){ %><option value="<%= c.id %>" <%= String(selectedClientId)===String(c.id)?'selected':'' %>><%= c.name %></option><% }) %>
+    </select>
     <select name="category">
       <% CATEGORIES.forEach(function(c){ %><option value="<%= c %>"><%= categoryLabel(c) %></option><% }) %>
     </select>
     <input name="homepage" placeholder="https://… (optionnel)">
     <button type="submit">Ajouter</button>
   </form>
+  <% if (!clients.length) { %><p class="muted">Crée d'abord un <a href="/clients">client</a>.</p><% } %>
 </details>
 
 <table class="grid">
-  <thead><tr><th>Site</th><th>Catégorie</th><th>Pages</th><th></th></tr></thead>
+  <thead><tr><th>Site</th><th>Client</th><th>Catégorie</th><th>Pages</th><th></th></tr></thead>
   <tbody>
     <% sites.forEach(function(s){ %>
       <tr>
         <td><a href="/inventory/sites/<%= s.id %>"><%= s.name %></a></td>
+        <td><% if (s.client) { %><%= s.client.name %><% } else { %><span class="muted">—</span><% } %></td>
         <td><%= categoryLabel(s.category) %></td>
         <td><%= s._count.pages %></td>
         <td class="actions">
@@ -30,7 +38,7 @@
         </td>
       </tr>
     <% }) %>
-    <% if (!sites.length) { %><tr><td colspan="4" class="muted">Aucun site. Ajoute-en un ci-dessus.</td></tr><% } %>
+    <% if (!sites.length) { %><tr><td colspan="5" class="muted">Aucun site. Ajoute-en un ci-dessus.</td></tr><% } %>
   </tbody>
 </table>
 

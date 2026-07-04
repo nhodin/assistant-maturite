@@ -72,8 +72,14 @@ describe("fonts.fontdisplay", () => {
     const e = makeEvidence({ fonts: [{ family: "A", fontDisplay: "swap" }] })
     expect(ctrl("fonts.fontdisplay").evaluate(e).passed).toBe(true)
   })
-  it("FAIL — no inline @font-face captured", () => {
+  it("FAIL — no @font-face captured (inline or external)", () => {
     expect(ctrl("fonts.fontdisplay").evaluate(makeEvidence()).passed).toBe(false)
+  })
+  it("PASS — @font-face sourced from an external stylesheet", () => {
+    // e.fonts combines inline <style> and fetched external stylesheet @font-face
+    // rules — the fixture doesn't distinguish the source, only the parsed result.
+    const e = makeEvidence({ fonts: [{ family: "A", fontDisplay: "optional" }] })
+    expect(ctrl("fonts.fontdisplay").evaluate(e).passed).toBe(true)
   })
 })
 

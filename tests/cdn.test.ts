@@ -75,6 +75,23 @@ describe("cdn.brotli", () => {
     expect(result.passed).toBe(false)
   })
 
+  it("ignores third-party CSS/JS — only main-domain resources count", () => {
+    const e = makeEvidence({
+      finalUrl: "https://example.com/",
+      mainResponseHeaders: { "content-encoding": "br" },
+      requests: [
+        // Main domain: all br → should pass regardless of third-party encodings
+        { url: "https://example.com/app.js", resourceType: "script", status: 200, fromCache: false, encodedBytes: 20000, decodedBytes: 80000, requestHeaders: {}, responseHeaders: { "content-encoding": "br" }, mimeType: "text/javascript" },
+        // Third parties on gzip — must be excluded from the ratio
+        { url: "https://cdn.thirdparty.com/a.js", resourceType: "script", status: 200, fromCache: false, encodedBytes: 30000, decodedBytes: 100000, requestHeaders: {}, responseHeaders: { "content-encoding": "gzip" }, mimeType: "text/javascript" },
+        { url: "https://other.example.net/b.css", resourceType: "stylesheet", status: 200, fromCache: false, encodedBytes: 5000, decodedBytes: 20000, requestHeaders: {}, responseHeaders: { "content-encoding": "gzip" }, mimeType: "text/css" },
+      ],
+    })
+    const result = ctrl("cdn.brotli").evaluate(e)
+    expect(result.passed).toBe(true)
+    expect(result.evidence).toContain("1/1 same-domain")
+  })
+
   it("fails when HTML uses br but most CSS/JS use gzip", () => {
     const e = makeEvidence({
       mainResponseHeaders: { "content-encoding": "br" },
@@ -228,6 +245,32 @@ describe("cdn.zstd", () => {
     const e = makeEvidence({
       requests: [
         { url: "style.css", resourceType: "stylesheet", status: 200, fromCache: false, encodedBytes: 5000, decodedBytes: 20000, requestHeaders: {}, responseHeaders: { "content-encoding": "zstd" }, mimeType: "text/css" },
+      ],
+    })
+    const result = ctrl("cdn.zstd").evaluate(e)
+    expect(result.passed).toBe(true)
+    expect(result.evidence).toContain("zstd")
+  })
+
+  it("ignores zstd on a third-party resource (only main domain counts)", () => {
+    const e = makeEvidence({
+      finalUrl: "https://example.com/",
+      mainResponseHeaders: { "content-encoding": "br" },
+      requests: [
+        { url: "https://cdn.thirdparty.com/style.css", resourceType: "stylesheet", status: 200, fromCache: false, encodedBytes: 5000, decodedBytes: 20000, requestHeaders: {}, responseHeaders: { "content-encoding": "zstd" }, mimeType: "text/css" },
+      ],
+    })
+    const result = ctrl("cdn.zstd").evaluate(e)
+    expect(result.passed).toBe(false)
+    expect(result.evidence).toMatch(/no zstd/i)
+  })
+
+  it("passes when a same-domain CSS resource uses zstd", () => {
+    const e = makeEvidence({
+      finalUrl: "https://example.com/",
+      mainResponseHeaders: { "content-encoding": "br" },
+      requests: [
+        { url: "https://example.com/style.css", resourceType: "stylesheet", status: 200, fromCache: false, encodedBytes: 5000, decodedBytes: 20000, requestHeaders: {}, responseHeaders: { "content-encoding": "zstd" }, mimeType: "text/css" },
       ],
     })
     const result = ctrl("cdn.zstd").evaluate(e)

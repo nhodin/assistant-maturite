@@ -8,19 +8,35 @@ import { header, requestsOfType } from "./util"
 
 // ── controls ──────────────────────────────────────────────────────────────────
 
+const CHARSET_TAG_RE = /<meta\b[^>]*charset[^>]*>/i
+/** Browsers must see the charset declaration within the first 1024 bytes to
+ *  avoid a re-parse of the document (HTML Standard encoding-sniffing rule). */
+const CHARSET_BYTE_BUDGET = 1024
+
+/** Byte offset (UTF-8) of the first <meta charset> tag in rawHtml, or null if absent. */
+function charsetByteOffset(rawHtml: string): number | null {
+  const m = CHARSET_TAG_RE.exec(rawHtml)
+  if (!m) return null
+  return Buffer.byteLength(rawHtml.slice(0, m.index), "utf-8")
+}
+
 /**
  * 30 pts — Head order: meta[charset] → meta[viewport] → title → CSS → JS
  *
  * From e.head.order we verify that among the PRESENT tokens from this ordered
  * set, each one appears before the next. Missing tokens are skipped (not a failure).
  * Tokens checked: "meta[charset]", "meta[viewport]", "title", "link[stylesheet]", "script"
+ *
+ * Also requires — when a charset declaration is present — that it appears within
+ * the first 1024 bytes of the document, per the HTML Standard's encoding-sniffing
+ * rule; a later charset tag forces the browser to re-parse the whole document.
  */
 const headOrderControl: Control = {
   id: "cp.headorder",
   topicId: 8,
   label: "Head tag order: charset → viewport → title → CSS → JS",
   description:
-    "The first occurrences of meta[charset], meta[viewport], title, link[stylesheet], script appear in that relative order.",
+    "The first occurrences of meta[charset], meta[viewport], title, link[stylesheet], script appear in that relative order, and meta[charset] (if present) is within the first 1024 bytes.",
   defaultPoints: 30,
   evaluate(e) {
     const EXPECTED = [
@@ -69,9 +85,22 @@ const headOrderControl: Control = {
       }
     }
 
+    // Encoding-sniffing rule: a present charset tag must start within the first
+    // 1024 bytes, else the browser re-parses the document from scratch.
+    const charsetOffset = charsetByteOffset(e.rawHtml)
+    if (charsetOffset !== null && charsetOffset >= CHARSET_BYTE_BUDGET) {
+      return {
+        passed: false,
+        evidence: `meta[charset] found but at byte offset ${charsetOffset} (≥${CHARSET_BYTE_BUDGET}) — triggers browser re-parse. Observed present tokens: [${observed}]`,
+      }
+    }
+
     return {
       passed: true,
-      evidence: `Head tag order correct among present tokens: [${observed}]`,
+      evidence:
+        charsetOffset !== null
+          ? `Head tag order correct among present tokens: [${observed}]; meta[charset] at byte offset ${charsetOffset} (< ${CHARSET_BYTE_BUDGET})`
+          : `Head tag order correct among present tokens: [${observed}]`,
     }
   },
 }
@@ -183,20 +212,30 @@ const preloadHeaderControl: Control = {
 /**
  * 10 pts — 103 Early Hints
  *
- * Not detectable from current capture → always FAIL with explanation.
+ * The collector fetches the main document with Node's http(s).request (see
+ * collector/index.ts) and listens for the 'information' event, which surfaces
+ * 1xx interim responses — including a 103 Early Hints response and its headers —
+ * that fetch()/undici silently discard.
  */
 const earlyHintsControl: Control = {
   id: "cp.earlyhints",
   topicId: 8,
   label: "103 Early Hints",
-  description:
-    "103 Early Hints are not observable from the current EvidenceBundle (POC limitation).",
+  description: "A 103 Early Hints interim response was observed for the main document request.",
   defaultPoints: 10,
-  evaluate(_e) {
+  evaluate(e) {
+    if (e.earlyHints) {
+      const linkHeader = e.earlyHints["link"]
+      return {
+        passed: true,
+        evidence: linkHeader
+          ? `103 Early Hints response observed with Link header: ${linkHeader.substring(0, 120)}`
+          : "103 Early Hints response observed for the main document request",
+      }
+    }
     return {
       passed: false,
-      evidence:
-        "103 Early Hints not detectable via current capture (POC limitation) — the 103 response is consumed by the browser before the main response is captured",
+      evidence: "No 103 Early Hints response observed for the main document request",
     }
   },
 }

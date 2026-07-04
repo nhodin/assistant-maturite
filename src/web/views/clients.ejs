@@ -1,0 +1,41 @@
+<%- include('partials/header', { title, active }) %>
+
+<h1>Clients</h1>
+<p class="muted">Regroupe sites, projets et runs par client. Chaque site et projet appartient à un client.</p>
+
+<details class="addbox" open>
+  <summary>Ajouter un client</summary>
+  <form method="post" action="/clients" class="form-row">
+    <input name="name" placeholder="Nom du client (ex. LVMH)" required>
+    <input name="notes" placeholder="Notes (optionnel)">
+    <button type="submit">Ajouter</button>
+  </form>
+</details>
+
+<table class="grid">
+  <thead><tr><th>Client</th><th>Sites</th><th>Projets</th><th>Notes</th><th></th></tr></thead>
+  <tbody>
+    <% clients.forEach(function(c){ %>
+      <tr>
+        <td>
+          <form method="post" action="/clients/<%= c.id %>/edit" class="form-row" style="margin:0">
+            <input name="name" value="<%= c.name %>" required style="max-width:220px">
+            <input name="notes" value="<%= c.notes || '' %>" placeholder="Notes">
+            <button type="submit">Enregistrer</button>
+          </form>
+        </td>
+        <td><a href="/inventory?client=<%= c.id %>"><%= c._count.sites %></a></td>
+        <td><a href="/projects?client=<%= c.id %>"><%= c._count.projects %></a></td>
+        <td class="muted"><%= c.notes || '—' %></td>
+        <td class="actions">
+          <form method="post" action="/clients/<%= c.id %>/delete" onsubmit="return confirm('Supprimer ce client ? Ses sites et projets seront détachés (non supprimés).')">
+            <button class="danger" type="submit">Suppr.</button>
+          </form>
+        </td>
+      </tr>
+    <% }) %>
+    <% if (!clients.length) { %><tr><td colspan="5" class="muted">Aucun client. Ajoute-en un ci-dessus.</td></tr><% } %>
+  </tbody>
+</table>
+
+<%- include('partials/footer') %>

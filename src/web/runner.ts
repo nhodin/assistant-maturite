@@ -4,11 +4,41 @@
  * run status. Only one run executes at a time (single-user internal tool).
  */
 import { prisma } from "./db";
-import { collect } from "../collector";
+import { collect, assessCaptureHealth } from "../collector";
 import { TOPICS } from "../topics";
 import { scoreSite } from "../engine";
 import { buildConfigMap } from "./config-store";
 import type { EvidenceBundle, Device } from "../core";
+
+type BrowserProvider = "playwright" | "cloak";
+
+function otherBrowser(b: BrowserProvider): BrowserProvider {
+  return b === "cloak" ? "playwright" : "cloak";
+}
+
+type CaptureAttempt =
+  | { ok: true; bundle: EvidenceBundle }
+  | { ok: false; reason: string; bundle: EvidenceBundle | null };
+
+/** One capture + health-check attempt with a single browser provider. Never throws. */
+async function tryCapture(
+  url: string,
+  browser: BrowserProvider,
+  device: Device,
+  acceptCookies: boolean,
+): Promise<CaptureAttempt> {
+  let bundle: EvidenceBundle;
+  try {
+    bundle = await collect(url, { browser, device, acceptCookies });
+  } catch (err) {
+    return { ok: false, reason: String(err).slice(0, 500), bundle: null };
+  }
+  const health = assessCaptureHealth(bundle);
+  if (!health.ok) {
+    return { ok: false, reason: health.reason ?? "Capture rejected", bundle };
+  }
+  return { ok: true, bundle };
+}
 
 /**
  * A compact copy for DB storage: drops the large HTML blobs and per-request headers
@@ -28,6 +58,7 @@ function slimEvidence(b: EvidenceBundle): object {
       encodedBytes: r.encodedBytes,
       decodedBytes: r.decodedBytes,
       mimeType: r.mimeType,
+      phase: r.phase,
       requestHeaders: {},
       responseHeaders: {},
     })),
@@ -79,41 +110,89 @@ async function executeRun(runId: number): Promise<void> {
   type SiteRef = (typeof run.runPages)[number]["page"]["site"];
 
   // Capture each page; keep the FULL bundle in memory for scoring, persist a slim copy.
-  const bySite = new Map<number, { site: SiteRef; bundles: EvidenceBundle[] }>();
+  // Track the RunPage id alongside each bundle so we can write back its per-page score.
+  const bySite = new Map<
+    number,
+    { site: SiteRef; items: { runPageId: number; bundle: EvidenceBundle }[] }
+  >();
   let anyDone = false;
+
+  const fallbackBrowser = otherBrowser(browser);
 
   for (const rp of run.runPages) {
     const site = rp.page.site;
     await prisma.runPage.update({ where: { id: rp.id }, data: { status: "RUNNING" } });
-    try {
-      const bundle = await collect(rp.url, {
-        browser,
-        device,
-        acceptCookies: run.acceptCookies,
-      });
-      anyDone = true;
-      const entry = bySite.get(site.id) ?? { site, bundles: [] };
-      entry.bundles.push(bundle);
-      bySite.set(site.id, entry);
-      await prisma.runPage.update({
-        where: { id: rp.id },
-        data: { status: "DONE", evidenceJson: slimEvidence(bundle) },
-      });
-    } catch (err) {
-      await prisma.runPage.update({
-        where: { id: rp.id },
-        data: { status: "FAILED", error: String(err).slice(0, 2000) },
-      });
+
+    const primaryAttempt = await tryCapture(rp.url, browser, device, run.acceptCookies);
+
+    let bundle: EvidenceBundle | null = null;
+    let pageError: string | null = null;
+
+    if (primaryAttempt.ok) {
+      bundle = primaryAttempt.bundle;
+    } else {
+      // Primary browser was blocked or produced an unhealthy capture — retry once
+      // with the other provider (playwright <-> cloak) before giving up on this page.
+      const fallbackAttempt = await tryCapture(rp.url, fallbackBrowser, device, run.acceptCookies);
+      if (fallbackAttempt.ok) {
+        bundle = fallbackAttempt.bundle;
+        pageError = `Captured with fallback browser "${fallbackBrowser}" — "${browser}" was blocked: ${primaryAttempt.reason}`;
+      } else {
+        pageError =
+          `Failed with both browser providers. [${browser}] ${primaryAttempt.reason} | ` +
+          `[${fallbackBrowser}] ${fallbackAttempt.reason}`;
+        const debugBundle = fallbackAttempt.bundle ?? primaryAttempt.bundle;
+        await prisma.runPage.update({
+          where: { id: rp.id },
+          data: {
+            status: "FAILED",
+            error: pageError.slice(0, 2000),
+            evidenceJson: debugBundle ? slimEvidence(debugBundle) : undefined,
+          },
+        });
+        await prisma.run.update({ where: { id: runId }, data: { donePages: { increment: 1 } } });
+        continue;
+      }
     }
+
+    anyDone = true;
+    const entry = bySite.get(site.id) ?? { site, items: [] };
+    entry.items.push({ runPageId: rp.id, bundle });
+    bySite.set(site.id, entry);
+    await prisma.runPage.update({
+      where: { id: rp.id },
+      data: {
+        status: "DONE",
+        error: pageError?.slice(0, 2000) ?? null,
+        evidenceJson: slimEvidence(bundle),
+      },
+    });
     await prisma.run.update({
       where: { id: runId },
       data: { donePages: { increment: 1 } },
     });
   }
 
-  for (const { site, bundles } of bySite.values()) {
-    if (bundles.length === 0) continue;
+  for (const { site, items } of bySite.values()) {
+    if (items.length === 0) continue;
+    const bundles = items.map((i) => i.bundle);
     const result = scoreSite(site.name, bundles, TOPICS, config);
+
+    // Persist each page's own score. result.pages preserves input (bundles) order.
+    for (let i = 0; i < items.length; i++) {
+      const pr = result.pages[i];
+      if (!pr) continue;
+      await prisma.runPage.update({
+        where: { id: items[i].runPageId },
+        data: {
+          overall: pr.overall,
+          geo: pr.geo,
+          china: pr.china,
+          topicsJson: pr.topics as unknown as object,
+        },
+      });
+    }
+
     await prisma.runSiteScore.upsert({
       where: { runId_siteId: { runId, siteId: site.id } },
       create: {

@@ -2,11 +2,14 @@
 
 <h1>Dashboard</h1>
 
+<%- include('partials/client-filter', { clients, selectedClientId, basePath: '/' }) %>
+
+<% var q = selectedClientId ? ('?client=' + selectedClientId) : ''; %>
 <div class="cards">
-  <a class="card" href="/inventory"><span class="num"><%= counts.sites %></span> sites</a>
-  <a class="card" href="/inventory"><span class="num"><%= counts.pages %></span> pages</a>
-  <a class="card" href="/projects"><span class="num"><%= counts.projects %></span> projets</a>
-  <a class="card" href="/runs"><span class="num"><%= counts.runs %></span> runs</a>
+  <a class="card" href="/inventory<%= q %>"><span class="num"><%= counts.sites %></span> sites</a>
+  <a class="card" href="/inventory<%= q %>"><span class="num"><%= counts.pages %></span> pages</a>
+  <a class="card" href="/projects<%= q %>"><span class="num"><%= counts.projects %></span> projets</a>
+  <a class="card" href="/runs<%= q %>"><span class="num"><%= counts.runs %></span> runs</a>
 </div>
 
 <% if (!latestRun) { %>

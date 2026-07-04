@@ -5,12 +5,15 @@
   <a class="btn" href="/projects/new">+ Nouveau projet</a>
 </div>
 
+<%- include('partials/client-filter', { clients, selectedClientId, basePath: '/projects' }) %>
+
 <table class="grid">
-  <thead><tr><th>Projet</th><th>Pages</th><th>Runs</th><th>Dernier run</th><th></th></tr></thead>
+  <thead><tr><th>Projet</th><th>Client</th><th>Pages</th><th>Runs</th><th>Dernier run</th><th></th></tr></thead>
   <tbody>
     <% projects.forEach(function(p){ %>
       <tr>
         <td><a href="/projects/<%= p.id %>"><%= p.name %></a></td>
+        <td><% if (p.client) { %><%= p.client.name %><% } else { %><span class="muted">—</span><% } %></td>
         <td><%= p._count.pages %></td>
         <td><%= p._count.runs %></td>
         <td><% if (p.runs[0]) { %><a href="/runs/<%= p.runs[0].id %>"><span class="badge b-<%= p.runs[0].status %>"><%= p.runs[0].status %></span></a> <%= fmtDate(p.runs[0].createdAt) %><% } else { %><span class="muted">—</span><% } %></td>
@@ -21,7 +24,7 @@
         </td>
       </tr>
     <% }) %>
-    <% if (!projects.length) { %><tr><td colspan="5" class="muted">Aucun projet. <a href="/projects/new">Créer un projet</a>.</td></tr><% } %>
+    <% if (!projects.length) { %><tr><td colspan="6" class="muted">Aucun projet. <a href="/projects/new">Créer un projet</a>.</td></tr><% } %>
   </tbody>
 </table>
 

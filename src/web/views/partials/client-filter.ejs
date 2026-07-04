@@ -1,0 +1,12 @@
+<%# Reusable client filter dropdown. Params: clients, selectedClientId, basePath %>
+<form method="get" action="<%= basePath %>" class="filter-bar">
+  <label>Client
+    <select name="client" onchange="this.form.submit()">
+      <option value="">Tous les clients</option>
+      <% clients.forEach(function(c){ %>
+        <option value="<%= c.id %>" <%= String(selectedClientId)===String(c.id)?'selected':'' %>><%= c.name %></option>
+      <% }) %>
+    </select>
+  </label>
+  <noscript><button type="submit">Filtrer</button></noscript>
+</form>

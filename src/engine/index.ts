@@ -115,4 +115,4 @@ export function renderCsv(results: SiteResult[]): string {
 }
 
 /* ── re-export score internals for advanced use ───────────────────────────── */
-export { scoreSite as _scoreSiteRaw } from "./score";
+export { scoreSite as _scoreSiteRaw, scorePage } from "./score";
