@@ -23,7 +23,12 @@
   <%- include('partials/run-progress', { run }) %>
 <% } else { %>
 
-  <h2>Classement global</h2>
+  <div class="head-row">
+    <h2>Classement global</h2>
+    <% if (run.status === 'DONE' && ranking.length) { %>
+      <a class="btn" href="/runs/<%= run.id %>/export.csv">⬇ Export CSV</a>
+    <% } %>
+  </div>
   <div class="scroll-x">
   <table class="grid matrix">
     <thead>

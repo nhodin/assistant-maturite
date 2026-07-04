@@ -21,7 +21,10 @@
     projet « <%= latestRun.project.name %> » — <%= fmtDate(latestRun.finishedAt) %>
     · <a href="/runs/<%= latestRun.id %>">voir le détail</a></p>
 
-  <h2>Classement global</h2>
+  <div class="head-row">
+    <h2>Classement global</h2>
+    <a class="btn" href="/runs/<%= latestRun.id %>/export.csv">⬇ Export CSV</a>
+  </div>
   <table class="grid">
     <thead><tr><th>#</th><th>Site</th><th>Catégorie</th><th>Score global</th><th>GEO</th><th>China</th></tr></thead>
     <tbody>

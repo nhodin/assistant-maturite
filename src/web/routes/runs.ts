@@ -2,6 +2,8 @@ import type { FastifyInstance } from "fastify";
 import { prisma } from "../db";
 import { activeRun } from "../runner";
 import { parseClientId, listClients } from "../clients";
+import { renderCsv } from "../../engine/report";
+import type { SiteResult, TopicResult } from "../../core/types";
 
 export async function runRoutes(app: FastifyInstance) {
   app.get("/runs", async (req, reply) => {
@@ -52,6 +54,35 @@ export async function runRoutes(app: FastifyInstance) {
       ranking,
       byCategory,
     });
+  });
+
+  // Per-site maturity results as CSV (same format as the engine report / out/*.csv).
+  app.get("/runs/:id/export.csv", async (req, reply) => {
+    const id = Number((req.params as any).id);
+    const run = await prisma.run.findUnique({
+      where: { id },
+      include: { runSiteScores: { include: { site: true } } },
+    });
+    if (!run) return reply.code(404).send("Run not found");
+
+    const results = [...run.runSiteScores]
+      .sort((a, b) => a.site.name.localeCompare(b.site.name))
+      .map(
+        (s): Pick<SiteResult, "site" | "topics"> => ({
+          site: s.site.name,
+          topics: (s.topicsJson as unknown as TopicResult[]) ?? [],
+        }),
+      );
+
+    const csv = renderCsv(results as SiteResult[]);
+    const date = (run.finishedAt ?? run.createdAt).toISOString().slice(0, 10);
+    return reply
+      .header("Content-Type", "text/csv; charset=utf-8")
+      .header(
+        "Content-Disposition",
+        `attachment; filename="run-${run.id}-${date}-maturity.csv"`,
+      )
+      .send(csv);
   });
 
   // HTMX poll partial: progress while running; once terminal, refresh whole page.
