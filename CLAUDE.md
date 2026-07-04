@@ -110,7 +110,17 @@ data/WEBSITES.csv      # seed source (website;url_hp;url_plp;url_pdp)
     `meta[charset]` starts within the first 1024 bytes of `rawHtml` (UTF-8), per the HTML
     Standard's encoding-sniffing rule — a later charset declaration forces the browser to
     re-parse the whole document from scratch.
-
+- **Detection-logic review** (2026-07, 25 findings — see
+  `docs/2026-07-02-criteria-logic-review.md` for the full list, dispositions and rationale):
+  20 fixes landed across the topic modules and the collector (e.g. `private, max-age>0` no
+  longer fails browser-cache; provider counting by registrable domain with GTM+GA grouped;
+  @font-face families no longer double-counted with URL stems; slider controls scoped to the
+  detected slider markup (`features.sliderHtml`) instead of the whole page; preload controls
+  match the preloaded URL to the LCP/poster/slide target; empty-rawHtml captures rejected by
+  the sanity gate; CPU throttling ×4 on mobile capture; HTTP/2 fallback probe for 103s; CDP
+  document headers preferred over the Node fetch). 2 findings are deferred pending a scoring
+  policy decision — notably "unmeasured ≠ failed" (a third control outcome), which would
+  change score semantics for historical runs.
 - **Webperf monitoring mode** (2026-07): a Project with `mode=MONITORING` is re-run on a
   fixed frequency (DAILY/WEEKLY) by an in-process scheduler (`web/monitor.ts`, started by
   `web/server.ts`, 60 s tick). Each cycle collects CrUX field p75s (LCP/TTFB/INP/CLS/FCP)
@@ -149,7 +159,7 @@ npm run db:studio                         # Prisma Studio (inspect DB)
 
 # Quality
 npm run typecheck                         # tsc --noEmit
-npm test                                  # vitest (292 tests)
+npm test                                  # vitest (354 tests)
 
 # CLI (no DB, writes out/ reports)
 npm run audit -- --browser cloak          # full audit over data/WEBSITES.csv

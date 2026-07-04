@@ -53,6 +53,26 @@ describe("css.order", () => {
     })
     expect(ctrl("css.order").evaluate(e).passed).toBe(false)
   })
+  it("FAIL — stylesheet after script", () => {
+    const e = makeEvidence({
+      head: { order: ["meta[viewport]", "script", "link[stylesheet]"], tags: [] },
+    })
+    expect(ctrl("css.order").evaluate(e).passed).toBe(false)
+  })
+  it("PASS — CSS fully inlined (no stylesheet link in head)", () => {
+    const e = makeEvidence({
+      head: { order: ["meta[charset]", "meta[viewport]", "title"], tags: [] },
+    })
+    const result = ctrl("css.order").evaluate(e)
+    expect(result.passed).toBe(true)
+    expect(result.evidence).toContain("fully inlined")
+  })
+  it("FAIL — meta[viewport] missing", () => {
+    const e = makeEvidence({
+      head: { order: ["meta[charset]", "title"], tags: [] },
+    })
+    expect(ctrl("css.order").evaluate(e).passed).toBe(false)
+  })
 })
 
 describe("css.nosvgfonts", () => {
@@ -111,6 +131,12 @@ describe("css.preload", () => {
   })
   it("FAIL — no Link header", () => {
     expect(ctrl("css.preload").evaluate(makeEvidence()).passed).toBe(false)
+  })
+  it("PASS — Link header with a comma inside the preloaded URL", () => {
+    const e = makeEvidence({
+      mainResponseHeaders: { link: `<https://x.com/a,b.css>; rel=preload; as=style` },
+    })
+    expect(ctrl("css.preload").evaluate(e).passed).toBe(true)
   })
 })
 

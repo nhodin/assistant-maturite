@@ -50,6 +50,33 @@ describe("tp.deferasync", () => {
     expect(evidence).toMatch(/0\/1/)
   })
 
+  it("PASS — sync third-party script in <body> (not head) is off critical path", () => {
+    // Criterion is scoped to the critical path (<head>); a sync 3P script at the
+    // end of <body> doesn't block rendering, so it must NOT fail this control.
+    const e = makeEvidence({
+      finalUrl: "https://example.com/",
+      rawHtml: `<!doctype html><html><head></head><body>
+        <p>content</p>
+        <script src="https://www.googletagmanager.com/gtag/js"></script>
+      </body></html>`,
+    })
+    const { passed, evidence } = ctrl["tp.deferasync"]!.evaluate(e)
+    expect(passed).toBe(true)
+    expect(evidence).toMatch(/no third-party scripts in <head>/)
+  })
+
+  it("FAIL — sync third-party script in <head>", () => {
+    const e = makeEvidence({
+      finalUrl: "https://example.com/",
+      rawHtml: `<!doctype html><html><head>
+        <script src="https://www.googletagmanager.com/gtag/js"></script>
+      </head><body></body></html>`,
+    })
+    const { passed, evidence } = ctrl["tp.deferasync"]!.evaluate(e)
+    expect(passed).toBe(false)
+    expect(evidence).toMatch(/0\/1/)
+  })
+
   it("PASS — type=module counts as deferred", () => {
     const e = makeEvidence({
       finalUrl: "https://example.com/",
@@ -224,15 +251,60 @@ describe("tp.limit", () => {
     expect(evidence).toMatch(/session-replay/)
   })
 
-  it("FAIL — 2 analytics/tagmgr providers", () => {
-    // Simulate 2 distinct analytics-tagmgr providers by using GA + GTM from different
-    // subdomains (both match analytics-tagmgr). In practice same company but
-    // our heuristic groups by host.
+  it("PASS — plain GA4 site: gtm + ga + regional shard collapse to 1 provider", () => {
+    // Regression for the systematic false-fail: GTM delivers GA4 and beacons go to
+    // google-analytics.com plus regional shards. All three are ONE analytics
+    // provider (vendor-aliased registrable domain), not 2+.
     const e = makeEvidence({
       finalUrl: "https://example.com/",
       requests: [
         {
-          url: "https://www.google-analytics.com/analytics.js",
+          url: "https://www.googletagmanager.com/gtag/js?id=G-XXXX",
+          resourceType: "script",
+          status: 200,
+          fromCache: false,
+          encodedBytes: 50000,
+          decodedBytes: 100000,
+          requestHeaders: {},
+          responseHeaders: {},
+          mimeType: "text/javascript",
+        },
+        {
+          url: "https://www.google-analytics.com/g/collect",
+          resourceType: "xhr",
+          status: 204,
+          fromCache: false,
+          encodedBytes: 0,
+          decodedBytes: 0,
+          requestHeaders: {},
+          responseHeaders: {},
+          mimeType: "",
+        },
+        {
+          url: "https://region1.google-analytics.com/g/collect",
+          resourceType: "xhr",
+          status: 204,
+          fromCache: false,
+          encodedBytes: 0,
+          decodedBytes: 0,
+          requestHeaders: {},
+          responseHeaders: {},
+          mimeType: "",
+        },
+      ],
+    })
+    const { passed, evidence } = ctrl["tp.limit"]!.evaluate(e)
+    expect(passed).toBe(true)
+    expect(evidence).toMatch(/no category exceeds 1/)
+  })
+
+  it("FAIL — 2 genuinely different chat vendors (intercom + drift)", () => {
+    // intercom.io and drift.com are distinct vendors, both "chat" → 2 providers.
+    const e = makeEvidence({
+      finalUrl: "https://example.com/",
+      requests: [
+        {
+          url: "https://widget.intercom.io/widget/abc123",
           resourceType: "script",
           status: 200,
           fromCache: false,
@@ -243,7 +315,7 @@ describe("tp.limit", () => {
           mimeType: "text/javascript",
         },
         {
-          url: "https://www.googletagmanager.com/gtag/js",
+          url: "https://js.drift.com/include/drift.js",
           resourceType: "script",
           status: 200,
           fromCache: false,
@@ -256,9 +328,11 @@ describe("tp.limit", () => {
       ],
     })
     const { passed, evidence } = ctrl["tp.limit"]!.evaluate(e)
-    // Both are "analytics-tagmgr" — 2 distinct hosts → FAIL
     expect(passed).toBe(false)
-    expect(evidence).toMatch(/analytics-tagmgr/)
+    expect(evidence).toMatch(/chat/)
+    // Listed by registrable domain
+    expect(evidence).toMatch(/intercom\.io/)
+    expect(evidence).toMatch(/drift\.com/)
   })
 
   it("PASS — no requests", () => {

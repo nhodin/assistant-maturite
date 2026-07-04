@@ -39,7 +39,10 @@ const deferControl: Control = {
   topicId: 6,
   label: "defer on first-party JS",
   description:
-    "Majority (>50%) of first-party <script src> in raw HTML have defer or type=module.",
+    "Majority (>50%) of first-party <script src> in raw HTML load non-blocking. " +
+    "defer, async and type=module are ALL accepted as non-blocking loading — this " +
+    "deviates slightly from the criterion's literal \"defer\" wording, since async and " +
+    "ES modules also avoid parser-blocking and are defensible modern equivalents.",
   defaultPoints: 30,
   evaluate(e: EvidenceBundle) {
     const scripts = parseTags(e.rawHtml, "script")

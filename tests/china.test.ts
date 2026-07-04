@@ -47,6 +47,40 @@ describe("china.nogfwcritical", () => {
     })
     expect(ctrl("china.nogfwcritical").evaluate(e).passed).toBe(false)
   })
+  it("FAIL — @import of fonts.googleapis.com in inline <style>", () => {
+    const e = makeEvidence({
+      rawHtml: `<head><style>@import url(https://fonts.googleapis.com/css?family=Roboto);</style></head>`,
+    })
+    const r = ctrl("china.nogfwcritical").evaluate(e)
+    expect(r.passed).toBe(false)
+    expect(r.evidence).toContain("fonts.googleapis.com")
+  })
+  it("FAIL — url() of fonts.gstatic.com in inline <style>", () => {
+    const e = makeEvidence({
+      rawHtml: `<head><style>@font-face{src:url('https://fonts.gstatic.com/s/roboto.woff2')}</style></head>`,
+    })
+    expect(ctrl("china.nogfwcritical").evaluate(e).passed).toBe(false)
+  })
+  it("FAIL — Link header preload of a gstatic URL", () => {
+    const e = makeEvidence({
+      rawHtml: `<head></head>`,
+      mainResponseHeaders: {
+        link: "<https://fonts.gstatic.com/s/roboto.woff2>; rel=preload; as=font",
+      },
+    })
+    const r = ctrl("china.nogfwcritical").evaluate(e)
+    expect(r.passed).toBe(false)
+    expect(r.evidence).toContain("fonts.gstatic.com")
+  })
+  it("PASS — clean inline <style> + first-party Link preload", () => {
+    const e = makeEvidence({
+      rawHtml: `<head><style>@font-face{src:url('/fonts/local.woff2')}</style></head>`,
+      mainResponseHeaders: {
+        link: "</app.css>; rel=preload; as=style",
+      },
+    })
+    expect(ctrl("china.nogfwcritical").evaluate(e).passed).toBe(true)
+  })
 })
 
 describe("china.cdnchinapop", () => {

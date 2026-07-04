@@ -57,7 +57,7 @@ const orderControl: Control = {
   id: "css.order",
   topicId: 7,
   label: "CSS at top of head after meta[viewport]",
-  description: "First link[stylesheet] token appears after meta[viewport] and before the first script token in head.order.",
+  description: "When an external stylesheet link exists in <head>, its first token appears after meta[viewport] and before the first script token in head.order. When CSS is fully inlined (no link[stylesheet] in <head>), the ordering criterion is satisfied.",
   defaultPoints: 25,
   evaluate(e: EvidenceBundle) {
     const order = e.head.order
@@ -73,8 +73,8 @@ const orderControl: Control = {
     }
     if (firstCssIdx === -1) {
       return {
-        passed: false,
-        evidence: `No link[stylesheet] found in head.order: [${order.join(", ")}]`,
+        passed: true,
+        evidence: `no external stylesheet in <head> — CSS fully inlined, ordering criterion satisfied. head.order: [${order.join(", ")}]`,
       }
     }
     const afterViewport = firstCssIdx > viewportIdx
@@ -142,7 +142,9 @@ const criticalInlineControl: Control = {
 }
 
 function findCssPreloadDirective(linkHeader: string): string | undefined {
-  return linkHeader.split(",").find((d) => {
+  // Split only at a comma that starts the next link-value ("<…"), so a comma
+  // inside a URL (e.g. <https://x.com/a,b.css>) does not fragment the directive.
+  return linkHeader.split(/,(?=\s*<)/).find((d) => {
     const hasPreload = /rel\s*=\s*["']?preload["']?/i.test(d)
     const hasStyle = /as\s*=\s*["']?style["']?/i.test(d)
     return hasPreload && hasStyle

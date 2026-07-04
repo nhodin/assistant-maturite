@@ -102,12 +102,63 @@ describe("fonts.max2", () => {
     const e = makeEvidence({ fonts: [{ family: "A" }, { family: "B" }, { family: "C" }] })
     expect(ctrl("fonts.max2").evaluate(e).passed).toBe(false)
   })
+  it("PASS — same font as @font-face family AND request stem counts once", () => {
+    // "Louis Vuitton Web" family + louisvuittonweb-regular.woff2 stem must not
+    // be counted as 2 distinct families. Two real families → still passes at 2.
+    const e = makeEvidence({
+      fonts: [{ family: "Louis Vuitton Web" }, { family: "LV Serif" }],
+      requests: [
+        fontReq("https://example.com/fonts/louisvuittonweb-regular.woff2"),
+        fontReq("https://example.com/fonts/lvserif-bold.woff2"),
+      ],
+    })
+    const res = ctrl("fonts.max2").evaluate(e)
+    expect(res.passed).toBe(true)
+    expect(res.evidence).toMatch(/@font-face families/)
+  })
+  it("FAIL — 3 @font-face families even with matching request stems", () => {
+    const e = makeEvidence({
+      fonts: [{ family: "A" }, { family: "B" }, { family: "C" }],
+      requests: [
+        fontReq("https://example.com/a-regular.woff2"),
+        fontReq("https://example.com/b-regular.woff2"),
+        fontReq("https://example.com/c-regular.woff2"),
+      ],
+    })
+    expect(ctrl("fonts.max2").evaluate(e).passed).toBe(false)
+  })
+  it("PASS — falls back to URL stems when no @font-face family captured", () => {
+    // Multi-token weight/style stems collapse: foo-bold-italic + foo-regular
+    // are one family; bar-700 is a second. → 2 families, passes.
+    const e = makeEvidence({
+      requests: [
+        fontReq("https://example.com/foo-bold-italic.woff2"),
+        fontReq("https://example.com/foo-regular.woff2"),
+        fontReq("https://example.com/bar-700.woff2"),
+      ],
+    })
+    const res = ctrl("fonts.max2").evaluate(e)
+    expect(res.passed).toBe(true)
+    expect(res.evidence).toMatch(/URL stems/)
+  })
 })
 
 describe("fonts.fallback", () => {
   it("PASS — size-adjust present on @font-face", () => {
     const e = makeEvidence({ fonts: [{ family: "A", sizeAdjust: "105%" }] })
     expect(ctrl("fonts.fallback").evaluate(e).passed).toBe(true)
+  })
+  it("PASS — ascent-override only (external CSS metric)", () => {
+    const e = makeEvidence({ fonts: [{ family: "A", ascentOverride: "90%" }] })
+    expect(ctrl("fonts.fallback").evaluate(e).passed).toBe(true)
+  })
+  it("PASS — local() fallback source only, no size settings", () => {
+    const e = makeEvidence({
+      fonts: [{ family: "A", src: 'local("Arial"), url(/a.woff2) format("woff2")' }],
+    })
+    const res = ctrl("fonts.fallback").evaluate(e)
+    expect(res.passed).toBe(true)
+    expect(res.evidence).toMatch(/local/)
   })
   it("FAIL — no fallback metrics", () => {
     expect(ctrl("fonts.fallback").evaluate(makeEvidence()).passed).toBe(false)
@@ -121,5 +172,23 @@ describe("fonts.subsetting", () => {
   })
   it("FAIL — no subsetting", () => {
     expect(ctrl("fonts.subsetting").evaluate(makeEvidence()).passed).toBe(false)
+  })
+  it("PASS — delimited locale/subset token in URL (latin-ext)", () => {
+    const e = makeEvidence({
+      requests: [
+        fontReq("https://example.com/noto-latin-ext.woff2"),
+        fontReq("https://example.com/noto-cyrillic.woff2"),
+      ],
+    })
+    expect(ctrl("fonts.subsetting").evaluate(e).passed).toBe(true)
+  })
+  it("FAIL — 'ext' substring in filename must not match (next.woff2)", () => {
+    const e = makeEvidence({
+      requests: [
+        fontReq("https://example.com/next.woff2"),
+        fontReq("https://example.com/text-icons.woff2"),
+      ],
+    })
+    expect(ctrl("fonts.subsetting").evaluate(e).passed).toBe(false)
   })
 })

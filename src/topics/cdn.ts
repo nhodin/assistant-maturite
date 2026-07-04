@@ -173,7 +173,10 @@ const zstdControl: Control = {
   id: "cdn.zstd",
   topicId: 10,
   label: "Zstandard compression",
-  description: "Main HTML or a same-domain CSS/JS response uses content-encoding: zstd.",
+  description:
+    "Main HTML or a same-domain CSS/JS response uses content-encoding: zstd. " +
+    "Note: main-HTML zstd is only observable if the capturing client advertised zstd in " +
+    "its accept-encoding request header (collector-side concern, handled separately).",
   defaultPoints: 10,
   evaluate(e) {
     // Check main HTML first
@@ -215,14 +218,18 @@ const alpnControl: Control = {
   id: "cdn.alpn",
   topicId: 10,
   label: "ALPN negotiated",
-  description: "network.alpn is a non-empty string.",
+  description:
+    "network.alpn is a non-empty string. ALPN is negotiated by virtually all modern " +
+    "TLS stacks — this criterion verifies baseline conformance only (a near-free 5 pts).",
   defaultPoints: 5,
   evaluate(e) {
     const alpn = e.network.alpn
     const passed = typeof alpn === "string" && alpn.length > 0
     return {
       passed,
-      evidence: passed ? `ALPN negotiated: ${alpn}` : `ALPN not set (network.alpn = ${String(alpn)})`,
+      evidence: passed
+        ? `ALPN negotiated: ${alpn} (baseline conformance — ALPN is negotiated by virtually all modern TLS stacks)`
+        : `ALPN not set (network.alpn = ${String(alpn)})`,
     }
   },
 }

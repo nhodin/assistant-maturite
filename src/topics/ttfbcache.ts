@@ -31,7 +31,7 @@ const cdnCacheControl: Control = {
   topicId: 5,
   label: "CDN cache on HTML pages",
   description:
-    "Main response indicates edge caching: cf-cache-status/x-cache/x-vercel-cache HIT, age > 0, or s-maxage > 0.",
+    "Main response indicates edge caching: cf-cache-status/x-cache/x-vercel-cache HIT, age > 0, or s-maxage > 0. Weakest fallback: cache-control max-age > 0 without private/no-store/no-cache (a CDN may cache it — no direct edge-hit evidence).",
   defaultPoints: 35,
   evaluate(e) {
     const h = e.mainResponseHeaders
@@ -71,6 +71,22 @@ const cdnCacheControl: Control = {
       }
     }
 
+    // 6. Weakest fallback — cache-control max-age > 0 without private/no-store/no-cache.
+    //    The written criterion accepts "Cache-Control with max-age/s-max-age > 0"; a public
+    //    max-age lets a shared cache (CDN) store the response, but we have no direct edge-hit.
+    if (!/\bprivate\b/i.test(cc) && !/\bno-store\b/i.test(cc) && !/\bno-cache\b/i.test(cc)) {
+      const maxMatch = /\bmax-age\s*=\s*(\d+)/i.exec(cc)
+      if (maxMatch) {
+        const maxVal = parseInt(maxMatch[1]!, 10)
+        if (maxVal > 0) {
+          return {
+            passed: true,
+            evidence: `cache-control: ${cc} (max-age=${maxVal}>0 without private — a CDN may cache this; no direct edge-hit evidence, weak signal)`,
+          }
+        }
+      }
+    }
+
     return {
       passed: false,
       evidence: cc
@@ -86,7 +102,7 @@ const browserCacheControl: Control = {
   topicId: 5,
   label: "Browser cache for HTML pages",
   description:
-    "cache-control max-age > 0 and not blocked by no-store, no-cache, or private.",
+    "cache-control max-age > 0 and not blocked by no-store or no-cache. `private` does NOT block browser caching (it only forbids shared/CDN caches), so `private, max-age=N` passes — the correct pattern for personalized HTML.",
   defaultPoints: 30,
   evaluate(e) {
     const cc = header(e.mainResponseHeaders, "cache-control") ?? ""
@@ -101,9 +117,9 @@ const browserCacheControl: Control = {
     if (/\bno-cache\b/i.test(cc)) {
       return { passed: false, evidence: `cache-control: ${cc} (no-cache requires revalidation)` }
     }
-    if (/\bprivate\b/i.test(cc)) {
-      return { passed: false, evidence: `cache-control: ${cc} (private — browser will cache but CDN won't; criterion checks max-age)` }
-    }
+
+    // Note: `private` is NOT a blocker — it only forbids shared/CDN caches; the browser
+    // (a private cache) still stores the response, so `private, max-age=N` is a valid HTML pattern.
 
     // Extract max-age (not s-maxage — browser only reads max-age)
     const maxMatch = /\bmax-age\s*=\s*(\d+)/i.exec(cc)
@@ -112,7 +128,10 @@ const browserCacheControl: Control = {
     }
     const maxAge = parseInt(maxMatch[1]!, 10)
     if (maxAge > 0) {
-      return { passed: true, evidence: `cache-control: ${cc} (max-age=${maxAge})` }
+      const note = /\bprivate\b/i.test(cc)
+        ? " — private does not block browser caching, only shared/CDN caches"
+        : ""
+      return { passed: true, evidence: `cache-control: ${cc} (max-age=${maxAge}${note})` }
     }
     return { passed: false, evidence: `cache-control: ${cc} (max-age=0 — browser won't cache)` }
   },
@@ -201,7 +220,7 @@ const bfcacheControl: Control = {
   topicId: 5,
   label: "bfcache eligible (no unload handlers)",
   description:
-    "Neither rawHtml nor renderedHtml contains onunload or addEventListener('unload'/'beforeunload').",
+    "Low-confidence heuristic: greps inline HTML (rawHtml/renderedHtml) for onunload or addEventListener('unload'/'beforeunload'). Unload handlers overwhelmingly live in external JS bundles, which are NOT scanned — so a pass only means no inline handler was found.",
   defaultPoints: 10,
   evaluate(e) {
     const pattern = /onunload|addEventListener\(\s*['"](unload|beforeunload)/i
@@ -222,7 +241,7 @@ const bfcacheControl: Control = {
     return {
       passed: true,
       evidence:
-        "No onunload or addEventListener(unload/beforeunload) found in raw or rendered HTML — bfcache likely eligible",
+        "No unload handler in inline HTML — external scripts not scanned; low-confidence pass",
     }
   },
 }

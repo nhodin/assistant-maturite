@@ -108,7 +108,10 @@ const headOrderControl: Control = {
 /**
  * 25 pts — Limit critical resources (total size)
  *
- * Sums encodedBytes of all stylesheet + script requests.
+ * Sums encodedBytes of stylesheet + script requests that are part of the
+ * critical path — i.e. excluding requests tagged phase:"interaction"
+ * (event-deferred loads such as consent-triggered tag-manager payloads). A
+ * request with no phase field means "load" and is kept.
  * PASS if total < 600_000 bytes (≈586 KB).
  */
 const limitResourcesControl: Control = {
@@ -116,17 +119,19 @@ const limitResourcesControl: Control = {
   topicId: 8,
   label: "Limit critical resource total size (<600 KB)",
   description:
-    "Sum of encoded bytes for all stylesheet + script requests is < 600 000 bytes.",
+    "Sum of encoded bytes for stylesheet + script requests is < 600 000 bytes, approximating critical resources by excluding interaction-deferred (phase=\"interaction\") requests.",
   defaultPoints: 25,
   evaluate(e) {
-    const resources = requestsOfType(e.requests, "stylesheet", "script")
-    const totalBytes = resources.reduce((sum, r) => sum + r.encodedBytes, 0)
+    const all = requestsOfType(e.requests, "stylesheet", "script")
+    const critical = all.filter((r) => r.phase !== "interaction")
+    const excluded = all.length - critical.length
+    const totalBytes = critical.reduce((sum, r) => sum + r.encodedBytes, 0)
     const totalKb = Math.round(totalBytes / 1024)
     const passed = totalBytes < 600_000
 
     return {
       passed,
-      evidence: `Total stylesheet + script transferred: ${totalKb} KB (${resources.length} resources) — threshold 600 KB`,
+      evidence: `Total critical stylesheet + script transferred: ${totalKb} KB (${critical.length} resources; ${excluded} interaction-phase resource(s) excluded) — threshold 600 KB`,
     }
   },
 }
@@ -190,8 +195,10 @@ const preloadHeaderControl: Control = {
     const linkHeader = header(e.mainResponseHeaders, "link") ?? ""
 
     if (/rel\s*=\s*["']?preload["']?/i.test(linkHeader)) {
-      // Grab the first preload directive as evidence snippet
-      const directives = linkHeader.split(",")
+      // Grab the first preload directive as evidence snippet. Split only at a
+      // comma that starts the next link-value ("<…"), so a comma inside a URL
+      // (e.g. <https://x.com/a,b.css>) does not fragment the directive.
+      const directives = linkHeader.split(/,(?=\s*<)/)
       const preloadDirective = directives.find((d) => /rel\s*=\s*["']?preload["']?/i.test(d))
       const snippet = (preloadDirective ?? linkHeader).trim().substring(0, 140)
       return {

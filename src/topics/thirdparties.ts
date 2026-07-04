@@ -13,6 +13,7 @@ import {
   headSlice,
   isThirdParty,
   host,
+  registrableDomain,
 } from "./util"
 
 // ── third-party category map ──────────────────────────────────────────────────
@@ -59,6 +60,24 @@ function categoryForHost(hostname: string): string | null {
   return null
 }
 
+/**
+ * Provider aliasing: domains that belong to ONE vendor's single product stack
+ * should count as a single provider, not several. Keyed by registrable domain.
+ * Kept deliberately small/explicit — only fold together domains that are truly
+ * the same usage from the same vendor.
+ *   - googletagmanager.com is just the delivery mechanism for GA4, whose beacons
+ *     go to google-analytics.com → one analytics provider, not two.
+ */
+const PROVIDER_ALIASES: Record<string, string> = {
+  "googletagmanager.com": "google-analytics",
+  "google-analytics.com": "google-analytics",
+}
+
+/** Collapse a registrable domain to its vendor/provider identity. */
+function providerFor(registrable: string): string {
+  return PROVIDER_ALIASES[registrable] ?? registrable
+}
+
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 /** True if a script tag has defer, async, or type="module". */
@@ -82,10 +101,14 @@ const deferAsyncControl: Control = {
   topicId: 4,
   label: "defer/async on third-party JS",
   description:
-    "All <script src> tags loading third-party JS must have defer, async, or type=module.",
+    "Third-party <script src> tags on the critical path (in <head>) must have defer, async, or type=module.",
   defaultPoints: 30,
   evaluate(e: EvidenceBundle) {
-    const scripts = parseTags(e.rawHtml, "script")
+    // Criterion is "defer/async on third-party JS *on critical path*". A sync
+    // third-party script at the end of <body> doesn't block rendering, so scope
+    // the scan to <head> only (like tp.selfhost).
+    const head = headSlice(e.rawHtml)
+    const scripts = parseTags(head, "script")
     // Only external scripts with a src attribute
     const externalScripts = scripts.filter((s) => s.attrs["src"] !== undefined)
     // Filter to third-party only (root-relative → first-party)
@@ -98,7 +121,7 @@ const deferAsyncControl: Control = {
     if (tpScripts.length === 0) {
       return {
         passed: true,
-        evidence: "no third-party scripts in initial HTML",
+        evidence: "no third-party scripts in <head>",
       }
     }
 
@@ -106,7 +129,7 @@ const deferAsyncControl: Control = {
     const passed = withDefer.length === tpScripts.length
     return {
       passed,
-      evidence: `${withDefer.length}/${tpScripts.length} third-party scripts use defer/async`,
+      evidence: `${withDefer.length}/${tpScripts.length} third-party scripts in <head> use defer/async`,
     }
   },
 }
@@ -187,7 +210,7 @@ const limitControl: Control = {
   topicId: 4,
   label: "Max 1 provider per third-party category (heuristic)",
   description:
-    "For all third-party request hosts, no usage category has more than 1 distinct provider domain. Heuristic based on domain-substring matching.",
+    "For all third-party request hosts, no usage category has more than 1 distinct provider (registrable domain, vendor-aliased) per usage category. Heuristic based on domain-substring matching.",
   defaultPoints: 15,
   evaluate(e: EvidenceBundle) {
     // Collect all distinct third-party hostnames from requests
@@ -199,14 +222,17 @@ const limitControl: Control = {
       }
     }
 
-    // Group hosts by category, track distinct provider domains per category
-    // A "provider" = registrable domain (we just use the matched category key)
+    // Group by category, tracking distinct providers. A "provider" is the
+    // vendor-aliased *registrable domain* (not the raw hostname) so regional
+    // shards (region1.google-analytics.com) and same-vendor delivery domains
+    // (googletagmanager.com → GA4) collapse to a single provider.
     const categoryToProviders = new Map<string, Set<string>>()
     for (const h of tpHosts) {
       const cat = categoryForHost(h)
       if (!cat) continue
+      const provider = providerFor(registrableDomain(h))
       if (!categoryToProviders.has(cat)) categoryToProviders.set(cat, new Set())
-      categoryToProviders.get(cat)!.add(h)
+      categoryToProviders.get(cat)!.add(provider)
     }
 
     const violating: string[] = []

@@ -23,10 +23,24 @@ function req(overrides: Partial<NetworkRequest> = {}): NetworkRequest {
   }
 }
 
+// Non-empty main-document headers, so tests exercise a code path *past* the new
+// empty-rawHtml / empty-headers gates unless they're deliberately testing those.
+const HEADERS = { "content-type": "text/html; charset=utf-8" }
+
+// Filler that pushes rawHtml past the 500-byte "near-empty" threshold. Kept as an
+// HTML comment so it doesn't add <img>/<title>/etc. markup the checks look at.
+const FILLER = `<!-- ${"padding ".repeat(80)} -->`
+
+/** Build a rawHtml document that clears the near-empty gate, preserving `inner`. */
+function html(inner: string): string {
+  return `<!doctype html><html><head></head><body>${inner}${FILLER}</body></html>`
+}
+
 describe("assessCaptureHealth", () => {
   it("OK — normal page with assets loaded", () => {
     const e = makeEvidence({
-      rawHtml: "<!doctype html><title>Real product page</title><body><img><img><img><img><img></body>",
+      rawHtml: html("<title>Real product page</title><img><img><img><img><img>"),
+      mainResponseHeaders: HEADERS,
       requests: [
         req({ resourceType: "document", status: 200 }),
         req({ resourceType: "image", status: 200, url: "https://example.com/a.jpg" }),
@@ -38,8 +52,34 @@ describe("assessCaptureHealth", () => {
     expect(health.reason).toBeNull()
   })
 
+  it("rejects — raw HTML fetch failed / near-empty document", () => {
+    const e = makeEvidence({
+      rawHtml: "",
+      mainResponseHeaders: HEADERS,
+      requests: [req({ resourceType: "document", status: 200 })],
+    })
+    const health = assessCaptureHealth(e)
+    expect(health.ok).toBe(false)
+    expect(health.reason).toMatch(/raw.?HTML/i)
+    expect(health.reason).toMatch(/< 500|near-empty|empty/i)
+  })
+
+  it("rejects — no main-document response headers captured", () => {
+    const e = makeEvidence({
+      rawHtml: html("<title>Real product page</title>"),
+      mainResponseHeaders: {},
+      requests: [req({ resourceType: "document", status: 200 })],
+    })
+    const health = assessCaptureHealth(e)
+    expect(health.ok).toBe(false)
+    expect(health.reason).toMatch(/response headers/i)
+    expect(health.reason).toMatch(/header-based/i)
+  })
+
   it("rejects — document request returns 403 mid-capture", () => {
     const e = makeEvidence({
+      rawHtml: html("<title>Real product page</title>"),
+      mainResponseHeaders: HEADERS,
       requests: [
         req({ resourceType: "document", status: 200 }),
         req({
@@ -59,6 +99,8 @@ describe("assessCaptureHealth", () => {
 
   it("rejects — document request returns 404", () => {
     const e = makeEvidence({
+      rawHtml: html("<title>Real product page</title>"),
+      mainResponseHeaders: HEADERS,
       requests: [req({ resourceType: "document", status: 404 })],
     })
     const health = assessCaptureHealth(e)
@@ -68,7 +110,8 @@ describe("assessCaptureHealth", () => {
 
   it("rejects — title matches a known bot-challenge pattern", () => {
     const e = makeEvidence({
-      rawHtml: "<!doctype html><title>Pardon Our Interruption...</title><body></body>",
+      rawHtml: html("<title>Pardon Our Interruption...</title>"),
+      mainResponseHeaders: HEADERS,
       requests: [req({ resourceType: "document", status: 200 })],
     })
     const health = assessCaptureHealth(e)
@@ -79,7 +122,8 @@ describe("assessCaptureHealth", () => {
 
   it("rejects — title matches a Cloudflare challenge page", () => {
     const e = makeEvidence({
-      rawHtml: "<!doctype html><title>Just a moment...</title><body></body>",
+      rawHtml: html("<title>Just a moment...</title>"),
+      mainResponseHeaders: HEADERS,
       requests: [req({ resourceType: "document", status: 200 })],
     })
     expect(assessCaptureHealth(e).ok).toBe(false)
@@ -87,9 +131,8 @@ describe("assessCaptureHealth", () => {
 
   it("rejects — raw HTML has images but browser captured none", () => {
     const e = makeEvidence({
-      rawHtml:
-        "<!doctype html><title>Some Product</title><body>" +
-        "<img><img><img><img><img><img></body>",
+      rawHtml: html("<title>Some Product</title><img><img><img><img><img><img>"),
+      mainResponseHeaders: HEADERS,
       requests: [req({ resourceType: "document", status: 200 })],
     })
     const health = assessCaptureHealth(e)
@@ -100,7 +143,8 @@ describe("assessCaptureHealth", () => {
 
   it("does not flag a legit asset-light page (few <img> tags)", () => {
     const e = makeEvidence({
-      rawHtml: "<!doctype html><title>Text-only article</title><body><img></body>",
+      rawHtml: html("<title>Text-only article</title><img>"),
+      mainResponseHeaders: HEADERS,
       requests: [req({ resourceType: "document", status: 200 })],
     })
     expect(assessCaptureHealth(e).ok).toBe(true)
@@ -108,7 +152,8 @@ describe("assessCaptureHealth", () => {
 
   it("does not flag a page with images loaded via script requests only (SPA)", () => {
     const e = makeEvidence({
-      rawHtml: "<!doctype html><title>SPA Product</title><body><img><img><img><img><img></body>",
+      rawHtml: html("<title>SPA Product</title><img><img><img><img><img>"),
+      mainResponseHeaders: HEADERS,
       requests: [
         req({ resourceType: "document", status: 200 }),
         req({ resourceType: "script", status: 200, url: "https://example.com/app.js" }),

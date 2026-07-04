@@ -46,6 +46,31 @@ function describeRequestCounts(requests: EvidenceBundle["requests"]): string {
  * scoring criterion — this gates whether the bundle is scored at all.
  */
 export function assessCaptureHealth(bundle: EvidenceBundle): CaptureHealth {
+  // The separate raw-HTML fetch can fail (bot-block at the HTTP layer, timeout,
+  // reset) and the collector then continues with rawHtml="" and
+  // mainResponseHeaders={}. Nothing below catches that (no 4xx doc, empty title,
+  // imgTagCount=0), so every markup/header-based control would score garbage and
+  // some pass vacuously. Reject such captures up front.
+  if (bundle.rawHtml.trim().length < 500) {
+    return {
+      ok: false,
+      reason:
+        `Empty raw HTML: the raw-HTML fetch failed or returned a near-empty document ` +
+        `(${bundle.rawHtml.trim().length} non-whitespace bytes, < 500) — likely bot-blocked or ` +
+        `reset at the HTTP layer, so markup-based criteria (head order, image/CSS/JS markup, ` +
+        `inline styles, SSR content) can't be evaluated.`,
+    };
+  }
+  if (Object.keys(bundle.mainResponseHeaders).length === 0) {
+    return {
+      ok: false,
+      reason:
+        `No response headers: the raw-HTML fetch captured 0 main-document response headers — likely ` +
+        `bot-blocked or reset at the HTTP layer, so header-based criteria (cache/TTL, CDN, ` +
+        `critical-path/early-hint headers) can't be evaluated.`,
+    };
+  }
+
   // A legitimate document response is never 4xx/5xx. Any such request (initial nav
   // or a later reload during the interaction probe) means the browser session was
   // blocked or the URL is broken — never a real render.

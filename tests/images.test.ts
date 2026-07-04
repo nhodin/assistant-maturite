@@ -36,6 +36,24 @@ describe("images.lazyload", () => {
     expect(result.passed).toBe(true)
     expect(result.evidence).toContain("2")
   })
+
+  it("passes on JS-lazyload pattern (data-src with no eager src)", () => {
+    const e = makeEvidence({ rawHtml: '<img data-src="hero.jpg" class="lazyload">' })
+    const result = ctrl("images.lazyload").evaluate(e)
+    expect(result.passed).toBe(true)
+    expect(result.evidence).toContain("data-src/data-lazy")
+  })
+
+  it("passes on data-lazy attribute with no eager src", () => {
+    const e = makeEvidence({ rawHtml: '<img data-lazy="hero.jpg">' })
+    expect(ctrl("images.lazyload").evaluate(e).passed).toBe(true)
+  })
+
+  it("does NOT count data-src when an eager src is also present", () => {
+    const e = makeEvidence({ rawHtml: '<img src="placeholder.jpg" data-src="hero.jpg">' })
+    const result = ctrl("images.lazyload").evaluate(e)
+    expect(result.passed).toBe(false)
+  })
 })
 
 // ── images.modernformat ───────────────────────────────────────────────────────
@@ -84,6 +102,35 @@ describe("images.modernformat", () => {
     expect(result.passed).toBe(false)
     expect(result.evidence).toMatch(/no image/i)
   })
+
+  it("excludes SVGs and tiny pixels, flipping the ratio to a pass", () => {
+    // Raw counts: 1 webp / 3 total = 33% (would fail). After excluding the 2 SVGs
+    // and the sub-1KB tracking pixel, the set is a single webp = 100% (pass).
+    const e = makeEvidence({
+      requests: [
+        { url: "hero.webp", resourceType: "image", status: 200, fromCache: false, encodedBytes: 40000, decodedBytes: 60000, requestHeaders: {}, responseHeaders: {}, mimeType: "image/webp" },
+        { url: "icon.svg", resourceType: "image", status: 200, fromCache: false, encodedBytes: 3000, decodedBytes: 3000, requestHeaders: {}, responseHeaders: {}, mimeType: "image/svg+xml" },
+        { url: "logo.svg", resourceType: "image", status: 200, fromCache: false, encodedBytes: 2000, decodedBytes: 2000, requestHeaders: {}, responseHeaders: {}, mimeType: "image/svg+xml" },
+        { url: "px.gif", resourceType: "image", status: 200, fromCache: false, encodedBytes: 43, decodedBytes: 43, requestHeaders: {}, responseHeaders: {}, mimeType: "image/gif" },
+      ],
+    })
+    const result = ctrl("images.modernformat").evaluate(e)
+    expect(result.passed).toBe(true)
+    expect(result.evidence).toContain("1/1")
+    expect(result.evidence).toContain("content image")
+  })
+
+  it("falls back to the unfiltered set when every image is svg/tiny", () => {
+    const e = makeEvidence({
+      requests: [
+        { url: "a.svg", resourceType: "image", status: 200, fromCache: false, encodedBytes: 2000, decodedBytes: 2000, requestHeaders: {}, responseHeaders: {}, mimeType: "image/svg+xml" },
+        { url: "px.gif", resourceType: "image", status: 200, fromCache: false, encodedBytes: 43, decodedBytes: 43, requestHeaders: {}, responseHeaders: {}, mimeType: "image/gif" },
+      ],
+    })
+    const result = ctrl("images.modernformat").evaluate(e)
+    expect(result.passed).toBe(false)
+    expect(result.evidence).toMatch(/fallback/i)
+  })
 })
 
 // ── images.lcppreload ─────────────────────────────────────────────────────────
@@ -120,6 +167,36 @@ describe("images.lcppreload", () => {
     const e = makeEvidence({ perf: { lcpElement: null } })
     const result = ctrl("images.lcppreload").evaluate(e)
     expect(result.passed).toBe(false)
+  })
+
+  it("matches LCP image loosely by filename despite CDN/query variance", () => {
+    const e = makeEvidence({
+      rawHtml: '<html><head><link rel="preload" as="image" href="/cdn/x/hero.jpg?w=800" fetchpriority="high"></head></html>',
+      perf: { lcpElement: { tagName: "IMG", src: "https://img.example.com/hero.jpg" } },
+    })
+    const result = ctrl("images.lcppreload").evaluate(e)
+    expect(result.passed).toBe(true)
+    expect(result.evidence).toContain("preloads the LCP image")
+  })
+
+  it("fails when a high-priority image preload does NOT match the known LCP image", () => {
+    const e = makeEvidence({
+      rawHtml: '<html><head><link rel="preload" as="image" href="banner.jpg" fetchpriority="high"></head></html>',
+      perf: { lcpElement: { tagName: "IMG", src: "hero.jpg" } },
+    })
+    const result = ctrl("images.lcppreload").evaluate(e)
+    expect(result.passed).toBe(false)
+    expect(result.evidence).toMatch(/none match/i)
+  })
+
+  it("weak-matches any image preload when LCP src is unknown", () => {
+    const e = makeEvidence({
+      rawHtml: '<html><head><link rel="preload" as="image" href="hero.jpg" fetchpriority="high"></head></html>',
+      perf: { lcpElement: { tagName: "IMG" } }, // no src
+    })
+    const result = ctrl("images.lcppreload").evaluate(e)
+    expect(result.passed).toBe(true)
+    expect(result.evidence).toMatch(/LCP URL unknown — weak match/i)
   })
 })
 
@@ -295,6 +372,30 @@ describe("images.compressed", () => {
     expect(result.passed).toBe(true)
     expect(result.evidence).toMatch(/no image/i)
   })
+
+  it("passes with low confidence when all image responses are cached (0 bytes)", () => {
+    const e = makeEvidence({
+      requests: [
+        { url: "a.webp", resourceType: "image", status: 200, fromCache: true, encodedBytes: 0, decodedBytes: 80000, requestHeaders: {}, responseHeaders: {}, mimeType: "image/webp" },
+        { url: "b.webp", resourceType: "image", status: 200, fromCache: true, encodedBytes: 0, decodedBytes: 90000, requestHeaders: {}, responseHeaders: {}, mimeType: "image/webp" },
+      ],
+    })
+    const result = ctrl("images.compressed").evaluate(e)
+    expect(result.passed).toBe(true)
+    expect(result.evidence).toMatch(/low confidence/i)
+  })
+
+  it("ignores cached 0-byte images and still fails on a heavy transferred image", () => {
+    const e = makeEvidence({
+      requests: [
+        { url: "cached.webp", resourceType: "image", status: 200, fromCache: true, encodedBytes: 0, decodedBytes: 80000, requestHeaders: {}, responseHeaders: {}, mimeType: "image/webp" },
+        { url: "heavy.jpg", resourceType: "image", status: 200, fromCache: false, encodedBytes: 512000, decodedBytes: 800000, requestHeaders: {}, responseHeaders: {}, mimeType: "image/jpeg" },
+      ],
+    })
+    const result = ctrl("images.compressed").evaluate(e)
+    expect(result.passed).toBe(false)
+    expect(result.evidence).toContain("500 KB")
+  })
 })
 
 // ── images.earlyhint ─────────────────────────────────────────────────────────
@@ -334,6 +435,17 @@ describe("images.earlyhint", () => {
     const result = ctrl("images.earlyhint").evaluate(e)
     expect(result.passed).toBe(false)
     expect(result.evidence).toMatch(/no link/i)
+  })
+
+  it("splits directives correctly when a URL contains a comma", () => {
+    const e = makeEvidence({
+      mainResponseHeaders: {
+        link: '</img/w_800,h_600/hero.avif>; rel=preload; as=image, </style.css>; rel=preload; as=style',
+      },
+    })
+    const result = ctrl("images.earlyhint").evaluate(e)
+    expect(result.passed).toBe(true)
+    expect(result.evidence).toContain("hero.avif")
   })
 
   it("fails when Link header exists but has no image preload", () => {

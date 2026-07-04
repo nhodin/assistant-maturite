@@ -91,6 +91,28 @@ describe("cp.limitresources", () => {
     })
     expect(ctrl("cp.limitresources").evaluate(e).passed).toBe(false)
   })
+  it("PASS — heavy interaction-phase scripts excluded from the total", () => {
+    const e = makeEvidence({
+      requests: [
+        req({ resourceType: "script", encodedBytes: 100_000, phase: "load" }),
+        req({ resourceType: "script", encodedBytes: 500_000, phase: "interaction" }),
+        req({ resourceType: "script", encodedBytes: 300_000, phase: "interaction" }),
+      ],
+    })
+    const result = ctrl("cp.limitresources").evaluate(e)
+    expect(result.passed).toBe(true)
+    expect(result.evidence).toContain("2 interaction-phase resource(s) excluded")
+  })
+  it("FAIL — same bytes as load-phase (not excluded)", () => {
+    const e = makeEvidence({
+      requests: [
+        req({ resourceType: "script", encodedBytes: 100_000, phase: "load" }),
+        req({ resourceType: "script", encodedBytes: 500_000, phase: "load" }),
+        req({ resourceType: "script", encodedBytes: 300_000 }), // missing phase → "load"
+      ],
+    })
+    expect(ctrl("cp.limitresources").evaluate(e).passed).toBe(false)
+  })
 })
 
 describe("cp.preloadprio", () => {
@@ -114,6 +136,14 @@ describe("cp.preloadheader", () => {
   })
   it("FAIL — no Link header", () => {
     expect(ctrl("cp.preloadheader").evaluate(makeEvidence()).passed).toBe(false)
+  })
+  it("PASS — Link header with a comma inside the preloaded URL", () => {
+    const e = makeEvidence({
+      mainResponseHeaders: { link: `<https://x.com/a,b.css>; rel=preload; as=style` },
+    })
+    const result = ctrl("cp.preloadheader").evaluate(e)
+    expect(result.passed).toBe(true)
+    expect(result.evidence).toContain("a,b.css")
   })
 })
 

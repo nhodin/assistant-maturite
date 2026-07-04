@@ -59,6 +59,33 @@ describe("video.preloadposter", () => {
     const e = makeEvidence({ rawHtml: `<head></head>` })
     expect(ctrl("video.preloadposter").evaluate(e).passed).toBe(false)
   })
+
+  it("PASS — preload href matches a <video poster> (loose filename match)", () => {
+    const e = makeEvidence({
+      rawHtml: `<head><link rel="preload" as="image" fetchpriority="high" href="/cdn/poster.jpg?w=800"></head><body><video poster="https://img.example.com/poster.jpg"></video></body>`,
+    })
+    const result = ctrl("video.preloadposter").evaluate(e)
+    expect(result.passed).toBe(true)
+    expect(result.evidence).toContain("poster")
+  })
+
+  it("FAIL — image preload present but does not match any <video poster>", () => {
+    const e = makeEvidence({
+      rawHtml: `<head><link rel="preload" as="image" fetchpriority="high" href="hero.jpg"></head><body><video poster="poster.jpg"></video></body>`,
+    })
+    const result = ctrl("video.preloadposter").evaluate(e)
+    expect(result.passed).toBe(false)
+    expect(result.evidence).toMatch(/none of its href/i)
+  })
+
+  it("PASS (weak) — image preload with no <video poster> to match", () => {
+    const e = makeEvidence({
+      rawHtml: `<head><link rel="preload" as="image" fetchpriority="high" href="p.jpg"></head><body><video src="v.mp4"></video></body>`,
+    })
+    const result = ctrl("video.preloadposter").evaluate(e)
+    expect(result.passed).toBe(true)
+    expect(result.evidence).toMatch(/weak match/i)
+  })
 })
 
 describe("video.selfhosted", () => {

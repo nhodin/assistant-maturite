@@ -70,6 +70,10 @@ export const FontFaceSchema = z.object({
   fontDisplay: z.string().optional(),
   unicodeRange: z.string().optional(),
   sizeAdjust: z.string().optional(),
+  /** value of ascent-override (local system fallback metric). */
+  ascentOverride: z.string().optional(),
+  /** value of descent-override (local system fallback metric). */
+  descentOverride: z.string().optional(),
 });
 
 /** The Largest Contentful Paint element, resolved from a PerformanceObserver. */
@@ -139,6 +143,14 @@ export const CruxDataSchema = z.object({
 export const PageFeaturesSchema = z.object({
   sliderDetected: z.boolean(),
   sliderLib: z.string().optional(),
+  /**
+   * outerHTML of the FIRST detected slider container (rendered DOM, post-JS), so
+   * topic-2 controls can score the slider itself instead of any page-wide <img>.
+   * Capped in the collector (200 000 chars) and further truncated when slimmed for
+   * DB storage. Optional/absent for evidence captured before slider markup was kept —
+   * topic-2 controls fall back to a page-wide heuristic in that case.
+   */
+  sliderHtml: z.string().optional(),
   videoDetected: z.boolean(),
   cookieAccepted: z.boolean(),
 });

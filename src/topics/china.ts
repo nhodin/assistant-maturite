@@ -43,6 +43,36 @@ function isGfw(url: string): boolean {
   return GFW_DOMAINS.some((d) => h === d || h.endsWith("." + d))
 }
 
+/** Extract url(...) and @import targets from a block of CSS text. */
+function extractCssUrls(css: string): string[] {
+  const out: string[] = []
+  // url( '...' | "..." | ... )
+  const urlRe = /url\(\s*(?:"([^"]*)"|'([^']*)'|([^)\s]*))\s*\)/gi
+  let m: RegExpExecArray | null
+  while ((m = urlRe.exec(css)) !== null) {
+    const u = m[1] ?? m[2] ?? m[3] ?? ""
+    if (u) out.push(u)
+  }
+  // @import "..." | '...'  (without url())
+  const importRe = /@import\s+(?:"([^"]*)"|'([^']*)')/gi
+  while ((m = importRe.exec(css)) !== null) {
+    const u = m[1] ?? m[2] ?? ""
+    if (u) out.push(u)
+  }
+  return out
+}
+
+/** Extract preload/prefetch URLs (between < and >) from a Link response header value. */
+function extractLinkHeaderUrls(linkHeader: string): string[] {
+  const out: string[] = []
+  const re = /<([^>]*)>/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(linkHeader)) !== null) {
+    if (m[1]) out.push(m[1].trim())
+  }
+  return out
+}
+
 // CN-CDN response-header signals (best-effort; a single-origin probe can only infer).
 const CN_CDN_HEADER_KEYS = [
   "x-nws-log-uuid", // Tencent Cloud CDN
@@ -59,7 +89,10 @@ const noGfwCriticalControl: Control = {
   id: "china.nogfwcritical",
   topicId: 12,
   label: "No GFW domains on critical path",
-  description: "No render-blocking script/CSS/preload in <head> from a GFW-blocked domain.",
+  description:
+    "No render-blocking GFW-blocked domain on the critical path: <head> <script src>, " +
+    "<head> <link rel=stylesheet|preload> href, GFW URLs referenced via @import/url(...) " +
+    "inside inline <style> in <head>, and preload targets in the main response Link header.",
   defaultPoints: 30,
   evaluate(e: EvidenceBundle) {
     const headHtml = headSlice(e.rawHtml)
@@ -73,6 +106,19 @@ const noGfwCriticalControl: Control = {
       const href = l.attrs["href"] ?? ""
       if ((rel === "stylesheet" || rel === "preload") && href && isGfw(href)) {
         blocked.add(host(href))
+      }
+    }
+    // Inline <style> blocks in <head>: @import / url(...) pointing at GFW hosts.
+    for (const styleBlock of headHtml.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/gi)) {
+      for (const url of extractCssUrls(styleBlock[1] ?? "")) {
+        if (isGfw(url)) blocked.add(host(url))
+      }
+    }
+    // Main response Link header: preload directives targeting GFW hosts.
+    const linkHeader = header(e.mainResponseHeaders, "link")
+    if (linkHeader) {
+      for (const url of extractLinkHeaderUrls(linkHeader)) {
+        if (isGfw(url)) blocked.add(host(url))
       }
     }
     if (blocked.size === 0) {

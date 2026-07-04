@@ -12,6 +12,34 @@ import { parseTags, headSlice, sameSite, requestsOfType, host } from "./util"
 
 const videoGate = (e: EvidenceBundle): boolean => e.features.videoDetected === true
 
+/** Pathname (lowercased) and last path segment of a URL — tolerant of relative
+ *  and protocol-relative URLs commonly seen in markup. */
+function urlParts(u: string): { pathname: string; lastSeg: string } {
+  let pathname = u
+  try {
+    const withProto = u.startsWith("//") ? "https:" + u : u
+    pathname = /^[a-z]+:\/\//i.test(withProto)
+      ? new URL(withProto).pathname
+      : (u.split(/[?#]/)[0] ?? u)
+  } catch {
+    pathname = u.split(/[?#]/)[0] ?? u
+  }
+  const lastSeg = pathname.split("/").filter(Boolean).pop() ?? ""
+  return { pathname: pathname.toLowerCase(), lastSeg: lastSeg.toLowerCase() }
+}
+
+/** Loose URL equality (exact, same pathname, or same filename) to tolerate
+ *  CDN/query variance between a preload href and a poster URL. */
+function looseUrlMatch(a: string, b: string): boolean {
+  if (!a || !b) return false
+  if (a === b) return true
+  const pa = urlParts(a)
+  const pb = urlParts(b)
+  if (pa.pathname && pa.pathname === pb.pathname) return true
+  if (pa.lastSeg && pa.lastSeg === pb.lastSeg) return true
+  return false
+}
+
 /** Known third-party video hosting domains (iframe embeds). */
 const THIRD_PARTY_VIDEO_DOMAINS = [
   "youtube.com",
@@ -86,29 +114,50 @@ const preloadPoster: Control = {
   topicId: 3,
   label: "Poster image preloaded with fetchpriority=high",
   description:
-    'A <link rel="preload" as="image" fetchpriority="high"> exists in <head>.',
+    'A <link rel="preload" as="image" fetchpriority="high"> in <head> preloads a <video poster> image (href loosely matched against poster URLs when present).',
   defaultPoints: 20,
   appliesTo: videoGate,
   evaluate(e) {
     const head = headSlice(e.rawHtml)
     const links = parseTags(head, "link")
-    const match = links.find(
+    const imagePreloads = links.filter(
       (link) =>
         (link.attrs["rel"] ?? "").toLowerCase() === "preload" &&
         (link.attrs["as"] ?? "").toLowerCase() === "image" &&
         (link.attrs["fetchpriority"] ?? "").toLowerCase() === "high",
     )
-    if (match) {
+    if (imagePreloads.length === 0) {
       return {
-        passed: true,
+        passed: false,
         evidence:
-          '<link rel="preload" as="image" fetchpriority="high"> found in <head>',
+          'No <link rel="preload" as="image" fetchpriority="high"> found in <head>',
       }
     }
+    // Poster URLs declared on <video poster="..."> anywhere in raw HTML.
+    const posterUrls = parseTags(e.rawHtml, "video")
+      .map((v) => (v.attrs["poster"] ?? "").trim())
+      .filter((p) => p.length > 0)
+    if (posterUrls.length > 0) {
+      const match = imagePreloads.find((link) =>
+        posterUrls.some((p) => looseUrlMatch(link.attrs["href"] ?? "", p)),
+      )
+      if (match) {
+        return {
+          passed: true,
+          evidence: `<link rel=preload as=image fetchpriority=high> preloads a <video poster> (href="${match.attrs["href"] ?? ""}")`,
+        }
+      }
+      return {
+        passed: false,
+        evidence:
+          "image preload present in <head> but none of its href(s) match a <video poster> URL",
+      }
+    }
+    // No poster attribute to match against — keep the weaker any-image-preload signal.
     return {
-      passed: false,
+      passed: true,
       evidence:
-        'No <link rel="preload" as="image" fetchpriority="high"> found in <head>',
+        '<link rel="preload" as="image" fetchpriority="high"> found in <head> — no <video poster> to match — weak match on any image preload',
     }
   },
 }

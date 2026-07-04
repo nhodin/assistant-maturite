@@ -16,10 +16,41 @@ function isModernImageMime(mimeType: string): boolean {
   return mimeType === "image/webp" || mimeType === "image/avif"
 }
 
-function countImgsWithAttr(html: string, attr: string): number {
-  // Match <img ... attr="..." ...> (attr present anywhere in tag)
-  const imgTags = html.match(/<img\b[^>]*>/gi) ?? []
-  return imgTags.filter((tag) => new RegExp(`\\b${attr}\\s*=`, "i").test(tag)).length
+/** Value of a single attribute inside a tag string (quoted), or "" if absent. */
+function attrValue(tag: string, attr: string): string {
+  const m = new RegExp(`\\b${attr}\\s*=\\s*"([^"]*)"|\\b${attr}\\s*=\\s*'([^']*)'`, "i").exec(tag)
+  return m ? (m[1] ?? m[2] ?? "") : ""
+}
+
+/** Pathname (lowercased) and last path segment of a URL — tolerant of relative
+ *  and protocol-relative URLs commonly seen in markup. */
+function urlParts(u: string): { pathname: string; lastSeg: string } {
+  let pathname = u
+  try {
+    const withProto = u.startsWith("//") ? "https:" + u : u
+    pathname = /^[a-z]+:\/\//i.test(withProto)
+      ? new URL(withProto).pathname
+      : (u.split(/[?#]/)[0] ?? u)
+  } catch {
+    pathname = u.split(/[?#]/)[0] ?? u
+  }
+  const lastSeg = pathname.split("/").filter(Boolean).pop() ?? ""
+  return { pathname: pathname.toLowerCase(), lastSeg: lastSeg.toLowerCase() }
+}
+
+/**
+ * Loose URL equality to tolerate CDN/query variance between a preload href and
+ * the resolved LCP/poster image URL: exact match, OR same pathname, OR same last
+ * path segment (filename).
+ */
+function looseUrlMatch(a: string, b: string): boolean {
+  if (!a || !b) return false
+  if (a === b) return true
+  const pa = urlParts(a)
+  const pb = urlParts(b)
+  if (pa.pathname && pa.pathname === pb.pathname) return true
+  if (pa.lastSeg && pa.lastSeg === pb.lastSeg) return true
+  return false
 }
 
 /** The value of a tag's style="..." attribute, or "" if absent. */
@@ -50,20 +81,30 @@ const lazyloadControl: Control = {
   id: "images.lazyload",
   topicId: 1,
   label: "Basic lazy-loading",
-  description: "At least one <img loading=\"lazy\"> in raw HTML.",
+  description:
+    'At least one lazy-loaded <img>: native (loading="lazy") or JS-driven (data-src/data-lazy with no eager src).',
   defaultPoints: 30,
   evaluate(e) {
-    const count = countImgsWithAttr(e.rawHtml, "loading")
-    // More precisely: count imgs where loading="lazy"
     const imgTags = e.rawHtml.match(/<img\b[^>]*>/gi) ?? []
-    const lazyCount = imgTags.filter((tag) => /\bloading\s*=\s*["']?lazy["']?/i.test(tag)).length
-    const passed = lazyCount > 0
-    return {
-      passed,
-      evidence: passed
-        ? `${lazyCount} <img loading="lazy"> found in raw HTML`
-        : "No <img loading=\"lazy\"> found in raw HTML",
+    const nativeCount = imgTags.filter((tag) => /\bloading\s*=\s*["']?lazy["']?/i.test(tag)).length
+    // JS-lazyload pattern (as detected by the slider topic): an <img> carrying
+    // data-src/data-lazy and NO eager src — the real URL is swapped in by script.
+    const jsLazyCount = imgTags.filter((tag) => {
+      const hasDataSrc = /\bdata-src\s*=/i.test(tag) || /\bdata-lazy\s*=/i.test(tag)
+      if (!hasDataSrc) return false
+      // A real `src` attribute is preceded by whitespace inside the tag; this
+      // avoids matching the "src" substring inside "data-src".
+      const eagerSrc = /\ssrc\s*=\s*["']?[^"'\s>]/i.test(tag)
+      return !eagerSrc
+    }).length
+    const passed = nativeCount + jsLazyCount > 0
+    if (!passed) {
+      return { passed: false, evidence: 'No lazy-loaded <img> (loading="lazy" or data-src/data-lazy) found in raw HTML' }
     }
+    const parts: string[] = []
+    if (nativeCount > 0) parts.push(`${nativeCount} <img loading="lazy">`)
+    if (jsLazyCount > 0) parts.push(`${jsLazyCount} <img data-src/data-lazy>`)
+    return { passed: true, evidence: parts.join("; ") + " found in raw HTML" }
   },
 }
 
@@ -71,19 +112,33 @@ const modernFormatControl: Control = {
   id: "images.modernformat",
   topicId: 1,
   label: "Modern image format (WebP / AVIF)",
-  description: "Majority (>50%) of image responses use image/webp or image/avif content-type.",
+  description:
+    "Majority (>50%) of content-image responses use image/webp or image/avif content-type. SVGs and tiny images (≤1 KB tracking pixels/icons) are excluded from both numerator and denominator.",
   defaultPoints: 20,
   evaluate(e) {
     const imgs = imageRequests(e)
     if (imgs.length === 0) {
       return { passed: false, evidence: "No image requests observed" }
     }
-    const modernCount = imgs.filter((r) => isModernImageMime(r.mimeType)).length
-    const pct = Math.round((modernCount / imgs.length) * 100)
-    const passed = modernCount / imgs.length > 0.5
+    // Restrict to "content pictures": drop SVGs and tiny (≤1 KB) images, which are
+    // vector/icon/tracking assets that this criterion is not about.
+    const isNonContent = (r: NetworkRequest): boolean =>
+      r.mimeType === "image/svg+xml" || (r.encodedBytes > 0 && r.encodedBytes <= 1024)
+    let set = imgs.filter((r) => !isNonContent(r))
+    let fellBack = false
+    if (set.length === 0) {
+      set = imgs
+      fellBack = true
+    }
+    const modernCount = set.filter((r) => isModernImageMime(r.mimeType)).length
+    const pct = Math.round((modernCount / set.length) * 100)
+    const passed = modernCount / set.length > 0.5
+    const label = fellBack ? "image" : "content image"
     return {
       passed,
-      evidence: `${modernCount}/${imgs.length} image responses are webp/avif (${pct}%)`,
+      evidence:
+        `${modernCount}/${set.length} ${label} responses are webp/avif (${pct}%)` +
+        (fellBack ? " — fallback to unfiltered set (all images were svg/tiny)" : ""),
     }
   },
 }
@@ -92,33 +147,50 @@ const lcpPreloadControl: Control = {
   id: "images.lcppreload",
   topicId: 1,
   label: "LCP image preloaded with fetchpriority=high",
-  description: "LCP element has fetchpriority=high, or a <link rel=preload as=image fetchpriority=high> exists.",
+  description:
+    "LCP element has fetchpriority=high, or a <link rel=preload as=image fetchpriority=high> preloads the LCP image (href loosely matched against the LCP src when known).",
   defaultPoints: 15,
   evaluate(e) {
-    // Check 1: LCP element itself has fetchpriority=high
+    // Check 1 (strongest signal): LCP element itself has fetchpriority=high.
     if (e.perf.lcpElement?.fetchPriorityAttr === "high") {
       return {
         passed: true,
         evidence: `LCP element (${e.perf.lcpElement.tagName}) has fetchpriority="high" attribute`,
       }
     }
-    // Check 2: a <link rel="preload" as="image" fetchpriority="high"> in rawHtml
+    // Check 2: a <link rel="preload" as="image" fetchpriority="high"> in rawHtml.
     const preloadLinks = e.rawHtml.match(/<link\b[^>]*>/gi) ?? []
-    const highPriorityPreload = preloadLinks.find((tag) => {
+    const imagePreloads = preloadLinks.filter((tag) => {
       const isPreload = /\brel\s*=\s*["']?preload["']?/i.test(tag)
       const isImage = /\bas\s*=\s*["']?image["']?/i.test(tag)
       const isHighPriority = /\bfetchpriority\s*=\s*["']?high["']?/i.test(tag)
       return isPreload && isImage && isHighPriority
     })
-    if (highPriorityPreload) {
+    if (imagePreloads.length === 0) {
       return {
-        passed: true,
-        evidence: `Found <link rel="preload" as="image" fetchpriority="high"> in raw HTML`,
+        passed: false,
+        evidence: "No fetchpriority=high on LCP element and no <link rel=preload as=image fetchpriority=high> found",
       }
     }
+    const lcpSrc = e.perf.lcpElement?.src
+    if (lcpSrc) {
+      const matching = imagePreloads.find((tag) => looseUrlMatch(attrValue(tag, "href"), lcpSrc))
+      if (matching) {
+        return {
+          passed: true,
+          evidence: `<link rel=preload as=image fetchpriority=high> preloads the LCP image (href="${attrValue(matching, "href")}")`,
+        }
+      }
+      return {
+        passed: false,
+        evidence: `${imagePreloads.length} image preload link(s) present but none match the LCP image (${lcpSrc})`,
+      }
+    }
+    // LCP URL unknown — fall back to the weaker any-image-preload signal.
     return {
-      passed: false,
-      evidence: "No fetchpriority=high on LCP element and no <link rel=preload as=image fetchpriority=high> found",
+      passed: true,
+      evidence:
+        "Found <link rel=preload as=image fetchpriority=high> in raw HTML — LCP URL unknown — weak match on any image preload",
     }
   },
 }
@@ -194,27 +266,39 @@ const compressedControl: Control = {
   id: "images.compressed",
   topicId: 1,
   label: "Well-compressed images (<250 KB each)",
-  description: "No single image response exceeds 250 KB transferred (encodedBytes ≤ 256000).",
+  description:
+    "No single image response with an observed transfer size exceeds 250 KB (encodedBytes ≤ 256000). Cached responses (encodedBytes = 0) are ignored.",
   defaultPoints: 5,
   evaluate(e) {
     const imgs = imageRequests(e)
     if (imgs.length === 0) {
       return { passed: true, evidence: "No image requests observed — criterion vacuously satisfied" }
     }
-    const heaviest = imgs.reduce((max, r) => (r.encodedBytes > max.encodedBytes ? r : max), imgs[0]!)
+    // encodedBytes is 0 for cached/unknown responses — those tell us nothing about
+    // transfer weight, so exclude them rather than silently pass on a 0 "size".
+    const withBytes = imgs.filter((r) => r.encodedBytes > 0)
+    if (withBytes.length === 0) {
+      return {
+        passed: true,
+        evidence: "no image transfer sizes observed (all cached/unknown) — low confidence",
+      }
+    }
+    const heaviest = withBytes.reduce((max, r) => (r.encodedBytes > max.encodedBytes ? r : max), withBytes[0]!)
     const passed = heaviest.encodedBytes <= 256000
     const kb = Math.round(heaviest.encodedBytes / 1024)
     return {
       passed,
       evidence: passed
-        ? `Largest image is ${kb} KB (≤250 KB threshold) — ${imgs.length} image request(s)`
+        ? `Largest image is ${kb} KB (≤250 KB threshold) — ${withBytes.length} image request(s) with sizes`
         : `Largest image is ${kb} KB (>250 KB threshold): ${heaviest.url}`,
     }
   },
 }
 
 function findImagePreloadDirective(linkHeader: string): string | undefined {
-  return linkHeader.split(",").find((d) => {
+  // Split on commas that separate directives (each directive starts with "<uri>"),
+  // not on commas inside a URL — hence the lookahead for the next "<".
+  return linkHeader.split(/,(?=\s*<)/).find((d) => {
     return /rel\s*=\s*["']?preload["']?/i.test(d) && /as\s*=\s*["']?image["']?/i.test(d)
   })
 }

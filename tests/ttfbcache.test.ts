@@ -41,6 +41,16 @@ describe("ttfb.cdncache", () => {
     const e = makeEvidence({ mainResponseHeaders: { "cache-control": "s-maxage=3600" } })
     expect(ctrl("ttfb.cdncache").evaluate(e).passed).toBe(true)
   })
+  it("PASS (weak fallback) — plain max-age > 0 without private", () => {
+    const e = makeEvidence({ mainResponseHeaders: { "cache-control": "max-age=300" } })
+    const r = ctrl("ttfb.cdncache").evaluate(e)
+    expect(r.passed).toBe(true)
+    expect(r.evidence).toMatch(/weak signal/i)
+  })
+  it("FAIL — private + max-age (weak fallback must not apply)", () => {
+    const e = makeEvidence({ mainResponseHeaders: { "cache-control": "private, max-age=3600" } })
+    expect(ctrl("ttfb.cdncache").evaluate(e).passed).toBe(false)
+  })
   it("FAIL — no cache indicators", () => {
     const e = makeEvidence({ mainResponseHeaders: { "cache-control": "no-store" } })
     expect(ctrl("ttfb.cdncache").evaluate(e).passed).toBe(false)
@@ -51,6 +61,12 @@ describe("ttfb.browsercache", () => {
   it("PASS — max-age > 0", () => {
     const e = makeEvidence({ mainResponseHeaders: { "cache-control": "max-age=600" } })
     expect(ctrl("ttfb.browsercache").evaluate(e).passed).toBe(true)
+  })
+  it("PASS — private + max-age > 0 (private does not block browser cache)", () => {
+    const e = makeEvidence({ mainResponseHeaders: { "cache-control": "private, max-age=3600" } })
+    const r = ctrl("ttfb.browsercache").evaluate(e)
+    expect(r.passed).toBe(true)
+    expect(r.evidence).toMatch(/private does not block/i)
   })
   it("FAIL — no-store", () => {
     const e = makeEvidence({ mainResponseHeaders: { "cache-control": "no-store" } })

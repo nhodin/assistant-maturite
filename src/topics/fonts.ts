@@ -33,12 +33,30 @@ function fontStem(url: string): string {
   }
   base = base.split("/").pop() ?? base
   base = base.replace(/\.(woff2?|ttf|otf|eot)(\?.*)?$/i, "")
-  // Drop trailing weight/style/hash tokens (e.g. -700, -Bold, .a1b2c3)
-  base = base.replace(
-    /[-_.](?:[0-9]{3}|bold|regular|italic|light|medium|semibold|thin|black|[0-9a-f]{6,})$/i,
-    "",
-  )
+  // Drop trailing weight/style/hash tokens (e.g. -700, -Bold, .a1b2c3),
+  // repeatedly, so "foo-bold-italic" collapses to "foo" (not "foo-bold").
+  const tokenRe =
+    /[-_.](?:[0-9]{3}|bold|regular|italic|oblique|light|medium|semibold|thin|black|normal|[0-9a-f]{6,})$/i
+  let prev: string
+  do {
+    prev = base
+    base = base.replace(tokenRe, "")
+  } while (base !== prev)
   return base.toLowerCase()
+}
+
+const SUBSET_TOKEN_RE =
+  /(?:^|[/\-_.])(latin|cyrillic|greek|vietnamese|hebrew|arabic|subset|ext)(?:$|[/\-_.?])/i
+
+/** True if a font URL's pathname carries a delimited locale/subset token. */
+function hasSubsetToken(url: string): boolean {
+  let path = url
+  try {
+    path = new URL(url).pathname
+  } catch {
+    /* keep raw */
+  }
+  return SUBSET_TOKEN_RE.test(path)
 }
 
 // ── controls ─────────────────────────────────────────────────────────────────
@@ -155,21 +173,30 @@ const max2Control: Control = {
   id: "fonts.max2",
   topicId: 9,
   label: "Max 2 font families",
-  description: "At most 2 distinct font families loaded across the page.",
+  description:
+    "At most 2 distinct font families loaded. Counts @font-face family names when any are captured; falls back to font-file URL stems only when no @font-face family was captured (avoids double-counting the same font as both a family name and a file stem).",
   defaultPoints: 10,
   evaluate(e: EvidenceBundle) {
     const families = new Set<string>()
     for (const f of e.fonts) {
       if (f.family) families.add(normFamily(f.family))
     }
-    for (const r of requestsOfType(e.requests, "font")) {
-      families.add(fontStem(r.url))
+    // Only fall back to URL stems when NO @font-face family was captured;
+    // otherwise the same font counts twice ("Foo Web" family + foo-web stem).
+    let source: string
+    if (families.size > 0) {
+      source = "@font-face families"
+    } else {
+      for (const r of requestsOfType(e.requests, "font")) {
+        families.add(fontStem(r.url))
+      }
+      source = "font-file URL stems"
     }
     const count = families.size
     const passed = count <= 2
     return {
       passed,
-      evidence: `${count} distinct font family/file group(s) detected: ${[...families].slice(0, 6).join(", ") || "none"}`,
+      evidence: `${count} distinct font ${source}: ${[...families].slice(0, 6).join(", ") || "none"}`,
     }
   },
 }
@@ -178,19 +205,33 @@ const fallbackControl: Control = {
   id: "fonts.fallback",
   topicId: 9,
   label: "Adjusted local fallback fonts",
-  description: "A size-adjusted fallback strategy (size-adjust / ascent-override / descent-override) is present.",
+  description:
+    "A local system fallback strategy is present: a size-adjust / ascent-override / descent-override metric OR a local(...) source in the @font-face stack (the criterion gives points 'even if there is no size settings').",
   defaultPoints: 20,
   evaluate(e: EvidenceBundle) {
-    const fontHasAdjust = e.fonts.some((f) => (f.sizeAdjust ?? "") !== "")
+    const hasMetric = e.fonts.some(
+      (f) =>
+        (f.sizeAdjust ?? "") !== "" ||
+        (f.ascentOverride ?? "") !== "" ||
+        (f.descentOverride ?? "") !== "",
+    )
+    const hasLocalSrc = e.fonts.some((f) => /local\(/i.test(f.src ?? ""))
     const htmlHasAdjust = /size-adjust|ascent-override|descent-override/i.test(
       e.rawHtml,
     )
-    const passed = fontHasAdjust || htmlHasAdjust
+    const passed = hasMetric || hasLocalSrc || htmlHasAdjust
+    const signal = hasMetric
+      ? "size-adjust/ascent-override/descent-override on @font-face"
+      : hasLocalSrc
+        ? "local(...) fallback source in @font-face src"
+        : htmlHasAdjust
+          ? "adjust metric in raw HTML"
+          : ""
     return {
       passed,
       evidence: passed
-        ? "Adjusted fallback font metrics detected (size-adjust/ascent-override/descent-override)"
-        : "No adjusted fallback font metrics detected in inline or external CSS",
+        ? `Adjusted local fallback detected (${signal})`
+        : "No adjusted fallback metric or local() source detected in inline or external CSS",
     }
   },
 }
@@ -199,18 +240,19 @@ const subsettingControl: Control = {
   id: "fonts.subsetting",
   topicId: 9,
   label: "Subsetting by locale",
-  description: "unicode-range subsetting or multiple locale-specific font files present.",
+  description:
+    "unicode-range subsetting on @font-face, or multiple font files whose URL pathname carries a delimited locale/subset token (e.g. -latin-ext, .cyrillic).",
   defaultPoints: 10,
   evaluate(e: EvidenceBundle) {
     const hasUnicodeRange = e.fonts.some((f) => (f.unicodeRange ?? "") !== "")
     if (hasUnicodeRange) {
       return { passed: true, evidence: "unicode-range subsetting present on @font-face" }
     }
-    // Multiple font files differing by a locale/subset token in the URL
+    // Multiple font files differing by a locale/subset token in the URL.
+    // Require the token to be delimited (bounded on BOTH sides) against the
+    // pathname, so "next.woff2"/"text-icons.woff2" don't false-positive on "ext".
     const fontReqs = requestsOfType(e.requests, "font")
-    const subsetTokens = fontReqs.filter((r) =>
-      /(latin|cyrillic|greek|vietnamese|hebrew|arabic|subset|ext)\b/i.test(r.url),
-    )
+    const subsetTokens = fontReqs.filter((r) => hasSubsetToken(r.url))
     if (subsetTokens.length >= 1 && fontReqs.length > 1) {
       return {
         passed: true,

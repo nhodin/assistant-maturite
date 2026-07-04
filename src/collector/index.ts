@@ -4,6 +4,7 @@
  */
 import * as http from "node:http";
 import * as https from "node:https";
+import * as http2 from "node:http2";
 import * as zlib from "node:zlib";
 import type { CDPSession } from "playwright";
 import {
@@ -85,7 +86,7 @@ function mapResourceType(cdpType: string): string {
 // external stylesheets — see "External CSS capture" below) ─────────────────────
 
 /** Parse every @font-face block out of a raw CSS string (no <style> wrapper). */
-function extractFontFacesFromCss(css: string): FontFace[] {
+export function extractFontFacesFromCss(css: string): FontFace[] {
   const fonts: FontFace[] = [];
   const fontFaceRe = /@font-face\s*\{([^}]+)\}/gi;
   let fontMatch: RegExpExecArray | null;
@@ -119,6 +120,12 @@ function extractFontFacesFromCss(css: string): FontFace[] {
           break;
         case "size-adjust":
           font.sizeAdjust = val;
+          break;
+        case "ascent-override":
+          font.ascentOverride = val;
+          break;
+        case "descent-override":
+          font.descentOverride = val;
           break;
       }
     }
@@ -188,6 +195,23 @@ function lowercaseHeaders(h: http.IncomingHttpHeaders): Record<string, string> {
   return out;
 }
 
+/**
+ * True when the running Node's zlib can DECOMPRESS zstd (`createZstdDecompress`,
+ * added in newer Node). Gates advertising `zstd` in Accept-Encoding and decoding
+ * a `content-encoding: zstd` main-HTML response, so cdn.zstd's main-HTML branch is
+ * observable on modern Node without breaking older runtimes. Injectable for tests.
+ */
+export function zstdDecompressorAvailable(
+  z: Record<string, unknown> = zlib as unknown as Record<string, unknown>,
+): boolean {
+  return typeof z.createZstdDecompress === "function";
+}
+
+/** Accept-Encoding for the raw fetch — advertise zstd only if we can decode it. */
+function rawFetchAcceptEncoding(): string {
+  return zstdDecompressorAvailable() ? "gzip, deflate, br, zstd" : "gzip, deflate, br";
+}
+
 function decompressStream(
   res: http.IncomingMessage,
 ): NodeJS.ReadableStream {
@@ -195,6 +219,12 @@ function decompressStream(
   if (encoding === "gzip" || encoding === "x-gzip") return res.pipe(zlib.createGunzip());
   if (encoding === "br") return res.pipe(zlib.createBrotliDecompress());
   if (encoding === "deflate") return res.pipe(zlib.createInflate());
+  if (encoding === "zstd" && zstdDecompressorAvailable()) {
+    const createZstd = (zlib as unknown as {
+      createZstdDecompress: () => zlib.Gunzip;
+    }).createZstdDecompress;
+    return res.pipe(createZstd());
+  }
   return res;
 }
 
@@ -221,7 +251,7 @@ function fetchRawHtmlWithEarlyHints(
         method: "GET",
         headers: {
           "user-agent": MOBILE_UA,
-          "accept-encoding": "gzip, deflate, br",
+          "accept-encoding": rawFetchAcceptEncoding(),
           accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
           "accept-language": "fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7",
         },
@@ -271,6 +301,87 @@ function fetchRawHtmlWithEarlyHints(
     };
 
     attempt(url, maxRedirects, null);
+  });
+}
+
+// ── 103 Early Hints over HTTP/2 ──────────────────────────────────────────────────
+// Many CDNs only emit 103 on H2/H3, so the HTTP/1.1-only Node probe above
+// false-negatives cp.earlyhints / css.preload / images.earlyhint. This best-effort
+// H2 probe re-checks the origin over HTTP/2, where Node surfaces 1xx interim
+// responses via the stream's 'headers' event (headers include ':status').
+
+/** Strip HTTP/2 pseudo-headers (":status", ":path", …) and lowercase the rest. */
+export function normalizeHttp2Headers(
+  headers: Record<string, unknown>,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(headers)) {
+    if (k.startsWith(":")) continue;
+    out[k.toLowerCase()] = Array.isArray(v) ? v.join(", ") : String(v);
+  }
+  return out;
+}
+
+/**
+ * Best-effort HTTP/2 probe for a 103 Early Hints interim response. Returns the
+ * 103's headers (pseudo-headers stripped, keys lowercased) or null. HTTPS only;
+ * hard timeout; session destroyed afterwards; every error swallowed → null.
+ */
+function probeEarlyHintsHttp2(
+  url: string,
+  timeoutMs = 10000,
+): Promise<Record<string, string> | null> {
+  return new Promise((resolve) => {
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      resolve(null);
+      return;
+    }
+    if (parsed.protocol !== "https:") {
+      resolve(null);
+      return;
+    }
+
+    let settled = false;
+    let session: http2.ClientHttp2Session | null = null;
+    let timer: NodeJS.Timeout;
+    const done = (result: Record<string, string> | null): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try {
+        session?.destroy();
+      } catch {
+        // ignore
+      }
+      resolve(result);
+    };
+    timer = setTimeout(() => done(null), timeoutMs);
+
+    try {
+      session = http2.connect(parsed.origin);
+      session.on("error", () => done(null));
+      const req = session.request({
+        ":method": "GET",
+        ":path": parsed.pathname + parsed.search,
+        "user-agent": MOBILE_UA,
+        accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      });
+      // 1xx interim (incl. 103) arrives as a 'headers' event; the final response
+      // as 'response'. If we reach the final response without a 103, there is none.
+      req.on("headers", (headers: Record<string, unknown>) => {
+        if (Number(headers[":status"]) === 103) {
+          done(normalizeHttp2Headers(headers));
+        }
+      });
+      req.on("response", () => done(null));
+      req.on("error", () => done(null));
+      req.end();
+    } catch {
+      done(null);
+    }
   });
 }
 
@@ -503,6 +614,14 @@ export const collect: CollectFn = async (
     earlyHints = null;
   }
 
+  // 103 Early Hints often only surface over HTTP/2 (many CDNs don't emit them on
+  // HTTP/1.1), which the Node http/1 fetch above can't observe. Re-probe over H2
+  // only when the H1 fetch saw none, and OR the result in.
+  if (!earlyHints) {
+    const h2Hints = await probeEarlyHintsHttp2(finalUrl);
+    if (h2Hints) earlyHints = h2Hints;
+  }
+
   // ── Step 2: Browser capture ──────────────────────────────────────────────────
   let renderedHtml = "";
   const requests: NetworkRequest[] = [];
@@ -516,6 +635,7 @@ export const collect: CollectFn = async (
   };
   let cookieAccepted = false;
   let sliderDetected = false;
+  let sliderHtml: string | undefined;
   let videoDetected = false;
   let cssUnusedPct: number | null = null;
   const externalCssBodies: string[] = [];
@@ -546,6 +666,15 @@ export const collect: CollectFn = async (
     try {
       cdp = await context.newCDPSession(page);
       await cdp.send("Network.enable");
+      // Mobile CPU throttling (4x): lab long-task and LCP signals are meaningless
+      // on desktop-class hardware without it (affects js.splittasks, geo.display2s).
+      if (device === "mobile") {
+        try {
+          await cdp.send("Emulation.setCPUThrottlingRate", { rate: 4 });
+        } catch {
+          // Best effort — throttling failure must not abort capture.
+        }
+      }
     } catch {
       // CDP unavailable — proceed without it
       cdp = null as unknown as CDPSession;
@@ -969,6 +1098,23 @@ export const collect: CollectFn = async (
       (sum, r) => sum + r.encodedBytes,
       0,
     );
+
+    // Prefer the browser's OWN document response headers for header-based controls
+    // (topics 5/8/10). The Node fetch above uses an iPhone-Safari UA over HTTP/1.1,
+    // but the scored page is stealth Chromium — with Vary/UA-tiered responses those
+    // two can get different headers, and a real user gets the browser's. Use the
+    // first captured document response matching finalUrl (else the first document
+    // response); keep the Node-fetch headers as fallback when none was captured.
+    const docResponses = requests.filter(
+      (r) =>
+        r.resourceType === "document" &&
+        Object.keys(r.responseHeaders).length > 0,
+    );
+    const docResponse =
+      docResponses.find((r) => r.url === finalUrl) ?? docResponses[0];
+    if (docResponse) {
+      mainResponseHeaders = docResponse.responseHeaders;
+    }
 
     // Resolve external stylesheet body fetches before the CDP session/context go
     // away — Network.getResponseBody only works while the page is still alive.
