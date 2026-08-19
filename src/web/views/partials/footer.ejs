@@ -1,4 +1,14 @@
   </main>
   <footer class="foot">Maturity Analyzer — deterministic web performance maturity (no LLM)</footer>
+  <script>
+    // Toggle the per-page criteria panel: load it on first click, clear it on
+    // the next one. The slot is hx-preserve="true", so it survives the polling.
+    function toggleCrit(btn) {
+      var slot = document.getElementById(btn.dataset.critTarget);
+      if (!slot) return;
+      if (slot.innerHTML.trim()) { slot.innerHTML = ''; return; }
+      htmx.ajax('GET', btn.dataset.critUrl, { target: slot, swap: 'innerHTML' });
+    }
+  </script>
 </body>
 </html>

@@ -5,6 +5,8 @@
   <div class="head-row">
     <strong><%= pageLabel %></strong>
     <span class="muted url"><%= pageUrl %></span>
+    <button class="btn sm" type="button" title="Fermer"
+            onclick="this.closest('.crit-panel').parentNode.innerHTML=''">✕</button>
   </div>
   <% if (!topics.length) { %>
     <p class="muted">Aucun détail de critères pour cette page.</p>

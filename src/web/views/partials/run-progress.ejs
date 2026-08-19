@@ -50,9 +50,9 @@
             <td><% if (done) { %><span class="score sm <%= scoreClass(rp.china) %>"><%= fmtScore(rp.china) %></span><% } else { %><span class="muted">·</span><% } %></td>
             <td>
               <% if (done) { %>
-                <button class="btn sm" type="button"
-                        hx-get="/runs/<%= run.id %>/pages/<%= rp.id %>/criteria"
-                        hx-target="#crit-<%= rp.id %>" hx-swap="innerHTML">Critères</button>
+                <button class="btn sm" type="button" onclick="toggleCrit(this)"
+                        data-crit-url="/runs/<%= run.id %>/pages/<%= rp.id %>/criteria"
+                        data-crit-target="crit-<%= rp.id %>">Critères</button>
               <% } %>
             </td>
           </tr>
