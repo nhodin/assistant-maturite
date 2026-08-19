@@ -19,6 +19,7 @@ import { runRoutes } from "./routes/runs";
 import { settingsRoutes } from "./routes/settings";
 import { diagnosticsRoutes } from "./routes/diagnostics";
 import { startScheduler } from "./monitor";
+import { recoverStaleRuns } from "./runner";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -44,6 +45,14 @@ async function main() {
   await app.register(runRoutes);
   await app.register(settingsRoutes);
   await app.register(diagnosticsRoutes);
+
+  // A run only exists inside a server process, so anything still RUNNING in the
+  // DB at boot died with the previous one. Mark it as such before serving, so the
+  // UI never shows a spinner for a run nobody is executing.
+  const recovered = await recoverStaleRuns();
+  if (recovered > 0) {
+    console.log(`  ${recovered} run(s) interrompu(s) récupéré(s) — reprise possible depuis /runs`);
+  }
 
   const port = Number(process.env.PORT ?? 5173);
   await app.listen({ port, host: "0.0.0.0" });

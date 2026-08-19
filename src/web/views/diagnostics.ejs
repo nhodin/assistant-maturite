@@ -13,8 +13,8 @@
   <h2>Navigateur</h2>
   <form hx-post="/diagnostics/browser" hx-target="#diag-browser" hx-indicator="#diag-browser">
     <select name="browser">
-      <option value="playwright">Playwright (headless)</option>
       <option value="cloak">CloakBrowser (stealth)</option>
+      <option value="playwright">Playwright (headless, debug)</option>
       <option value="cdp">Chrome réel (CDP)</option>
     </select>
     <button type="submit">Lancer un test (example.com)</button>

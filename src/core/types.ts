@@ -128,6 +128,19 @@ export interface SiteResult {
 /** Which Chromium drives the capture. See `CollectOptions.browser`. */
 export type BrowserProvider = "playwright" | "cloak" | "cdp";
 
+/**
+ * How hard the stealth provider leans on its evasion features for ONE attempt.
+ * The audit never switches provider on a block — it retries the same
+ * CloakBrowser with more of its own machinery, exactly as the vendor prescribes:
+ *
+ *  - "standard": headless, fresh context. Simpler to run and fast; the default.
+ *  - "escalated": HEADED (headless is detectable on its own, so going headed is
+ *    the escalation step, not the starting point), humanize/careful input timing,
+ *    and a persistent per-origin profile — a reused profile carrying cookies and
+ *    history reads as a real user, a fresh incognito session reads as disposable.
+ */
+export type CaptureMode = "standard" | "escalated";
+
 export interface CollectOptions {
   device?: Device;
   /** Click the cookie-consent accept button before capturing (topic 4). */
@@ -161,6 +174,17 @@ export interface CollectOptions {
    * Chrome itself. Defaults to `<app>/data/chrome-profile`.
    */
   chromeProfileDir?: string;
+  /**
+   * Stealth level for THIS attempt (cloak provider only). Defaults to "standard";
+   * the run executor passes "escalated" for the single retry it allows after a
+   * block. Ignored by the playwright and cdp providers.
+   */
+  mode?: CaptureMode;
+  /**
+   * Root directory holding the per-origin CloakBrowser profiles used by an
+   * "escalated" attempt. Defaults to `<app>/data/cloak-profiles`.
+   */
+  cloakProfileRoot?: string;
 }
 
 /** The single public entry point the collector must export. */

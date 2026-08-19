@@ -55,9 +55,21 @@ describe("cloakConfigFromEnv", () => {
 describe("cloakLaunchOptions", () => {
   it("omits optional keys so cloakbrowser's own fallbacks stay in play", () => {
     const options = cloakLaunchOptions(cloakConfigFromEnv({}));
-    expect(options).toEqual({ headless: false, humanize: true, humanPreset: "careful" });
+    expect(options).toEqual({ headless: true, humanize: true, humanPreset: "careful" });
     expect("licenseKey" in options).toBe(false);
     expect("proxy" in options).toBe(false);
+  });
+
+  it("starts headless — headed is the escalation after a block, not the default", () => {
+    expect(cloakLaunchOptions(cloakConfigFromEnv({})).headless).toBe(true);
+    // What the escalated attempt asks for, whatever the environment says.
+    const cfg = cloakConfigFromEnv({ CLOAK_HEADLESS: "1", CLOAK_HUMANIZE: "0" });
+    const escalated = cloakLaunchOptions(cfg, {
+      headless: false,
+      humanize: true,
+      humanPreset: "careful",
+    });
+    expect(escalated).toMatchObject({ headless: false, humanize: true, humanPreset: "careful" });
   });
 
   it("lets caller overrides win over the environment", () => {

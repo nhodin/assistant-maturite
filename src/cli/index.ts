@@ -98,10 +98,11 @@ program
   .option("--no-cookies", "Skip cookie acceptance")
   .option("--crux-key <key>", "Google CrUX/PSI API key")
   .option(
-    "--browser <playwright|cloak|cdp>",
-    "Browser provider (cloak = stealth Chromium for WAF-protected sites; " +
+    "--browser <cloak|playwright|cdp>",
+    "Browser provider (default cloak = stealth Chromium, what the audit runs on; " +
+      "playwright = vanilla Chromium, debug only; " +
       "cdp = attach to a real Chrome on --cdp-endpoint, else launch the installed one)",
-    "playwright",
+    "cloak",
   )
   .option(
     "--cdp-endpoint <url>",

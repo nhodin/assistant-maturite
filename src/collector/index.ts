@@ -640,10 +640,10 @@ export const collect: CollectFn = async (
   let cssUnusedPct: number | null = null;
   const externalCssBodies: string[] = [];
 
-  // Browser capture via the selected provider: vanilla Playwright (default) or
-  // CloakBrowser stealth (opts.browser === "cloak") for WAF-protected sites.
-  // The provider returns a Playwright-compatible BrowserContext either way.
-  const opened = await openBrowser(opts);
+  // Browser capture via the selected provider — CloakBrowser stealth by default.
+  // The provider returns a Playwright-compatible BrowserContext whichever it is.
+  // `finalUrl` lets an escalated cloak attempt pick its per-origin profile.
+  const opened = await openBrowser(opts, finalUrl);
   const { context } = opened;
   try {
 

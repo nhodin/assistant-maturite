@@ -18,7 +18,10 @@
  *   CLOAK_GEOIP                 1 → align timezone/locale with the proxy IP
  *   CLOAK_HUMANIZE              0 → disable human-like mouse/keyboard/scroll
  *   CLOAK_HUMAN_PRESET          default | careful   (default: careful)
- *   CLOAK_HEADLESS              1 → force headless (stealth is best headful)
+ *   CLOAK_HEADLESS              0 → force HEADED from the first attempt. Captures
+ *                               start headless by default (vendor guidance:
+ *                               headed is the escalation after a block, not the
+ *                               starting point).
  */
 
 import { createRequire } from "node:module";
@@ -34,7 +37,7 @@ export interface CloakConfig {
   /** Human-like input emulation. */
   humanize: boolean;
   humanPreset: "default" | "careful";
-  /** Force headless; undefined leaves the provider's own default in place. */
+  /** Explicit headless choice; undefined leaves the provider's own default in place. */
   headless?: boolean;
   releaseChannel?: "stable" | "preview";
   browserVersion?: string;
@@ -100,16 +103,24 @@ export function cloakConfigFromEnv(env: Env = process.env): CloakConfig {
  */
 export function cloakLaunchOptions(
   cfg: CloakConfig,
-  overrides: { proxy?: string; headless?: boolean } = {},
+  overrides: {
+    proxy?: string;
+    headless?: boolean;
+    humanize?: boolean;
+    humanPreset?: "default" | "careful";
+  } = {},
 ): Record<string, unknown> {
   const proxy = overrides.proxy ?? cfg.proxy;
-  const headless = overrides.headless ?? cfg.headless ?? false; // stealth ⇒ headful
+  // Headless by default: it needs no display and is simpler to run. A site that
+  // blocks or challenges us gets ONE headed retry (see CaptureMode) — headless is
+  // detectable on its own, so headed is the escalation, not the starting point.
+  const headless = overrides.headless ?? cfg.headless ?? true;
   const geoip = cfg.geoip && !!proxy && geoipAvailable();
 
   return {
     headless,
-    humanize: cfg.humanize,
-    humanPreset: cfg.humanPreset,
+    humanize: overrides.humanize ?? cfg.humanize,
+    humanPreset: overrides.humanPreset ?? cfg.humanPreset,
     ...(cfg.licenseKey ? { licenseKey: cfg.licenseKey } : {}),
     ...(proxy ? { proxy } : {}),
     ...(geoip ? { geoip: true } : {}),
@@ -137,7 +148,7 @@ export function describeCloakConfig(cfg: CloakConfig): string[] {
     `proxy        ${maskProxy(cfg.proxy)}`,
     `geoip        ${cfg.geoip ? (geoipAvailable() ? "on" : "requested but mmdb-lib is missing → off") : "off"}`,
     `humanize     ${cfg.humanize ? `on (${cfg.humanPreset})` : "off"}`,
-    `headless     ${cfg.headless === undefined ? "default (headful)" : cfg.headless}`,
+    `headless     ${cfg.headless === undefined ? "default (headless; headed on retry)" : cfg.headless}`,
   ];
   if (cfg.releaseChannel) lines.push(`channel      ${cfg.releaseChannel}`);
   if (cfg.browserVersion) lines.push(`version      ${cfg.browserVersion}`);

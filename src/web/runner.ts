@@ -1,33 +1,68 @@
 /**
  * Run executor — collects each page of a run, persists evidence, scores per-site,
  * and writes RunSiteScore rows. Runs in-process (fire-and-forget); the UI polls
- * run status. Only one run executes at a time (single-user internal tool).
+ * run status. Only one run executes at a time (single-user internal tool): the
+ * parallelism budget lives INSIDE a run, as the capture pool below, so that the
+ * number of live browser sessions stays bounded by CAPTURE_CONCURRENCY whatever
+ * the UI does.
+ *
+ * Within a run, pages are grouped by origin and the groups are captured in
+ * parallel — never two sessions on the same origin at once. See
+ * collector/concurrency.ts for why the parallelism has that shape.
+ *
+ * A run lives only in this process, so it dies with it. Two things make that
+ * survivable: each site is scored the moment its last page is captured (rather
+ * than all sites at the end), and `resumeRun` continues an interrupted run,
+ * keeping the sites already scored and recapturing only the rest.
  */
 import { prisma } from "./db";
 import { collect, assessCaptureHealth } from "../collector";
-import { asProvider, fallbackChain, providersAfterFailure } from "../collector/browser";
+import { asProvider } from "../collector/browser";
+import { captureConcurrencyFromEnv, groupByOrigin, runPool } from "../collector/concurrency";
 import type { CaptureFailureKind } from "../collector/sanity";
 import { TOPICS } from "../topics";
-import { scoreSite, scorePage } from "../engine";
+import { scoreSiteFromPages, scorePage } from "../engine";
 import { buildConfigMap } from "./config-store";
-import type { EvidenceBundle, Device, BrowserProvider } from "../core";
+import type { ConfigMap } from "../engine";
+import type {
+  EvidenceBundle,
+  Device,
+  BrowserProvider,
+  CaptureMode,
+  PageResult,
+  TopicResult,
+} from "../core";
 
-/** Pause before escalating to another provider on a WAF block, to stop hammering. */
-const BLOCK_COOLDOWN_MS = 20_000;
-
-/**
- * How many pages of the SAME origin may be blocked before the executor stops
- * escalating for that origin altogether. Past this point every extra attempt is
- * a near-certain 403 that only degrades the IP's standing with the WAF further.
- */
-const ORIGIN_BLOCK_BUDGET = 2;
-
+/** Scheme + host + port — the unit a WAF rate-limits on, and so the unit we bucket by. */
 function originOf(url: string): string {
   try {
     return new URL(url).origin;
   } catch {
     return url;
   }
+}
+
+/**
+ * Pause before the escalated retry. A block is a verdict on the CLIENT — its IP,
+ * its session, its missing anti-bot sensor cookie — so coming straight back only
+ * confirms the pattern. Waiting first is part of what makes the retry work.
+ */
+const BLOCK_COOLDOWN_MS = 20_000;
+
+/**
+ * How many pages of the SAME origin may be blocked THROUGH the escalated retry
+ * before the executor stops retrying for that origin at all. Only a block the
+ * escalation could not rescue counts: while the warm headed session still gets
+ * through, the origin is not refusing us. Past the budget the remaining pages
+ * fail on their first attempt and are recaptured in a later run.
+ */
+const ORIGIN_BLOCK_BUDGET = 2;
+
+/** Count one more block for an origin and return the new total. */
+function bumpBlocked(counts: Map<string, number>, origin: string): number {
+  const next = (counts.get(origin) ?? 0) + 1;
+  counts.set(origin, next);
+  return next;
 }
 
 const sleep = (ms: number): Promise<void> =>
@@ -42,12 +77,13 @@ type CaptureAttempt =
       kind: CaptureFailureKind;
     };
 
-/** One capture + health-check attempt with a single browser provider. Never throws. */
+/** One capture + health-check attempt, at one stealth level. Never throws. */
 async function tryCapture(
   url: string,
   browser: BrowserProvider,
   device: Device,
   acceptCookies: boolean,
+  mode: CaptureMode,
 ): Promise<CaptureAttempt> {
   let bundle: EvidenceBundle;
   try {
@@ -55,6 +91,7 @@ async function tryCapture(
       browser,
       device,
       acceptCookies,
+      mode,
       cruxApiKey: process.env.CRUX_API_KEY,
     });
   } catch (err) {
@@ -104,157 +141,204 @@ export function activeRun(): number | null {
   return activeRunId;
 }
 
-/** Kick off a run asynchronously. Returns immediately. */
-export function startRun(runId: number): { started: boolean; reason?: string } {
+/**
+ * Put every non-terminal run back into a truthful state. Called once at server
+ * start: a run lives only in this process, so a run still marked RUNNING in the
+ * DB when the process boots is by definition one whose executor died with it
+ * (server stopped, crash, reboot). Left alone it shows a spinner that will never
+ * advance; marked FAILED with the reason, it can be resumed — the pages already
+ * captured are kept.
+ */
+export async function recoverStaleRuns(): Promise<number> {
+  const stale = await prisma.run.findMany({
+    where: { status: { in: ["RUNNING", "PENDING"] } },
+    select: { id: true, donePages: true, totalPages: true },
+  });
+  if (stale.length === 0) return 0;
+
+  const ids = stale.map((r) => r.id);
+  // A page mid-capture when the process died has neither evidence nor score.
+  await prisma.runPage.updateMany({
+    where: { runId: { in: ids }, status: { in: ["RUNNING", "PENDING"] } },
+    data: { status: "FAILED", error: "Interrompue par un arrêt du serveur." },
+  });
+  for (const r of stale) {
+    await prisma.run.update({
+      where: { id: r.id },
+      data: {
+        status: "FAILED",
+        finishedAt: new Date(),
+        error:
+          `Interrompu par un arrêt du serveur (${r.donePages}/${r.totalPages} pages capturées). ` +
+          `« Reprendre » recapturera uniquement les pages manquantes.`,
+      },
+    });
+  }
+  return stale.length;
+}
+
+/** Pages of a run still to capture — what the resume button offers to finish. */
+export async function pendingPageCount(runId: number): Promise<number> {
+  return prisma.runPage.count({ where: { runId, status: { not: "DONE" } } });
+}
+
+/** The shape planResume needs from a RunPage — kept minimal so it stays testable. */
+export interface ResumablePage {
+  status: string;
+  page: { siteId: number };
+}
+
+/**
+ * Which pages a resume must capture: exactly those not already DONE. A page
+ * captured by the interrupted attempt is never recaptured — its per-page score
+ * was persisted (RunPage.topicsJson), and the site aggregate is rebuilt from the
+ * per-page results rather than from the bundles, so the missing pages are all
+ * that has to be paid for again. See engine.scoreSiteFromPages.
+ */
+export function planResume<T extends ResumablePage>(pages: T[]): T[] {
+  return pages.filter((p) => p.status !== "DONE");
+}
+
+/** Sites that a resume has to re-aggregate: those owning at least one recaptured page. */
+function sitesOf(pages: ResumablePage[]): Set<number> {
+  return new Set(pages.map((p) => p.page.siteId));
+}
+
+/** Shared launcher for a fresh start and for a resume. Returns immediately. */
+function launch(runId: number, resume: boolean): { started: boolean; reason?: string } {
   if (activeRunId !== null) {
     return { started: false, reason: `A run is already in progress (#${activeRunId})` };
   }
   activeRunId = runId;
-  executeRun(runId)
-    .catch((err) => console.error(`Run #${runId} crashed:`, err))
+  executeRun(runId, { resume })
+    .catch(async (err) => {
+      console.error(`Run #${runId} crashed:`, err);
+      // The executor died outside a page's own error handling. Without this the
+      // run would stay RUNNING until the next server start, spinner and all.
+      await prisma.run
+        .update({
+          where: { id: runId },
+          data: {
+            status: "FAILED",
+            finishedAt: new Date(),
+            error: `Exécution interrompue : ${String(err).slice(0, 1000)}`,
+          },
+        })
+        .catch(() => {});
+    })
     .finally(() => {
       activeRunId = null;
     });
   return { started: true };
 }
 
-async function executeRun(runId: number): Promise<void> {
+/** Kick off a run asynchronously. Returns immediately. */
+export function startRun(runId: number): { started: boolean; reason?: string } {
+  return launch(runId, false);
+}
+
+/**
+ * Continue a run that never finished. Sites already scored are left untouched;
+ * every other site is recaptured whole — see executeRun for why a half-captured
+ * site cannot be salvaged from the DB.
+ */
+export function resumeRun(runId: number): { started: boolean; reason?: string } {
+  return launch(runId, true);
+}
+
+async function executeRun(runId: number, opts: { resume?: boolean } = {}): Promise<void> {
   const run = await prisma.run.findUnique({
     where: { id: runId },
-    include: { runPages: { include: { page: { include: { site: true } } } } },
+    include: {
+      runPages: { include: { page: { include: { site: true } } } },
+      runSiteScores: { select: { siteId: true } },
+    },
   });
   if (!run) return;
 
-  const config = await buildConfigMap();
+  // On a resume the config MUST be the one the already-scored sites were graded
+  // with, or a single ranking would mix two scoring rules.
+  const config =
+    opts.resume && run.configJson
+      ? (run.configJson as unknown as ConfigMap)
+      : await buildConfigMap();
+
+  type SiteRef = (typeof run.runPages)[number]["page"]["site"];
+
+  const toCapture = opts.resume ? planResume(run.runPages) : [...run.runPages];
+  const keptPages = run.runPages.length - toCapture.length;
+
+  if (toCapture.length === 0) {
+    await prisma.run.update({
+      where: { id: runId },
+      data: { status: "DONE", finishedAt: new Date(), error: null },
+    });
+    return;
+  }
+
   await prisma.run.update({
     where: { id: runId },
     data: {
       status: "RUNNING",
-      startedAt: new Date(),
+      // A resume continues the same run, so it keeps its original start time.
+      startedAt: opts.resume ? (run.startedAt ?? new Date()) : new Date(),
+      finishedAt: null,
+      error: null,
       configJson: config as object,
       totalPages: run.runPages.length,
-      donePages: 0,
+      donePages: keptPages,
     },
+  });
+  // Pages about to be (re)captured go back to PENDING so the live table is honest.
+  await prisma.runPage.updateMany({
+    where: { id: { in: toCapture.map((rp) => rp.id) } },
+    data: { status: "PENDING", error: null },
   });
 
   const device: Device = run.device === "desktop" ? "desktop" : "mobile";
   const browser = asProvider(run.browser);
 
-  type SiteRef = (typeof run.runPages)[number]["page"]["site"];
-
-  // Capture each page; keep the FULL bundle in memory for scoring, persist a slim copy.
-  // Track the RunPage id alongside each bundle so we can write back its per-page score.
-  const bySite = new Map<
-    number,
-    { site: SiteRef; items: { runPageId: number; bundle: EvidenceBundle }[] }
-  >();
-  let anyDone = false;
-
-  const chain = fallbackChain(browser);
-  /** Pages already blocked per origin — feeds the per-origin circuit breaker. */
+  /** Pages left to capture per site — a site reaching 0 is aggregated immediately. */
+  const remainingBySite = new Map<number, number>();
+  for (const rp of toCapture) {
+    remainingBySite.set(rp.page.siteId, (remainingBySite.get(rp.page.siteId) ?? 0) + 1);
+  }
+  /** Blocked pages per origin — feeds the per-origin retry budget below. */
   const blocksByOrigin = new Map<string, number>();
 
-  for (const rp of run.runPages) {
-    const site = rp.page.site;
-    await prisma.runPage.update({ where: { id: rp.id }, data: { status: "RUNNING" } });
+  /**
+   * One page of `site` is settled (captured or failed). When it was the last one,
+   * the site aggregate is computed and persisted RIGHT THERE rather than at the
+   * end of the run — an interrupted run then keeps every site it had completed.
+   *
+   * The aggregate is rebuilt from the PER-PAGE scores stored in the DB, not from
+   * the bundles: that is what lets a resume mix pages captured before the
+   * interruption with pages captured after it, and it means no bundle has to be
+   * held in memory until the site is done. The rule is identical either way —
+   * see engine.scoreSiteFromPages.
+   */
+  const settleSite = async (site: SiteRef): Promise<void> => {
+    const left = (remainingBySite.get(site.id) ?? 1) - 1;
+    remainingBySite.set(site.id, left);
+    if (left > 0) return;
 
-    // Try providers until one yields a HEALTHY capture. A provider "fails" both
-    // when collect() throws and when assessCaptureHealth rejects the bundle — see
-    // tryCapture. What happens NEXT depends on why it failed: a technical failure
-    // costs nothing to retry, a WAF block costs the IP's standing with that origin.
-    let bundle: EvidenceBundle | null = null;
-    let pageError: string | null = null;
-    let usedBrowser: BrowserProvider | null = null;
-    let debugBundle: EvidenceBundle | null = null;
-    const failures: string[] = [];
-    const attempted: BrowserProvider[] = [];
-    const origin = originOf(rp.url);
-    let queue: BrowserProvider[] = [chain[0]];
-
-    while (queue.length > 0) {
-      const provider = queue.shift()!;
-      attempted.push(provider);
-      const attempt = await tryCapture(rp.url, provider, device, run.acceptCookies);
-      if (attempt.ok) {
-        bundle = attempt.bundle;
-        usedBrowser = provider;
-        break;
-      }
-      failures.push(`[${provider}] ${attempt.reason}`);
-      debugBundle = attempt.bundle ?? debugBundle;
-
-      if (attempt.kind === "blocked") {
-        const blocked = (blocksByOrigin.get(origin) ?? 0) + 1;
-        blocksByOrigin.set(origin, blocked);
-        if (blocked > ORIGIN_BLOCK_BUDGET) {
-          failures.push(
-            `[circuit-breaker] ${origin} has now blocked ${blocked} capture(s) in this run — ` +
-              `giving up on it instead of escalating, since further attempts from the same IP ` +
-              `only harden the WAF. Capture it with a warm browser session (see the "cdp" ` +
-              `provider) or import it manually.`,
-          );
-          break;
-        }
-      }
-
-      queue = providersAfterFailure(chain, attempted, attempt.kind);
-      // Escalating right after a block would just hand the WAF another data point.
-      if (queue.length > 0 && attempt.kind === "blocked") {
-        await sleep(BLOCK_COOLDOWN_MS);
-      }
-    }
-
-    if (!bundle) {
-      pageError = `Capture failed after ${attempted.length} attempt(s). ${failures.join(" | ")}`;
-      await prisma.runPage.update({
-        where: { id: rp.id },
-        data: {
-          status: "FAILED",
-          error: pageError.slice(0, 2000),
-          evidenceJson: debugBundle ? slimEvidence(debugBundle) : undefined,
-        },
-      });
-      await prisma.run.update({ where: { id: runId }, data: { donePages: { increment: 1 } } });
-      continue;
-    }
-
-    if (usedBrowser !== browser) {
-      pageError =
-        `Captured with fallback browser "${usedBrowser}" — ${failures.join(" | ")}`;
-    }
-
-    anyDone = true;
-    const entry = bySite.get(site.id) ?? { site, items: [] };
-    entry.items.push({ runPageId: rp.id, bundle });
-    bySite.set(site.id, entry);
-
-    // Score this page right away so the UI can show its criteria live, without
-    // waiting for the whole run. The site aggregate is still computed at the end.
-    const pageResult = scorePage(bundle, TOPICS, config);
-    await prisma.runPage.update({
-      where: { id: rp.id },
-      data: {
-        status: "DONE",
-        error: pageError?.slice(0, 2000) ?? null,
-        evidenceJson: slimEvidence(bundle),
-        overall: pageResult.overall,
-        geo: pageResult.geo,
-        china: pageResult.china,
-        topicsJson: pageResult.topics as unknown as object,
-      },
+    const scored = await prisma.runPage.findMany({
+      where: { runId, status: "DONE", page: { siteId: site.id } },
+      select: { url: true, topicsJson: true, overall: true, geo: true, china: true },
+      orderBy: { id: "asc" },
     });
-    await prisma.run.update({
-      where: { id: runId },
-      data: { donePages: { increment: 1 } },
-    });
-  }
+    const pageResults: PageResult[] = scored
+      .filter((rp) => rp.topicsJson !== null)
+      .map((rp) => ({
+        url: rp.url,
+        topics: rp.topicsJson as unknown as TopicResult[],
+        overall: rp.overall,
+        geo: rp.geo,
+        china: rp.china,
+      }));
+    if (pageResults.length === 0) return; // every page failed: no score for this site.
 
-  for (const { site, items } of bySite.values()) {
-    if (items.length === 0) continue;
-    // Per-page scores were already persisted during capture (same pure scorePage).
-    const bundles = items.map((i) => i.bundle);
-    const result = scoreSite(site.name, bundles, TOPICS, config);
-
+    const result = scoreSiteFromPages(site.name, pageResults, TOPICS, config);
     await prisma.runSiteScore.upsert({
       where: { runId_siteId: { runId, siteId: site.id } },
       create: {
@@ -274,14 +358,148 @@ async function executeRun(runId: number): Promise<void> {
         topicsJson: result.topics as unknown as object,
       },
     });
-  }
+  };
 
+  /**
+   * Capture, score and persist ONE page. A page that cannot be captured is
+   * recorded as FAILED and the run carries on; only a persistence failure can
+   * escape, and the pool below catches that.
+   */
+  const capturePage = async (rp: (typeof run.runPages)[number]): Promise<void> => {
+    const site = rp.page.site;
+    await prisma.runPage.update({ where: { id: rp.id }, data: { status: "RUNNING" } });
+
+    // The provider NEVER changes: CloakBrowser is already the most human-like
+    // client we have, so retrying with a weaker Chromium could only do worse.
+    // What a failed page gets instead is ONE retry with the SAME browser turned
+    // up to everything its vendor prescribes against a challenge — headed,
+    // humanize/careful, warm per-origin profile (see CaptureMode). Past the
+    // per-origin block budget even that is skipped: the WAF has made up its mind
+    // about this IP, and a second hit per page would only harden it further.
+    let attempt = await tryCapture(rp.url, browser, device, run.acceptCookies, "standard");
+    let mode: CaptureMode = "standard";
+    let firstFailure: string | null = null;
+
+    if (!attempt.ok) {
+      firstFailure = `[standard] ${attempt.reason}`;
+      const origin = originOf(rp.url);
+      const spent = blocksByOrigin.get(origin) ?? 0;
+
+      if (attempt.kind === "blocked" && spent >= ORIGIN_BLOCK_BUDGET) {
+        firstFailure +=
+          ` | [no retry] the escalated attempt was itself blocked on ${spent} page(s) of ` +
+          `${origin} in this run — this WAF has made up its mind about the client, and ` +
+          `another headed session would only harden it further. Recapture the brand later, ` +
+          `from another exit IP or with an already-warm profile.`;
+      } else {
+        // Coming straight back after a block just hands the WAF another data point.
+        if (attempt.kind === "blocked") await sleep(BLOCK_COOLDOWN_MS);
+        mode = "escalated";
+        attempt = await tryCapture(rp.url, browser, device, run.acceptCookies, "escalated");
+        // Only a block the ESCALATION could not rescue spends budget: as long as the
+        // warm headed session still gets through, the origin is not refusing us.
+        if (!attempt.ok && attempt.kind === "blocked") bumpBlocked(blocksByOrigin, origin);
+      }
+    }
+
+    const bundle = attempt.ok ? attempt.bundle : null;
+
+    if (!bundle) {
+      const failed = attempt as Extract<CaptureAttempt, { ok: false }>;
+      const pageError =
+        `Capture failed [${browser}/${failed.kind}] ${firstFailure}` +
+        (mode === "escalated" ? ` | [escalated] ${failed.reason}` : "");
+      await prisma.runPage.update({
+        where: { id: rp.id },
+        data: {
+          status: "FAILED",
+          error: pageError.slice(0, 2000),
+          evidenceJson: failed.bundle ? slimEvidence(failed.bundle) : undefined,
+        },
+      });
+      await prisma.run.update({ where: { id: runId }, data: { donePages: { increment: 1 } } });
+      await settleSite(site);
+      return;
+    }
+
+    const rescueNote =
+      mode === "escalated"
+        ? `Rescued by the escalated retry (headed + humanize/careful + warm per-origin ` +
+          `profile) after ${firstFailure}. That profile may already carry the site's ` +
+          `consent cookie, so consent-gated third parties can load without the banner ` +
+          `being clicked — Third parties evidence is weaker here than on a standard capture.`
+        : null;
+
+    // Score this page right away so the UI can show its criteria live, and so the
+    // site aggregate can be rebuilt from these stored results later (settleSite).
+    const pageResult = scorePage(bundle, TOPICS, config);
+    await prisma.runPage.update({
+      where: { id: rp.id },
+      data: {
+        status: "DONE",
+        // Only an escalated capture has a story to tell: it says WHY the standard
+        // attempt failed, and warns that a warm profile weakens Topic 4 evidence.
+        error: rescueNote?.slice(0, 2000) ?? null,
+        evidenceJson: slimEvidence(bundle),
+        overall: pageResult.overall,
+        geo: pageResult.geo,
+        china: pageResult.china,
+        topicsJson: pageResult.topics as unknown as object,
+      },
+    });
+    await prisma.run.update({
+      where: { id: runId },
+      data: { donePages: { increment: 1 } },
+    });
+    await settleSite(site);
+  };
+
+  // Parallelism is BY ORIGIN: each bucket holds every page of one origin and is
+  // captured sequentially, buckets run side by side. Widening the pool therefore
+  // adds brands in flight, never simultaneous hits on a single WAF — which is
+  // exactly the pattern that hardened Akamai against this client (see browser.ts).
+  const buckets = groupByOrigin(toCapture, (rp) => originOf(rp.url));
+  const { slots, warning } = captureConcurrencyFromEnv();
+  if (warning) console.warn(`Run #${runId}: ${warning}`);
+  console.log(
+    `Run #${runId}${opts.resume ? " (resume)" : ""}: ${toCapture.length} page(s) over ` +
+      `${buckets.length} origin(s), ${Math.min(slots, buckets.length)} captured in parallel` +
+      (opts.resume
+        ? ` — ${keptPages} page(s) already captured, kept; ` +
+          `${sitesOf(toCapture).size} site(s) to re-aggregate`
+        : ""),
+  );
+
+  await runPool(
+    buckets.map((bucket) => async () => {
+      for (const rp of bucket) {
+        // The pool must survive a page whose own error handling failed (a DB write,
+        // typically) — otherwise one page would abort the sibling origins too.
+        await capturePage(rp).catch((err) =>
+          console.error(`Run #${runId}: page #${rp.id} (${rp.url}) crashed:`, err),
+        );
+      }
+    }),
+    slots,
+  );
+
+  // Truth comes from the DB, not from this process: on a resume the sites scored
+  // by the earlier attempt count too.
+  const [scored, missed] = await Promise.all([
+    prisma.runSiteScore.count({ where: { runId } }),
+    prisma.runPage.count({ where: { runId, status: { not: "DONE" } } }),
+  ]);
   await prisma.run.update({
     where: { id: runId },
     data: {
-      status: anyDone ? "DONE" : "FAILED",
+      status: scored > 0 ? "DONE" : "FAILED",
       finishedAt: new Date(),
-      error: anyDone ? null : "All pages failed to capture",
+      error:
+        scored === 0
+          ? "All pages failed to capture"
+          : missed > 0
+            ? `${missed} page(s) non capturée(s) — « Reprendre » ne recapturera que celles-là.`
+            : null,
     },
   });
 }

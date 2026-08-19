@@ -106,9 +106,21 @@ interface SiteControlAgg {
   evidence: string;
 }
 
-function aggregateControl(
+/**
+ * The only per-page facts a site aggregate needs. They can come from evaluating a
+ * live EvidenceBundle OR from a ControlResult persisted earlier — which is what
+ * lets a resumed run aggregate pages captured before the interruption together
+ * with the ones captured after it.
+ */
+export interface PageControlFacts {
+  applicable: boolean;
+  passed: boolean;
+  evidence: string;
+}
+
+function aggregateFacts(
   control: Control,
-  pages: EvidenceBundle[],
+  facts: PageControlFacts[],
   cfg: ControlConfig,
 ): SiteControlAgg {
   if (!cfg.enabled) {
@@ -121,7 +133,7 @@ function aggregateControl(
     };
   }
 
-  const pageEvals = pages.map((p) => evalControlOnPage(control, p, cfg));
+  const pageEvals = facts;
   const applicableEvals = pageEvals.filter((e) => e.applicable);
 
   // N/A on ALL pages → N/A for the site
@@ -152,6 +164,7 @@ function aggregateControl(
   };
 }
 
+
 /* ── shared overall/geo/china computation ─────────────────────────────────── */
 
 function computeAggregates(
@@ -179,10 +192,15 @@ function computeAggregates(
 
 /* ── topic scoring ────────────────────────────────────────────────────────── */
 
-function scoreTopic(
+/**
+ * Site-level topic scoring, parameterised by where the per-page facts come from:
+ * freshly evaluated bundles (`scoreTopic`) or stored per-page ControlResults
+ * (`scoreSiteFromPages`). One implementation of the aggregation rule, two sources.
+ */
+function scoreTopicWith(
   topic: TopicModule,
-  pages: EvidenceBundle[],
   config: ConfigMap,
+  factsFor: (control: Control, cfg: ControlConfig) => PageControlFacts[],
 ): TopicResult {
   const controlResults: ControlResult[] = [];
 
@@ -203,7 +221,7 @@ function scoreTopic(
       continue;
     }
 
-    const agg = aggregateControl(control, pages, cfg);
+    const agg = aggregateFacts(control, factsFor(control, cfg), cfg);
     controlResults.push({
       controlId: control.id,
       label: control.label,
@@ -224,6 +242,16 @@ function scoreTopic(
   const raw = controlResults.reduce((sum, c) => sum + c.pointsAwarded, 0);
   const score = Math.min(100, raw);
   return { topicId: topic.id, name: topic.name, score, controls: controlResults };
+}
+
+function scoreTopic(
+  topic: TopicModule,
+  pages: EvidenceBundle[],
+  config: ConfigMap,
+): TopicResult {
+  return scoreTopicWith(topic, config, (control, cfg) =>
+    pages.map((p) => evalControlOnPage(control, p, cfg)),
+  );
 }
 
 /* ── single-page topic scoring (binary per control) ──────────────────────── */
@@ -272,6 +300,47 @@ export function scorePage(
   const topicResults = topics.map((t) => scoreTopicOnPage(t, page, config));
   const { overall, geo, china } = computeAggregates(topicResults, topics);
   return { url: page.url, topics: topicResults, overall, geo, china };
+}
+
+/**
+ * Aggregate a site from per-page results computed EARLIER, instead of from live
+ * EvidenceBundles. Same rule, same numbers as `scoreSite` — the aggregation only
+ * ever reads `applicable`/`passed` per page, and those are exactly what a stored
+ * ControlResult carries.
+ *
+ * This is what makes a resumed run cheap: the pages captured before the
+ * interruption keep their stored results and only the missing pages are
+ * recaptured, even though their (large) bundles are long gone.
+ *
+ * A control with no stored result on a given page (a control added to the code
+ * after that page was scored) counts as N/A on that page, so the aggregate is
+ * computed from the pages that actually know about it rather than silently
+ * failing them.
+ */
+export function scoreSiteFromPages(
+  site: string,
+  pages: PageResult[],
+  topics: TopicModule[],
+  config: ConfigMap,
+): SiteResult {
+  // controlId → its result on each page, in page order.
+  const byControl = new Map<string, PageControlFacts[]>();
+  for (const page of pages) {
+    for (const topic of page.topics) {
+      for (const c of topic.controls) {
+        const list = byControl.get(c.controlId) ?? [];
+        list.push({ applicable: c.applicable, passed: c.passed, evidence: c.evidence });
+        byControl.set(c.controlId, list);
+      }
+    }
+  }
+
+  const topicResults = topics.map((t) =>
+    scoreTopicWith(t, config, (control) => byControl.get(control.id) ?? []),
+  );
+  const { overall, geo, china } = computeAggregates(topicResults, topics);
+
+  return { site, topics: topicResults, overall, geo, china, pages };
 }
 
 export function scoreSite(

@@ -1,15 +1,16 @@
 /**
  * Browser-provider selection: how a persisted/CLI/form string becomes a provider,
- * and in which order providers are retried when a capture fails or is rejected by
- * the health check.
+ * and where an escalated retry keeps its warm profile. There is deliberately no
+ * fallback chain — a blocked page is retried with the SAME provider turned up
+ * (see CaptureMode), never with a weaker Chromium.
  */
 import { describe, it, expect } from "vitest";
+import * as path from "node:path";
 import {
   asProvider,
-  fallbackChain,
-  providersAfterFailure,
-  PROVIDER_PRIORITY,
+  PROVIDERS,
   cdpEndpointAlive,
+  cloakProfileDirFor,
 } from "../src/collector/browser";
 
 describe("asProvider", () => {
@@ -19,65 +20,41 @@ describe("asProvider", () => {
     expect(asProvider("cdp")).toBe("cdp");
   });
 
-  it("falls back to playwright for unknown / missing values", () => {
-    expect(asProvider("firefox")).toBe("playwright");
-    expect(asProvider("")).toBe("playwright");
-    expect(asProvider(undefined)).toBe("playwright");
+  it("falls back to cloak for unknown / missing values", () => {
+    expect(asProvider("firefox")).toBe("cloak");
+    expect(asProvider("")).toBe("cloak");
+    expect(asProvider(undefined)).toBe("cloak");
+  });
+
+  it("only ever returns a provider from the known list", () => {
+    for (const value of ["cloak", "playwright", "cdp", "nope", undefined]) {
+      expect(PROVIDERS).toContain(asProvider(value));
+    }
   });
 });
 
-describe("fallbackChain", () => {
-  it("puts the primary first and keeps every other provider", () => {
-    expect(fallbackChain("cloak")).toEqual(["cloak", "playwright", "cdp"]);
-    expect(fallbackChain("playwright")).toEqual(["playwright", "cloak", "cdp"]);
-    expect(fallbackChain("cdp")).toEqual(["cdp", "cloak", "playwright"]);
+describe("cloakProfileDirFor", () => {
+  const root = path.join("/tmp", "profiles");
+
+  it("gives each origin its own directory — the pool may run several in parallel", () => {
+    const a = cloakProfileDirFor("https://www.kenzo.com/fr/", root);
+    const b = cloakProfileDirFor("https://www.buly1803.com/", root);
+    expect(a).not.toBe(b);
+    expect(path.basename(a)).toBe("www.kenzo.com");
   });
 
-  it("never repeats a provider and covers all of them", () => {
-    for (const primary of PROVIDER_PRIORITY) {
-      const chain = fallbackChain(primary);
-      expect(new Set(chain).size).toBe(chain.length);
-      expect(new Set(chain)).toEqual(new Set(PROVIDER_PRIORITY));
+  it("reuses one directory for every page of the same host — that is the warmth", () => {
+    expect(cloakProfileDirFor("https://www.kenzo.com/fr/hp", root)).toBe(
+      cloakProfileDirFor("https://www.kenzo.com/fr/pdp/123", root),
+    );
+  });
+
+  it("never escapes the root, whatever the URL looks like", () => {
+    for (const url of ["not a url", "https://a b/../../x", "https://../evil"]) {
+      const dir = cloakProfileDirFor(url, root);
+      expect(path.dirname(dir)).toBe(root);
+      expect(path.basename(dir)).not.toContain("..");
     }
-  });
-
-  it("keeps cdp last unless it is the primary — it needs a graphical session", () => {
-    expect(fallbackChain("cloak").at(-1)).toBe("cdp");
-    expect(fallbackChain("playwright").at(-1)).toBe("cdp");
-  });
-});
-
-describe("providersAfterFailure", () => {
-  const chain = fallbackChain("cloak"); // ["cloak", "playwright", "cdp"]
-
-  it("keeps every remaining provider after a technical failure", () => {
-    expect(providersAfterFailure(chain, ["cloak"], "unusable")).toEqual([
-      "playwright",
-      "cdp",
-    ]);
-  });
-
-  it("escalates ONCE, to the strongest provider left, after a WAF block", () => {
-    // Not ["playwright", "cdp"]: each extra hit on a blocking origin degrades the
-    // IP's standing, so we jump straight to the most human-like client.
-    expect(providersAfterFailure(chain, ["cloak"], "blocked")).toEqual(["cdp"]);
-  });
-
-  it("stops once the strongest provider has itself been blocked", () => {
-    expect(providersAfterFailure(chain, ["cloak", "cdp"], "blocked")).toEqual([]);
-  });
-
-  it("never proposes a provider that was already attempted", () => {
-    for (const kind of ["blocked", "unusable"] as const) {
-      const next = providersAfterFailure(chain, ["cloak", "playwright"], kind);
-      expect(next).not.toContain("cloak");
-      expect(next).not.toContain("playwright");
-    }
-  });
-
-  it("returns nothing when the whole chain has been attempted", () => {
-    expect(providersAfterFailure(chain, [...chain], "unusable")).toEqual([]);
-    expect(providersAfterFailure(chain, [...chain], "blocked")).toEqual([]);
   });
 });
 

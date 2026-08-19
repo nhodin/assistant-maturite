@@ -180,12 +180,16 @@
       <label>Navigateur
         <select name="browser">
           <option value="cloak">CloakBrowser (anti-bot, recommandé)</option>
-          <option value="playwright">Playwright (headless)</option>
+          <option value="playwright">Playwright (headless, debug)</option>
           <option value="cdp">Chrome réel (CDP — anti-bot max, ouvre une fenêtre)</option>
         </select>
       </label>
-      <p class="muted small">En cas d'échec ou de capture bloquée, les autres navigateurs sont
-        automatiquement réessayés (cloak → playwright → chrome réel).</p>
+      <p class="muted small">Pas de changement de navigateur en cas de blocage : la page est
+        réessayée <strong>une fois</strong> avec le même navigateur poussé au maximum
+        (fenêtre visible + comportement humain « careful » + profil persistant par domaine).
+        Une page sauvée par cette 2<sup>e</sup> tentative est signalée dans le run — le profil
+        chaud peut déjà porter le cookie de consentement, ce qui affaiblit la preuve du
+        topic « Third parties ».</p>
       <label>Device
         <select name="device">
           <option value="mobile">Mobile</option>

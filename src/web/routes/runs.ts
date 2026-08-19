@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { prisma } from "../db";
-import { activeRun } from "../runner";
+import { activeRun, resumeRun } from "../runner";
 import { parseClientId, listClients } from "../clients";
 import { renderCsv } from "../../engine/report";
 import type { SiteResult, TopicResult } from "../../core/types";
@@ -19,6 +19,14 @@ export async function runRoutes(app: FastifyInstance) {
       }),
       listClients(),
     ]);
+    // Pages left to capture per run — a non-zero count is what makes a run resumable.
+    const pending = await prisma.runPage.groupBy({
+      by: ["runId"],
+      where: { runId: { in: runs.map((r) => r.id) }, status: { not: "DONE" } },
+      _count: { _all: true },
+    });
+    const pendingByRun = new Map(pending.map((p) => [p.runId, p._count._all]));
+
     return reply.view("run-list", {
       active: "runs",
       title: "Runs",
@@ -26,6 +34,7 @@ export async function runRoutes(app: FastifyInstance) {
       clients,
       selectedClientId: clientId,
       activeRunId: activeRun(),
+      pendingByRun,
     });
   });
 
@@ -56,7 +65,30 @@ export async function runRoutes(app: FastifyInstance) {
       run,
       ranking,
       byCategory,
+      // A run is live only if THIS process is executing it; a RUNNING row that is
+      // not the active run is a leftover from a previous server (see recoverStaleRuns).
+      isLive: activeRun() === run.id,
+      pendingPages: run.runPages.filter((rp) => rp.status !== "DONE").length,
+      flash: (req.query as any)?.flash ?? null,
     });
+  });
+
+  // Continue a run that never finished: keeps the sites already scored, recaptures
+  // the rest. See runner.resumeRun.
+  app.post("/runs/:id/resume", async (req, reply) => {
+    const id = Number((req.params as any).id);
+    const run = await prisma.run.findUnique({ where: { id }, select: { id: true } });
+    if (!run) return reply.code(404).send("Run not found");
+
+    const left = await prisma.runPage.count({ where: { runId: id, status: { not: "DONE" } } });
+    if (left === 0) {
+      return reply.redirect(`/runs/${id}?flash=${encodeURIComponent("Ce run est déjà complet.")}`);
+    }
+    const res = resumeRun(id);
+    if (!res.started) {
+      return reply.redirect(`/runs/${id}?flash=${encodeURIComponent(res.reason ?? "Reprise impossible")}`);
+    }
+    return reply.redirect(`/runs/${id}`);
   });
 
   // Per-site maturity results as CSV (same format as the engine report / out/*.csv).
@@ -101,7 +133,9 @@ export async function runRoutes(app: FastifyInstance) {
       },
     });
     if (!run) return reply.code(404).send("");
-    if (run.status === "DONE" || run.status === "FAILED") {
+    // Terminal, or RUNNING with nobody executing it (a run left over by a previous
+    // server process): either way there is nothing more to poll — reload the page.
+    if (run.status === "DONE" || run.status === "FAILED" || activeRun() !== run.id) {
       reply.header("HX-Refresh", "true");
       return reply.send("");
     }

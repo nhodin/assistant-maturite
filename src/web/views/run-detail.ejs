@@ -12,16 +12,38 @@
 <div class="head-row">
   <h1>Run #<%= run.id %></h1>
   <span class="badge b-<%= run.status %>"><%= run.status %></span>
+  <% if (!isLive && pendingPages > 0) { %>
+    <form method="post" action="/runs/<%= run.id %>/resume">
+      <% if (run.status === 'DONE') { %>
+        <%# The run went to the end: what is left is pages that failed to capture. %>
+        <button class="btn" type="submit">↻ Relancer <%= pendingPages %> page<%= pendingPages > 1 ? 's' : '' %> en échec</button>
+      <% } else { %>
+        <button class="btn" type="submit">▶ Reprendre (<%= pendingPages %> page<%= pendingPages > 1 ? 's' : '' %>)</button>
+      <% } %>
+    </form>
+  <% } %>
 </div>
+<% if (flash) { %><div class="empty err"><%= flash %></div><% } %>
 <p class="muted">
   Projet « <%= run.project.name %> » · <%= run.browser %> · <%= run.device %> ·
   <%= fmtDate(run.startedAt) %> → <%= fmtDate(run.finishedAt) %>
 </p>
 <% if (run.error) { %><div class="empty err"><%= run.error %></div><% } %>
 
-<% if (run.status === 'PENDING' || run.status === 'RUNNING') { %>
+<% if (isLive) { %>
   <%- include('partials/run-progress', { run }) %>
 <% } else { %>
+  <% if (pendingPages > 0 && run.runPages.length) { %>
+    <p class="muted">
+      <%= run.runPages.length - pendingPages %>/<%= run.runPages.length %> pages capturées.
+      <% if (run.status === 'DONE') { %>
+        Relancer ne recapture que les <%= pendingPages %> page(s) en échec et recalcule les
+        sites concernés ; les pages réussies sont conservées.
+      <% } else { %>
+        « Reprendre » ne recapture que les pages manquantes ; les pages déjà capturées sont conservées.
+      <% } %>
+    </p>
+  <% } %>
 
   <div class="head-row">
     <h2>Classement global</h2>

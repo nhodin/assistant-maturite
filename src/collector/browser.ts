@@ -2,11 +2,12 @@
  * Browser provider — abstracts WHICH Chromium drives the capture so the rest of
  * the collector stays identical. Three providers:
  *
- *  - "playwright" (default): vanilla headless Chromium. Fast, no extra binary,
- *    but blocked by aggressive WAFs (Akamai serves "Access Denied").
- *  - "cloak": CloakBrowser stealth Chromium (patched binary). Required for the
- *    Akamai-protected LVMH brand sites. Fully Playwright API-compatible
- *    (newContext / addInitScript / newCDPSession all work — verified).
+ *  - "cloak" (default): CloakBrowser stealth Chromium (patched binary). The one
+ *    the audit runs on — required for the Akamai-protected LVMH brand sites and
+ *    fully Playwright API-compatible (newContext / addInitScript /
+ *    newCDPSession all work — verified).
+ *  - "playwright": vanilla headless Chromium. Fast, no extra binary, but blocked
+ *    by aggressive WAFs (Akamai serves "Access Denied"). Debug/offline use only.
  *  - "cdp": a REAL, user-owned Chrome. Two modes, tried in that order:
  *      1. ATTACH — a Chrome is already listening on `cdpEndpoint`
  *         (started with `chrome.exe --remote-debugging-port=9222`): connect to it
@@ -29,61 +30,24 @@
 import { chromium, devices, type BrowserContext, type Page } from "playwright";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { BrowserProvider, CollectOptions } from "../core";
+import type { BrowserProvider, CaptureMode, CollectOptions } from "../core";
 import { cloakConfigFromEnv, cloakLaunchOptions } from "./cloak-config";
 
 /**
- * Order the providers are tried in when the configured one fails or returns an
- * unhealthy capture. "cdp" (a real, user-owned Chrome) comes LAST: highest
- * anti-bot fidelity, but it needs a graphical session and pops a visible Chrome
- * window, so it is the last resort rather than a default.
+ * Every provider the collector knows how to drive. The order is informational
+ * (roughly least → most human-like client): a capture uses exactly the provider
+ * it was configured with — there is no automatic retry with another one.
  */
-export const PROVIDER_PRIORITY: BrowserProvider[] = ["cloak", "playwright", "cdp"];
-
-/** Narrow an arbitrary string (CLI flag, form field, DB column) to a known provider. */
-export function asProvider(value: string | undefined): BrowserProvider {
-  return (PROVIDER_PRIORITY as string[]).includes(value ?? "")
-    ? (value as BrowserProvider)
-    : "playwright";
-}
-
-/** Providers to try for one page: primary first, then every other one in priority order. */
-export function fallbackChain(primary: BrowserProvider): BrowserProvider[] {
-  return [primary, ...PROVIDER_PRIORITY.filter((p) => p !== primary)];
-}
+export const PROVIDERS: BrowserProvider[] = ["cloak", "playwright", "cdp"];
 
 /**
- * Which providers are still worth trying after the ones in `attempted` failed.
- *
- * A "blocked" verdict is about the CLIENT — its IP, its session, its missing
- * anti-bot sensor cookie — not about which Chromium drove the capture. Measured
- * on an Akamai-protected LVMH site (2026-08): a first `cdp` capture succeeded,
- * then a handful of blocked captures from the same IP within the hour hardened
- * the WAF to the point where even a plain Node fetch got a 403 maintenance page,
- * while a human's warm Chrome session still loaded the site fine. So on a block
- * we escalate ONCE — to the strongest provider left — instead of burning the
- * whole chain against an origin that is already counting.
- *
- * A "unusable" failure (nothing fetched, no headers, broken URL) costs the
- * client nothing reputationally, so every remaining provider stays on the table.
+ * Narrow an arbitrary string (CLI flag, form field, DB column) to a known
+ * provider. Unknown/missing → "cloak", the stealth Chromium the audit runs on.
  */
-export function providersAfterFailure(
-  chain: BrowserProvider[],
-  attempted: BrowserProvider[],
-  kind: "blocked" | "unusable",
-): BrowserProvider[] {
-  const left = chain.filter((p) => !attempted.includes(p));
-  if (kind !== "blocked" || left.length === 0 || attempted.length === 0) return left;
-
-  // "Strength" = position in PROVIDER_PRIORITY: the later, the more human-like the
-  // client. Only an ESCALATION can plausibly get past a WAF that just refused us —
-  // once the strongest provider has itself been blocked, a weaker one certainly
-  // won't pass, and trying it anyway would only cost more standing with the origin.
-  const strength = (p: BrowserProvider): number => PROVIDER_PRIORITY.indexOf(p);
-  const strongestAttempted = Math.max(...attempted.map(strength));
-  const stronger = left.filter((p) => strength(p) > strongestAttempted);
-  if (stronger.length === 0) return [];
-  return [stronger.reduce((best, p) => (strength(p) > strength(best) ? p : best))];
+export function asProvider(value: string | undefined): BrowserProvider {
+  return (PROVIDERS as string[]).includes(value ?? "")
+    ? (value as BrowserProvider)
+    : "cloak";
 }
 
 export interface OpenedBrowser {
@@ -111,6 +75,41 @@ const DEFAULT_CDP_ENDPOINT = "http://127.0.0.1:9222";
 function defaultChromeProfileDir(): string {
   const here = path.dirname(fileURLToPath(import.meta.url)); // src/collector
   return path.join(here, "..", "..", "data", "chrome-profile");
+}
+
+/** `<app>/data/cloak-profiles` — root of the per-origin CloakBrowser profiles. */
+function defaultCloakProfileRoot(): string {
+  const here = path.dirname(fileURLToPath(import.meta.url)); // src/collector
+  return path.join(here, "..", "..", "data", "cloak-profiles");
+}
+
+/**
+ * Directory of the persistent CloakBrowser profile for one URL — ONE PER ORIGIN,
+ * never a single shared profile. Two reasons, and both matter:
+ *
+ *  - Correctness: a persistent context locks its directory, and the run executor
+ *    captures several origins in parallel. Per-origin dirs can never collide,
+ *    because the pool already guarantees one live session per origin.
+ *  - Credibility: what makes a warm profile read as a real user is that ITS
+ *    cookies, storage and history belong to the site being visited. A single
+ *    profile carrying twenty unrelated brands is its own anomaly.
+ */
+export function cloakProfileDirFor(url: string, root?: string): string {
+  let host: string;
+  try {
+    host = new URL(url).host;
+  } catch {
+    host = "unknown";
+  }
+  // Sanitize hard: the host comes from a URL in the DB, and the result is a path.
+  // Collapsing dot runs is what stops a host like ".." from walking out of the root.
+  const safe =
+    host
+      .toLowerCase()
+      .replace(/[^a-z0-9.-]/g, "_")
+      .replace(/[.]{2,}/g, ".")
+      .replace(/^[.-]+|[.-]+$/g, "") || "unknown";
+  return path.join(root ?? defaultCloakProfileRoot(), safe);
 }
 
 /** Context options for a mobile/desktop profile WITH a forced UA (Playwright). */
@@ -253,8 +252,78 @@ async function launchRealChrome(
   };
 }
 
+/**
+ * CloakBrowser stealth Chromium — the provider the audit runs on.
+ *
+ * "standard" (default): headless, fresh context. Headless needs no display and
+ * is simpler to run, so it is where every capture starts.
+ *
+ * "escalated": the ONE retry a blocked page gets. Everything the vendor
+ * prescribes against a challenge, at once — headed (headless is detectable on
+ * its own), humanize/careful input timing, and a persistent per-origin profile
+ * whose cookies and history make the session look like a returning user instead
+ * of a disposable incognito one.
+ *
+ * Note for whoever reads a rescued capture: a warm profile may already hold the
+ * site's consent cookie, so consent-gated third parties can load without the
+ * banner ever being clicked. Topic 4 evidence from an escalated capture is
+ * therefore weaker than from a standard one — the run executor records which
+ * mode produced the bundle.
+ */
+async function openCloak(
+  opts: CollectOptions,
+  device: "mobile" | "desktop",
+  url?: string,
+): Promise<OpenedBrowser> {
+  const mode: CaptureMode = opts.mode ?? "standard";
+  const escalated = mode === "escalated";
+
+  // Lazy import so the ~535 MB stealth binary is only required when actually used.
+  const cloak: any = await import("cloakbrowser");
+  // License key, proxy, geoip and humanize settings all come from .env — see
+  // cloak-config.ts. An escalated attempt overrides the two that are its whole
+  // point (headed + careful humanize), whatever the environment says.
+  const launchOptions = cloakLaunchOptions(cloakConfigFromEnv(), {
+    proxy: opts.proxy,
+    headless: escalated ? false : opts.headless,
+    ...(escalated ? { humanize: true, humanPreset: "careful" as const } : {}),
+  });
+
+  const contextOptions = cloakContextOptions(device);
+
+  if (escalated && url) {
+    const profileDir = cloakProfileDirFor(url, opts.cloakProfileRoot);
+    // Playwright-compatible builds expose launchPersistentContext; if this one
+    // does not, a fresh headed context is still a real escalation — losing the
+    // warm profile must not cost us the retry.
+    if (typeof cloak.launchPersistentContext === "function") {
+      const context: BrowserContext = await cloak.launchPersistentContext(profileDir, {
+        ...launchOptions,
+        ...contextOptions,
+      });
+      return { context, close: async () => { await context.close(); } };
+    }
+  }
+
+  const browser = await cloak.launch(launchOptions);
+  const context: BrowserContext = await browser.newContext(contextOptions);
+  return {
+    context,
+    close: async () => {
+      await browser.close();
+    },
+  };
+}
+
+/**
+ * Open a browser context for one capture.
+ *
+ * `url` is only used by the cloak provider in "escalated" mode, to pick the
+ * per-origin persistent profile; every other path ignores it.
+ */
 export async function openBrowser(
   opts: CollectOptions,
+  url?: string,
 ): Promise<OpenedBrowser> {
   const device = opts.device ?? "mobile";
   const provider = opts.browser ?? "playwright";
@@ -269,25 +338,7 @@ export async function openBrowser(
   }
 
   if (provider === "cloak") {
-    // Lazy import so the ~535 MB stealth binary is only required when actually used.
-    const cloak: any = await import("cloakbrowser");
-    // License key, proxy, geoip and humanize settings all come from .env — see
-    // cloak-config.ts. Without them this resolves to the previous behaviour
-    // (free tier, headful, humanize/careful).
-    const launchOptions = cloakLaunchOptions(cloakConfigFromEnv(), {
-      proxy: opts.proxy,
-      headless: opts.headless,
-    });
-    const browser = await cloak.launch(launchOptions);
-    const context: BrowserContext = await browser.newContext(
-      cloakContextOptions(device),
-    );
-    return {
-      context,
-      close: async () => {
-        await browser.close();
-      },
-    };
+    return openCloak(opts, device, url);
   }
 
   // Default: vanilla Playwright Chromium.

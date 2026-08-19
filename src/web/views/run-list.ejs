@@ -14,10 +14,25 @@
         <td><% if (r.project.client) { %><%= r.project.client.name %><% } else { %><span class="muted">—</span><% } %></td>
         <td><%= r.project.name %></td>
         <td><span class="badge b-<%= r.status %>"><%= r.status %></span></td>
-        <td><%= r.donePages %>/<%= r.totalPages %></td>
+        <%# donePages counts failures too, so a run can read 30/30 with pages missing. %>
+        <td>
+          <%= r.donePages %>/<%= r.totalPages %>
+          <% var ko = pendingByRun.get(r.id) || 0; %>
+          <% if (ko > 0 && r.status === 'DONE') { %><span class="badge b-FAILED"><%= ko %> KO</span><% } %>
+        </td>
         <td><%= r._count.runSiteScores %></td>
         <td><%= fmtDate(r.createdAt) %></td>
         <td class="actions">
+          <% var left = pendingByRun.get(r.id) || 0; %>
+          <% if (left > 0 && activeRunId !== r.id) { %>
+            <form method="post" action="/runs/<%= r.id %>/resume">
+              <% if (r.status === 'DONE') { %>
+                <button type="submit" title="Recapture les <%= left %> page(s) en échec">↻ Relancer les échecs</button>
+              <% } else { %>
+                <button type="submit" title="<%= left %> page(s) restant à capturer">▶ Reprendre</button>
+              <% } %>
+            </form>
+          <% } %>
           <form method="post" action="/runs/<%= r.id %>/delete" onsubmit="return confirm('Supprimer ce run ?')">
             <button class="danger" type="submit">Suppr.</button>
           </form>

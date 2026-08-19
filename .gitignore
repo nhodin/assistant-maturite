@@ -13,3 +13,5 @@ scratch-*
 .claude/worktrees/
 # Persistent Chrome profile used by the "cdp" browser provider (launch mode)
 /data/chrome-profile/
+# Warm per-origin CloakBrowser profiles used by an escalated retry
+/data/cloak-profiles/

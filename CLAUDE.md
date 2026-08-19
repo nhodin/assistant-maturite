@@ -27,7 +27,8 @@ src/
                # Control / TopicModule interfaces + makeEvidence() test fixture. DO NOT fork.
   collector/   # Capture → EvidenceBundle. Playwright/CloakBrowser + CDP network +
                # Node probes (TLS/IPv6/HTTP3) + view-source fetch + CrUX. Scores nothing.
-               #   browser.ts = swappable provider (playwright | cloak | cdp) + retry policy.
+               #   browser.ts = swappable provider (cloak | playwright | cdp) + stealth
+               #   escalation (CaptureMode) used by the single same-provider retry.
   topics/      # One module per topic (01..12). Each Control is a PURE function of an
                # EvidenceBundle → { passed, evidence }. util.ts = shared helpers.
   engine/      # Loads config, runs controls, aggregates per-site, exports MD/CSV.
@@ -87,8 +88,8 @@ data/WEBSITES.csv      # seed source (website;url_hp;url_plp;url_pdp)
      Chrome (`channel: "chrome"`, not the bundled Chromium), headful, with a dedicated
      persistent profile at `data/chrome-profile/` (gitignored) so accepted banners and
      device reputation accumulate across runs.
-  Both modes need a graphical session (a Chrome window appears) — so `cdp` is **last** in
-  `PROVIDER_PRIORITY` and never the default. `collector/index.ts` no longer calls
+  Both modes need a graphical session (a Chrome window appears), and nothing selects `cdp`
+  automatically any more — it is a manual choice for a human-warmed rescue. `collector/index.ts` no longer calls
   `context.close()`; teardown is the provider's business (closing the context in attach
   mode would close the user's own tabs).
   **Measured on `fr.louisvuitton.com/fra-fr/homepage` (Akamai), 2026-08 — read the whole
@@ -110,35 +111,64 @@ data/WEBSITES.csv      # seed source (website;url_hp;url_plp;url_pdp)
   - Note for attach mode: Chrome 136+ refuses `--remote-debugging-port` on the DEFAULT
     user-data-dir, so attaching to the operator's actual everyday profile is not possible;
     attach targets a separate `--user-data-dir`, which starts cold.
-- **Provider fallback is a CHAIN with a WAF-aware retry policy** (2026-08).
-  `fallbackChain(primary)` = primary first, then every other provider in
-  `PROVIDER_PRIORITY` order (`cloak` → `playwright` → `cdp`). What happens after a failure
-  depends on WHY it failed — `assessCaptureHealth` now returns a `kind`:
-  - `"unusable"` (nothing fetched, no headers, broken URL, collect() threw): retry with
-    every remaining provider. Costs nothing but time.
-  - `"blocked"` (WAF status 401/403/405/406/409/418/429/503, challenge-page title, markup
-    with zero assets served): `providersAfterFailure` escalates **once**, to the strongest
-    provider still untried, after a `BLOCK_COOLDOWN_MS` (20 s) pause — and returns nothing
-    at all once the strongest provider has itself been blocked, since no weaker client will
-    pass. Plus a per-origin circuit breaker (`ORIGIN_BLOCK_BUDGET` = 2): once an origin has
-    blocked that many captures in a run, the executor stops escalating for it entirely and
-    says so in `RunPage.error`. Rationale is the LV measurement above: burning the full
-    chain on a blocking origin does not rescue the page, it degrades the IP for the rest
-    of the run.
+- **No provider fallback — the retry is a STEALTH ESCALATION on the same browser**
+  (2026-08, replaces the old `fallbackChain`). CloakBrowser Pro is already the most
+  human-like client available, so switching to a weaker Chromium after a block could only
+  do worse while handing the WAF another data point. `asProvider` therefore defaults to
+  `cloak`, and a page gets **at most two attempts, both on the configured provider**, per
+  `CaptureMode` (`core/types.ts`) — the escalation ladder CloakBrowser's own guidance
+  prescribes:
+  - `"standard"`: **headless**, fresh context, humanize per `.env`. Where every capture
+    starts (headless needs no display and is simpler to run).
+  - `"escalated"`: fired once when the first attempt throws or is rejected by
+    `assessCaptureHealth`. **Headed** (headless is detectable on its own, so headed is the
+    escalation, not the starting point) + `humanize`/`careful` forced on + a **persistent
+    per-origin profile** under `data/cloak-profiles/<host>/` (gitignored) via
+    `launchPersistentContext`, so cookies and history accumulate and the session reads as a
+    returning user. Per-ORIGIN, not shared: the pool captures several origins in parallel
+    and a persistent context locks its directory.
+  - After a `"blocked"` failure the retry waits `BLOCK_COOLDOWN_MS` (20 s) first, and the
+    per-origin budget (`ORIGIN_BLOCK_BUDGET` = 2) skips the escalation entirely once an
+    origin has blocked that many captures in the run — the LV measurement above is why.
+  - **Scoring caveat**: a warm profile may already hold the site's consent cookie, so
+    consent-gated third parties can load without the banner being clicked. A page rescued
+    by the escalated attempt is `DONE` with a note in `RunPage.error` saying so — Topic 4
+    evidence from such a capture is weaker than from a standard one.
 - **`vitest.config.ts` pins `include` to `tests/**/*.test.ts`** — the `cdp` launch mode's
   persistent profile (`data/chrome-profile/`) contains Chrome extensions that ship their own
   `.spec.js` files, which the default glob happily collected and failed on.
 - **Evidence persistence**: the run executor (`web/runner.ts`) scores from the **in-memory**
   bundle and stores only a **slimmed** EvidenceBundle (no rawHtml/renderedHtml, no request
   headers) — a full bundle exceeds MySQL `max_allowed_packet` and drops the connection.
+- **Interruption & resume**: a run lives only in the server process, so stopping the server
+  kills it. Three things make that recoverable:
+  1. **Site aggregates are rebuilt from the per-page scores, not from the bundles**
+     (`engine.scoreSiteFromPages`). The aggregation rule only ever reads `applicable`/`passed`
+     per page, and those are exactly what `RunPage.topicsJson` persists — so a site can be
+     aggregated from pages captured minutes or days apart. `tests/runner-resume.test.ts` pins
+     that this path is criterion-for-criterion identical to `scoreSite` on live bundles.
+     Consequence: no bundle is held in memory waiting for a site to complete, and each site's
+     `RunSiteScore` is written as soon as its last page settles rather than at the end of the run.
+  2. `recoverStaleRuns()` runs once at server start and flips any run left `RUNNING`/`PENDING`
+     (plus its non-terminal pages) to `FAILED` with an explicit reason — otherwise the UI polls
+     a spinner nobody will ever advance.
+  3. `resumeRun(id)` (`POST /runs/:id/resume`) continues it: `planResume` recaptures **exactly
+     the pages that are not DONE**, nothing else, then re-aggregates the sites those pages belong
+     to. The resume reuses the run's stored `configJson`, never the current settings, so one
+     ranking never mixes two scoring rules.
+     One endpoint covers two situations, and the UI labels them apart: an interrupted run offers
+     « Reprendre » (pages never captured), a **DONE** run with failures offers « Relancer les
+     échecs » — a WAF block on 3 of 30 pages is retried without paying for the other 27. Note
+     that `donePages` counts failures too, so the run list shows a `N KO` badge next to `30/30`
+     rather than pretending the run is complete.
 - **Capture health check**: `collector/sanity.ts` (`assessCaptureHealth`) rejects a capture
   that landed on an error/bot-block page (document request ≥400 mid-capture, a Cloudflare/Akamai
   challenge title, or real `<img>` markup with zero image/stylesheet requests actually captured)
-  instead of silently scoring it. The run executor retries once with the **other** browser
-  provider (`playwright` ↔ `cloak`) when the configured one fails or is rejected; if the fallback
-  succeeds the `RunPage` is `DONE` with a note in `error` saying which provider actually worked,
-  and if both fail it's `FAILED` with both providers' reasons. Only the healthy bundle (if any)
-  feeds scoring.
+  instead of silently scoring it, and returns a `kind` (`"blocked"` | `"unusable"`) that drives
+  the retry above. The run executor retries once with the SAME provider in `"escalated"` mode;
+  if that rescues the page the `RunPage` is `DONE` with a note in `error` (first failure +
+  warm-profile caveat), and if both attempts fail it's `FAILED` with both reasons. Only the
+  healthy bundle (if any) feeds scoring.
 - **No more POC-mode controls** (resolved 2026-07 — see `../CLAUDE.md` topics 7/8/9 for the
   criteria these back):
   - **Registrable domain** (`topics/util.ts:registrableDomain`) uses `tldts` (Public Suffix
@@ -228,7 +258,7 @@ npm run db:studio                         # Prisma Studio (inspect DB)
 
 # Quality
 npm run typecheck                         # tsc --noEmit
-npm test                                  # vitest (372 tests)
+npm test                                  # vitest (395 tests)
 
 # CLI (no DB, writes out/ reports)
 npm run audit -- --browser cloak          # full audit over data/WEBSITES.csv
@@ -247,6 +277,14 @@ npm run spike:cloudflare -- <url>         # Cloudflare Browser Run CDP feasibili
 - Prisma is **pinned to v6** (v7 dropped `url = env()` in the schema).
 - `.env` is gitignored; Prisma CLI auto-loads it, the server loads it via `dotenv` (first import).
 - The run executor runs **one run at a time** (in-process); the UI polls status via HTMX.
+  Parallelism lives INSIDE a run: `collector/concurrency.ts` groups the run pages by
+  **origin** and `runner.ts` captures `CAPTURE_CONCURRENCY` buckets at once (default 2),
+  each bucket sequentially. Widening the pool adds brands in flight, never simultaneous
+  hits on one WAF. Two ceilings to respect: the CloakBrowser plan (`CLOAK_SESSION_LIMIT`,
+  default 5 — a higher CAPTURE_CONCURRENCY warns at run start rather than being clamped,
+  so a plan/config mismatch surfaces instead of hiding behind a slow run), and measurement
+  fidelity — every extra session shares CPU/bandwidth with the one being timed, so lab
+  TTFB/LCP drift upward past 2-3 slots.
 - When adding a topic: create `src/topics/NN-name.ts` exporting a `TopicModule`, register it
   in `src/topics/index.ts`, add per-control tests. Points must sum to 100 (enforced by
   `tests/topics.meta.test.ts`).
