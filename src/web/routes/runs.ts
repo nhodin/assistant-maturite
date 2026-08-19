@@ -36,7 +36,10 @@ export async function runRoutes(app: FastifyInstance) {
       include: {
         project: true,
         runSiteScores: { include: { site: true } },
-        runPages: { include: { page: { include: { site: true } } } },
+        runPages: {
+          include: { page: { include: { site: true } } },
+          orderBy: { id: "asc" },
+        },
       },
     });
     if (!run) return reply.code(404).send("Run not found");
@@ -85,16 +88,41 @@ export async function runRoutes(app: FastifyInstance) {
       .send(csv);
   });
 
-  // HTMX poll partial: progress while running; once terminal, refresh whole page.
+  // HTMX poll partial: live per-page results while running; once terminal, refresh page.
   app.get("/runs/:id/status", async (req, reply) => {
     const id = Number((req.params as any).id);
-    const run = await prisma.run.findUnique({ where: { id } });
+    const run = await prisma.run.findUnique({
+      where: { id },
+      include: {
+        runPages: {
+          include: { page: { include: { site: true } } },
+          orderBy: { id: "asc" },
+        },
+      },
+    });
     if (!run) return reply.code(404).send("");
     if (run.status === "DONE" || run.status === "FAILED") {
       reply.header("HX-Refresh", "true");
       return reply.send("");
     }
     return reply.view("partials/run-progress", { run });
+  });
+
+  // On-demand criteria detail for one captured page (available as soon as the
+  // page is scored, i.e. before the run finishes).
+  app.get("/runs/:id/pages/:runPageId/criteria", async (req, reply) => {
+    const id = Number((req.params as any).id);
+    const runPageId = Number((req.params as any).runPageId);
+    const rp = await prisma.runPage.findFirst({
+      where: { id: runPageId, runId: id },
+      include: { page: { include: { site: true } } },
+    });
+    if (!rp) return reply.code(404).send("");
+    return reply.view("partials/run-page-criteria", {
+      pageLabel: `${rp.page.site.name} — ${rp.page.label || rp.page.kind}`,
+      pageUrl: rp.url,
+      pageTopics: (rp.topicsJson as any[]) ?? [],
+    });
   });
 
   app.get("/runs/:id/sites/:siteId", async (req, reply) => {

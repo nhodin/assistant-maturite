@@ -14,11 +14,14 @@
 import type { MonitorFrequency } from "@prisma/client";
 import { prisma } from "./db";
 import { startRun, activeRun } from "./runner";
-import { fetchCruxMetrics } from "../collector/crux";
+import { fetchCruxMetrics, type CruxFormFactor } from "../collector/crux";
 
 // ── Pure helpers (unit-tested) ──────────────────────────────────────────────
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Form factors sampled every cycle — mobile and desktop are tracked separately. */
+const FORM_FACTORS: CruxFormFactor[] = ["PHONE", "DESKTOP"];
 
 /** Next due timestamp for a monitoring frequency, relative to `from`. */
 export function computeNextAt(freq: MonitorFrequency, from: Date): Date {
@@ -29,9 +32,10 @@ export function computeNextAt(freq: MonitorFrequency, from: Date): Date {
 // ── CrUX collection ─────────────────────────────────────────────────────────
 
 /**
- * Collect and persist CrUX snapshots for a monitored project: one per distinct
- * site origin, one per project page URL. Rows are only inserted when CrUX
- * returned data (a null fetch = no field data for that URL/origin → skipped).
+ * Collect and persist CrUX snapshots for a monitored project: for each device
+ * form factor (mobile + desktop), one per distinct site origin and one per
+ * project page URL. Rows are only inserted when CrUX returned data (a null fetch
+ * = no field data for that URL/origin/form factor → skipped).
  * Returns the number of snapshot rows inserted.
  */
 export async function collectCruxForProject(projectId: number): Promise<number> {
@@ -58,44 +62,49 @@ export async function collectCruxForProject(projectId: number): Promise<number> 
   }
 
   // Sequential fetches are fine (low volume, avoids hammering the CrUX API).
-  for (const origin of origins.keys()) {
-    const m = await fetchCruxMetrics({ origin }, apiKey);
-    if (!m) continue;
-    await prisma.cruxSnapshot.create({
-      data: {
-        projectId,
-        scope: "ORIGIN",
-        pageId: null,
-        urlKey: origin,
-        lcpMs: m.lcpMs ?? null,
-        ttfbMs: m.ttfbMs ?? null,
-        inpMs: m.inpMs ?? null,
-        cls: m.cls ?? null,
-        fcpMs: m.fcpMs ?? null,
-        collectedAt: now,
-      },
-    });
-    inserted++;
-  }
+  // Sample every form factor for every origin and every page.
+  for (const formFactor of FORM_FACTORS) {
+    for (const origin of origins.keys()) {
+      const m = await fetchCruxMetrics({ origin }, apiKey, formFactor);
+      if (!m) continue;
+      await prisma.cruxSnapshot.create({
+        data: {
+          projectId,
+          scope: "ORIGIN",
+          formFactor,
+          pageId: null,
+          urlKey: origin,
+          lcpMs: m.lcpMs ?? null,
+          ttfbMs: m.ttfbMs ?? null,
+          inpMs: m.inpMs ?? null,
+          cls: m.cls ?? null,
+          fcpMs: m.fcpMs ?? null,
+          collectedAt: now,
+        },
+      });
+      inserted++;
+    }
 
-  for (const pp of project.pages) {
-    const m = await fetchCruxMetrics({ url: pp.page.url }, apiKey);
-    if (!m) continue;
-    await prisma.cruxSnapshot.create({
-      data: {
-        projectId,
-        scope: "PAGE",
-        pageId: pp.pageId,
-        urlKey: pp.page.url,
-        lcpMs: m.lcpMs ?? null,
-        ttfbMs: m.ttfbMs ?? null,
-        inpMs: m.inpMs ?? null,
-        cls: m.cls ?? null,
-        fcpMs: m.fcpMs ?? null,
-        collectedAt: now,
-      },
-    });
-    inserted++;
+    for (const pp of project.pages) {
+      const m = await fetchCruxMetrics({ url: pp.page.url }, apiKey, formFactor);
+      if (!m) continue;
+      await prisma.cruxSnapshot.create({
+        data: {
+          projectId,
+          scope: "PAGE",
+          formFactor,
+          pageId: pp.pageId,
+          urlKey: pp.page.url,
+          lcpMs: m.lcpMs ?? null,
+          ttfbMs: m.ttfbMs ?? null,
+          inpMs: m.inpMs ?? null,
+          cls: m.cls ?? null,
+          fcpMs: m.fcpMs ?? null,
+          collectedAt: now,
+        },
+      });
+      inserted++;
+    }
   }
 
   return inserted;

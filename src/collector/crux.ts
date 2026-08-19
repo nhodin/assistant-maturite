@@ -32,6 +32,9 @@ export interface CruxMetrics {
   fcpMs?: number;
 }
 
+/** CrUX device form factor. We track mobile (PHONE) and desktop separately. */
+export type CruxFormFactor = "PHONE" | "DESKTOP";
+
 /** Pure parse of a CrUX `queryRecord` JSON payload into p75 metrics. */
 export function parseCruxMetrics(data: CruxResponse | null | undefined): CruxMetrics | null {
   const metrics = data?.record?.metrics;
@@ -88,19 +91,21 @@ export async function fetchCrux(
 }
 
 /**
- * Fetch p75 CrUX field metrics for either a specific `url` or an `origin`
- * (PHONE form factor). Returns null when no apiKey is provided, on a non-OK
- * response (a 404 = "no CrUX data for this URL/origin" is common), or on error.
+ * Fetch p75 CrUX field metrics for either a specific `url` or an `origin`, for
+ * the given `formFactor` (defaults to PHONE/mobile). Returns null when no apiKey
+ * is provided, on a non-OK response (a 404 = "no CrUX data for this URL/origin/
+ * form factor" is common), or on error.
  */
 export async function fetchCruxMetrics(
   key: { url?: string; origin?: string },
   apiKey?: string,
+  formFactor: CruxFormFactor = "PHONE",
 ): Promise<CruxMetrics | null> {
   if (!apiKey) return null;
   if (!key.url && !key.origin) return null;
 
   try {
-    const body: Record<string, unknown> = { formFactor: "PHONE" };
+    const body: Record<string, unknown> = { formFactor };
     if (key.url) body.url = key.url;
     else body.origin = key.origin;
 

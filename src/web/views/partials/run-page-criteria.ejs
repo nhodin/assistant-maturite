@@ -1,0 +1,32 @@
+<%
+  var topics = pageTopics || [];
+%>
+<div class="crit-panel">
+  <div class="head-row">
+    <strong><%= pageLabel %></strong>
+    <span class="muted url"><%= pageUrl %></span>
+  </div>
+  <% if (!topics.length) { %>
+    <p class="muted">Aucun détail de critères pour cette page.</p>
+  <% } %>
+  <% topics.forEach(function(t){ %>
+    <div class="crit-topic">
+      <div class="crit-topic-head">
+        <%= t.topicId %>. <%= t.name %>
+        <span class="score sm <%= scoreClass(t.score) %>"><%= fmtScore(t.score) %></span>
+      </div>
+      <ul class="crit-list">
+        <% (t.controls || []).forEach(function(c){ %>
+          <li>
+            <% if (!c.applicable) { %><span class="muted">N/A</span>
+            <% } else if (c.passed) { %><span class="ok">✓</span>
+            <% } else { %><span class="ko">✗</span><% } %>
+            <span class="crit-label"><%= c.label %></span>
+            <% if (c.applicable) { %><span class="muted">(<%= c.pointsAwarded %>/<%= c.maxPoints %>)</span><% } %>
+            <div class="ev"><%= c.evidence %></div>
+          </li>
+        <% }) %>
+      </ul>
+    </div>
+  <% }) %>
+</div>

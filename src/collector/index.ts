@@ -661,6 +661,13 @@ export const collect: CollectFn = async (
 
     const page = await context.newPage();
 
+    // Provider-specific per-page setup, before any navigation. Only the "cdp"
+    // attach mode uses it (device emulation on the user's own context, which
+    // carries no Playwright emulation); a no-op for playwright/cloak.
+    if (opened.preparePage) {
+      await opened.preparePage(page);
+    }
+
     // ── CDP session for network events ─────────────────────────────────────────
     let cdp: CDPSession;
     try {
@@ -1119,9 +1126,9 @@ export const collect: CollectFn = async (
     // Resolve external stylesheet body fetches before the CDP session/context go
     // away — Network.getResponseBody only works while the page is still alive.
     await Promise.allSettled(externalCssFetchPromises);
-
-    await context.close();
   } finally {
+    // Teardown is the provider's business: closing the context here would close
+    // the user's own default context (and all their tabs) in the "cdp" attach mode.
     await opened.close();
   }
 

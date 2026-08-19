@@ -6,11 +6,32 @@
  */
 import type { EvidenceBundle } from "../core";
 
+/**
+ * Why a capture was rejected.
+ * - "blocked": a WAF/anti-bot VERDICT (403/429, challenge or maintenance page,
+ *   assets never served). The verdict is about the client's standing — its IP,
+ *   its session, its lack of a valid sensor cookie — not about which Chromium
+ *   drove it. Hammering the same origin with the next provider seconds later
+ *   rarely helps and measurably degrades that standing, so the run executor
+ *   escalates at most once and cools down first.
+ * - "unusable": a technical capture failure (nothing fetched, no headers,
+ *   broken URL). Another provider may genuinely do better, at no reputational cost.
+ */
+export type CaptureFailureKind = "blocked" | "unusable";
+
 export interface CaptureHealth {
   ok: boolean;
   /** Human-readable reason, set only when ok === false. */
   reason: string | null;
+  /** Set only when ok === false. Drives the run executor's retry policy. */
+  kind?: CaptureFailureKind;
 }
+
+/**
+ * HTTP statuses a WAF returns as a verdict on the client, as opposed to a
+ * genuinely broken URL (404/410) or a one-off server error.
+ */
+const BLOCK_STATUSES = new Set([401, 403, 405, 406, 409, 418, 429, 503]);
 
 const ERROR_TITLE_PATTERNS: RegExp[] = [
   /access denied/i,
@@ -54,6 +75,7 @@ export function assessCaptureHealth(bundle: EvidenceBundle): CaptureHealth {
   if (bundle.rawHtml.trim().length < 500) {
     return {
       ok: false,
+      kind: "unusable",
       reason:
         `Empty raw HTML: the raw-HTML fetch failed or returned a near-empty document ` +
         `(${bundle.rawHtml.trim().length} non-whitespace bytes, < 500) — likely bot-blocked or ` +
@@ -64,6 +86,7 @@ export function assessCaptureHealth(bundle: EvidenceBundle): CaptureHealth {
   if (Object.keys(bundle.mainResponseHeaders).length === 0) {
     return {
       ok: false,
+      kind: "unusable",
       reason:
         `No response headers: the raw-HTML fetch captured 0 main-document response headers — likely ` +
         `bot-blocked or reset at the HTTP layer, so header-based criteria (cache/TTL, CDN, ` +
@@ -80,6 +103,7 @@ export function assessCaptureHealth(bundle: EvidenceBundle): CaptureHealth {
   if (blockedDoc) {
     return {
       ok: false,
+      kind: BLOCK_STATUSES.has(blockedDoc.status) ? "blocked" : "unusable",
       reason:
         `Blocked mid-capture: the document request to ${blockedDoc.url} returned HTTP ${blockedDoc.status} ` +
         `during the "${blockedDoc.phase ?? "load"}" phase (a real document response is never 4xx/5xx) — ` +
@@ -92,6 +116,7 @@ export function assessCaptureHealth(bundle: EvidenceBundle): CaptureHealth {
   if (badTitlePattern) {
     return {
       ok: false,
+      kind: "blocked",
       reason:
         `Blocked page: <title> is "${title}", which matches the known error/bot-challenge wording ` +
         `/${badTitlePattern.source}/ — capture hit a block/error page instead of the real site.`,
@@ -108,6 +133,7 @@ export function assessCaptureHealth(bundle: EvidenceBundle): CaptureHealth {
   if (imgTagCount >= 5 && imageRequests === 0 && styleRequests === 0 && scriptRequests <= 2) {
     return {
       ok: false,
+      kind: "blocked",
       reason:
         `Blocked assets: raw HTML references ${imgTagCount} <img> tag(s) but the browser captured 0 image ` +
         `and 0 stylesheet requests (only ${bundle.requests.length} network requests total: ` +

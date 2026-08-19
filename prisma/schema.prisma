@@ -53,6 +53,13 @@ enum CruxScope {
   PAGE
 }
 
+/// Device form factor of a CrUX field-data snapshot. Mobile and desktop are
+/// tracked separately (each cycle samples both).
+enum CruxFormFactor {
+  PHONE
+  DESKTOP
+}
+
 /// A client / organization that owns sites and projects (e.g. LVMH, Conforama, Groupama).
 model Client {
   id        Int      @id @default(autoincrement())
@@ -136,6 +143,9 @@ model CruxSnapshot {
   project     Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
   projectId   Int
   scope       CruxScope
+  // Device form factor this sample was collected for (mobile vs desktop).
+  // Defaults to PHONE so pre-existing rows (all mobile) stay valid without a data migration.
+  formFactor  CruxFormFactor @default(PHONE)
   // For PAGE scope, the page this sample belongs to. Null for ORIGIN scope.
   page        Page?     @relation(fields: [pageId], references: [id], onDelete: Cascade)
   pageId      Int?
@@ -168,7 +178,7 @@ model Run {
   project       Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
   projectId     Int
   status        RunStatus @default(PENDING)
-  browser       String    @default("cloak") // playwright | cloak
+  browser       String    @default("cloak") // playwright | cloak | cdp
   source        String    @default("manual") // manual | scheduled
   device        String    @default("mobile")
   acceptCookies Boolean   @default(true)

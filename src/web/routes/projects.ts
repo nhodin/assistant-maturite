@@ -1,7 +1,8 @@
 import type { FastifyInstance } from "fastify";
-import type { MonitorFrequency, ProjectMode } from "@prisma/client";
+import type { MonitorFrequency, ProjectMode, CruxFormFactor } from "@prisma/client";
 import { prisma } from "../db";
 import { startRun } from "../runner";
+import { asProvider } from "../../collector/browser";
 import { runMonitoringCycle } from "../monitor";
 import { parseClientId, listClients } from "../clients";
 import { buildProjectTrend, type TrendRunInput, type TrendPageDef } from "../trend";
@@ -13,6 +14,10 @@ function parseMode(v: unknown): ProjectMode {
 
 function parseFrequency(v: unknown): MonitorFrequency {
   return v === "WEEKLY" ? "WEEKLY" : "DAILY";
+}
+
+function parseFormFactor(v: unknown): CruxFormFactor {
+  return v === "DESKTOP" ? "DESKTOP" : "PHONE";
 }
 
 function toIdArray(v: unknown): number[] {
@@ -139,6 +144,8 @@ export async function projectRoutes(app: FastifyInstance) {
     const trend = buildProjectTrend(trendRuns, pageDefs);
 
     // Webperf monitoring: CrUX snapshots for the latest-values table + trend charts.
+    // A device toggle (?ff=PHONE|DESKTOP) filters both to one form factor at a time.
+    const selectedFF = parseFormFactor((req.query as any)?.ff);
     let cruxTrends: ReturnType<typeof buildCruxTrends> = [];
     let cruxLatest: {
       scope: string;
@@ -151,13 +158,21 @@ export async function projectRoutes(app: FastifyInstance) {
       fcpMs: number | null;
       collectedAt: Date;
     }[] = [];
+    // Which form factors actually have data (drives the toggle availability).
+    const cruxFormFactors: CruxFormFactor[] = [];
 
     if (project.mode === "MONITORING") {
-      const snapshots = await prisma.cruxSnapshot.findMany({
+      const allSnapshots = await prisma.cruxSnapshot.findMany({
         where: { projectId: id },
         orderBy: { collectedAt: "asc" },
         include: { page: { include: { site: true } } },
       });
+
+      if (allSnapshots.some((s) => s.formFactor === "PHONE")) cruxFormFactors.push("PHONE");
+      if (allSnapshots.some((s) => s.formFactor === "DESKTOP")) cruxFormFactors.push("DESKTOP");
+
+      // Restrict the table + charts to the selected device form factor.
+      const snapshots = allSnapshots.filter((s) => s.formFactor === selectedFF);
 
       // Label helper for a snapshot's scope.
       const labelFor = (s: (typeof snapshots)[number]): string => {
@@ -205,6 +220,8 @@ export async function projectRoutes(app: FastifyInstance) {
       trend,
       cruxTrends,
       cruxLatest,
+      cruxFormFactors,
+      selectedFF,
       flash: (req.query as any)?.flash ?? null,
     });
   });
@@ -224,7 +241,7 @@ export async function projectRoutes(app: FastifyInstance) {
         projectId: id,
         status: "PENDING",
         source: "manual",
-        browser: b.browser === "playwright" ? "playwright" : "cloak",
+        browser: asProvider(String(b.browser ?? "cloak")),
         device: b.device === "desktop" ? "desktop" : "mobile",
         acceptCookies: b.acceptCookies === "on" || b.acceptCookies === "true",
         totalPages: project.pages.length,

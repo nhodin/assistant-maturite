@@ -27,7 +27,7 @@ src/
                # Control / TopicModule interfaces + makeEvidence() test fixture. DO NOT fork.
   collector/   # Capture → EvidenceBundle. Playwright/CloakBrowser + CDP network +
                # Node probes (TLS/IPv6/HTTP3) + view-source fetch + CrUX. Scores nothing.
-               #   browser.ts = swappable provider (playwright | cloak).
+               #   browser.ts = swappable provider (playwright | cloak | cdp) + retry policy.
   topics/      # One module per topic (01..12). Each Control is a PURE function of an
                # EvidenceBundle → { passed, evidence }. util.ts = shared helpers.
   engine/      # Loads config, runs controls, aggregates per-site, exports MD/CSV.
@@ -59,6 +59,64 @@ data/WEBSITES.csv      # seed source (website;url_hp;url_plp;url_pdp)
   Playwright. Don't re-evaluate it for LVMH sites unless Cloudflare adds proxy/stealth
   support; it remains a legitimate option for capturing *unprotected* sites without
   installing Chromium/CloakBrowser locally.
+- **`cdp` provider — a REAL, user-owned Chrome** (2026-08). Third provider, highest
+  anti-bot fidelity, for the sites CloakBrowser itself can't get through. Two modes,
+  auto-selected in `collector/browser.ts`:
+  1. **attach** — a Chrome is already listening on `cdpEndpoint` (default
+     `http://127.0.0.1:9222`, overridable via `CDP_ENDPOINT`), started with
+     `chrome.exe --remote-debugging-port=9222`: `connectOverCDP` + **`browser.contexts()[0]`**
+     (never `newContext()`, which would create a fresh incognito context and throw the
+     user's real cookies/history away). Verified: `browser.close()` on a CDP connection
+     only *detaches* — the user's Chrome keeps running — and we close only the tab we
+     opened. An attached context carries no Playwright emulation, so the provider
+     returns a `preparePage` hook that applies mobile metrics/UA/touch over CDP's
+     `Emulation` domain; the collector calls it right after `newPage()` (the ONLY
+     provider-specific branch in the collector).
+  2. **launch** — nothing on the endpoint: `launchPersistentContext` on the *installed*
+     Chrome (`channel: "chrome"`, not the bundled Chromium), headful, with a dedicated
+     persistent profile at `data/chrome-profile/` (gitignored) so accepted banners and
+     device reputation accumulate across runs.
+  Both modes need a graphical session (a Chrome window appears) — so `cdp` is **last** in
+  `PROVIDER_PRIORITY` and never the default. `collector/index.ts` no longer calls
+  `context.close()`; teardown is the provider's business (closing the context in attach
+  mode would close the user's own tabs).
+  **Measured on `fr.louisvuitton.com/fra-fr/homepage` (Akamai), 2026-08 — read the whole
+  story before trusting `cdp` as an answer to anti-bot:**
+  - First attempt: `cloak` → document HTTP 403, 11 requests, 12 KB rendered DOM, rejected
+    by `assessCaptureHealth`; `cdp` → health OK, 2 MB rendered DOM, real LCP `<img>`, 197
+    head tags, 10 `@font-face`, TLS 1.3 / h2 / HTTP3 / IPv6 probed. So the provider works.
+  - One hour and a handful of blocked captures later, from the same IP: **every** provider
+    got 403 — `cloak`, `playwright`, `cdp` in launch mode, `cdp` in attach mode against a
+    Chrome started with human-style flags, AND a fresh throwaway profile. The plain Node
+    raw-HTML fetch, which had returned 1 MB earlier, also started returning a 12 KB
+    maintenance page. Meanwhile the operator's own everyday Chrome loaded the site fine.
+  - Diagnosis: Akamai hardened its stance **towards this client**, and now demands a valid
+    `_abck` sensor cookie that only a warm, genuinely human session holds. The blocker is
+    the client's standing (IP + session), not which Chromium drives the capture — so no
+    provider is a general answer here, and repeated automated captures actively make it
+    worse. A residential proxy, a human-warmed attach session, or manual evidence import
+    are the real mitigations.
+  - Note for attach mode: Chrome 136+ refuses `--remote-debugging-port` on the DEFAULT
+    user-data-dir, so attaching to the operator's actual everyday profile is not possible;
+    attach targets a separate `--user-data-dir`, which starts cold.
+- **Provider fallback is a CHAIN with a WAF-aware retry policy** (2026-08).
+  `fallbackChain(primary)` = primary first, then every other provider in
+  `PROVIDER_PRIORITY` order (`cloak` → `playwright` → `cdp`). What happens after a failure
+  depends on WHY it failed — `assessCaptureHealth` now returns a `kind`:
+  - `"unusable"` (nothing fetched, no headers, broken URL, collect() threw): retry with
+    every remaining provider. Costs nothing but time.
+  - `"blocked"` (WAF status 401/403/405/406/409/418/429/503, challenge-page title, markup
+    with zero assets served): `providersAfterFailure` escalates **once**, to the strongest
+    provider still untried, after a `BLOCK_COOLDOWN_MS` (20 s) pause — and returns nothing
+    at all once the strongest provider has itself been blocked, since no weaker client will
+    pass. Plus a per-origin circuit breaker (`ORIGIN_BLOCK_BUDGET` = 2): once an origin has
+    blocked that many captures in a run, the executor stops escalating for it entirely and
+    says so in `RunPage.error`. Rationale is the LV measurement above: burning the full
+    chain on a blocking origin does not rescue the page, it degrades the IP for the rest
+    of the run.
+- **`vitest.config.ts` pins `include` to `tests/**/*.test.ts`** — the `cdp` launch mode's
+  persistent profile (`data/chrome-profile/`) contains Chrome extensions that ship their own
+  `.spec.js` files, which the default glob happily collected and failed on.
 - **Evidence persistence**: the run executor (`web/runner.ts`) scores from the **in-memory**
   bundle and stores only a **slimmed** EvidenceBundle (no rawHtml/renderedHtml, no request
   headers) — a full bundle exceeds MySQL `max_allowed_packet` and drops the connection.
@@ -159,11 +217,12 @@ npm run db:studio                         # Prisma Studio (inspect DB)
 
 # Quality
 npm run typecheck                         # tsc --noEmit
-npm test                                  # vitest (354 tests)
+npm test                                  # vitest (372 tests)
 
 # CLI (no DB, writes out/ reports)
 npm run audit -- --browser cloak          # full audit over data/WEBSITES.csv
 npm run collect -- https://example.com    # capture one URL → evidence/<host>.json
+npm run collect -- <url> cdp              # …with a real Chrome (attach to :9222, else launch)
 npx tsx src/cli/rescore.ts                # re-score evidence/*.json against current topics
 
 # Spike (not wired into the app — see "Anti-bot" above)

@@ -5,20 +5,42 @@
  */
 import { prisma } from "./db";
 import { collect, assessCaptureHealth } from "../collector";
+import { asProvider, fallbackChain, providersAfterFailure } from "../collector/browser";
+import type { CaptureFailureKind } from "../collector/sanity";
 import { TOPICS } from "../topics";
-import { scoreSite } from "../engine";
+import { scoreSite, scorePage } from "../engine";
 import { buildConfigMap } from "./config-store";
-import type { EvidenceBundle, Device } from "../core";
+import type { EvidenceBundle, Device, BrowserProvider } from "../core";
 
-type BrowserProvider = "playwright" | "cloak";
+/** Pause before escalating to another provider on a WAF block, to stop hammering. */
+const BLOCK_COOLDOWN_MS = 20_000;
 
-function otherBrowser(b: BrowserProvider): BrowserProvider {
-  return b === "cloak" ? "playwright" : "cloak";
+/**
+ * How many pages of the SAME origin may be blocked before the executor stops
+ * escalating for that origin altogether. Past this point every extra attempt is
+ * a near-certain 403 that only degrades the IP's standing with the WAF further.
+ */
+const ORIGIN_BLOCK_BUDGET = 2;
+
+function originOf(url: string): string {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return url;
+  }
 }
+
+const sleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
 
 type CaptureAttempt =
   | { ok: true; bundle: EvidenceBundle }
-  | { ok: false; reason: string; bundle: EvidenceBundle | null };
+  | {
+      ok: false;
+      reason: string;
+      bundle: EvidenceBundle | null;
+      kind: CaptureFailureKind;
+    };
 
 /** One capture + health-check attempt with a single browser provider. Never throws. */
 async function tryCapture(
@@ -36,11 +58,17 @@ async function tryCapture(
       cruxApiKey: process.env.CRUX_API_KEY,
     });
   } catch (err) {
-    return { ok: false, reason: String(err).slice(0, 500), bundle: null };
+    // A throw is a technical failure (launch/navigation/timeout), never a WAF verdict.
+    return { ok: false, reason: String(err).slice(0, 500), bundle: null, kind: "unusable" };
   }
   const health = assessCaptureHealth(bundle);
   if (!health.ok) {
-    return { ok: false, reason: health.reason ?? "Capture rejected", bundle };
+    return {
+      ok: false,
+      reason: health.reason ?? "Capture rejected",
+      bundle,
+      kind: health.kind ?? "unusable",
+    };
   }
   return { ok: true, bundle };
 }
@@ -110,7 +138,7 @@ async function executeRun(runId: number): Promise<void> {
   });
 
   const device: Device = run.device === "desktop" ? "desktop" : "mobile";
-  const browser = run.browser === "cloak" ? "cloak" : "playwright";
+  const browser = asProvider(run.browser);
 
   type SiteRef = (typeof run.runPages)[number]["page"]["site"];
 
@@ -122,54 +150,97 @@ async function executeRun(runId: number): Promise<void> {
   >();
   let anyDone = false;
 
-  const fallbackBrowser = otherBrowser(browser);
+  const chain = fallbackChain(browser);
+  /** Pages already blocked per origin — feeds the per-origin circuit breaker. */
+  const blocksByOrigin = new Map<string, number>();
 
   for (const rp of run.runPages) {
     const site = rp.page.site;
     await prisma.runPage.update({ where: { id: rp.id }, data: { status: "RUNNING" } });
 
-    const primaryAttempt = await tryCapture(rp.url, browser, device, run.acceptCookies);
-
+    // Try providers until one yields a HEALTHY capture. A provider "fails" both
+    // when collect() throws and when assessCaptureHealth rejects the bundle — see
+    // tryCapture. What happens NEXT depends on why it failed: a technical failure
+    // costs nothing to retry, a WAF block costs the IP's standing with that origin.
     let bundle: EvidenceBundle | null = null;
     let pageError: string | null = null;
+    let usedBrowser: BrowserProvider | null = null;
+    let debugBundle: EvidenceBundle | null = null;
+    const failures: string[] = [];
+    const attempted: BrowserProvider[] = [];
+    const origin = originOf(rp.url);
+    let queue: BrowserProvider[] = [chain[0]];
 
-    if (primaryAttempt.ok) {
-      bundle = primaryAttempt.bundle;
-    } else {
-      // Primary browser was blocked or produced an unhealthy capture — retry once
-      // with the other provider (playwright <-> cloak) before giving up on this page.
-      const fallbackAttempt = await tryCapture(rp.url, fallbackBrowser, device, run.acceptCookies);
-      if (fallbackAttempt.ok) {
-        bundle = fallbackAttempt.bundle;
-        pageError = `Captured with fallback browser "${fallbackBrowser}" — "${browser}" was blocked: ${primaryAttempt.reason}`;
-      } else {
-        pageError =
-          `Failed with both browser providers. [${browser}] ${primaryAttempt.reason} | ` +
-          `[${fallbackBrowser}] ${fallbackAttempt.reason}`;
-        const debugBundle = fallbackAttempt.bundle ?? primaryAttempt.bundle;
-        await prisma.runPage.update({
-          where: { id: rp.id },
-          data: {
-            status: "FAILED",
-            error: pageError.slice(0, 2000),
-            evidenceJson: debugBundle ? slimEvidence(debugBundle) : undefined,
-          },
-        });
-        await prisma.run.update({ where: { id: runId }, data: { donePages: { increment: 1 } } });
-        continue;
+    while (queue.length > 0) {
+      const provider = queue.shift()!;
+      attempted.push(provider);
+      const attempt = await tryCapture(rp.url, provider, device, run.acceptCookies);
+      if (attempt.ok) {
+        bundle = attempt.bundle;
+        usedBrowser = provider;
+        break;
       }
+      failures.push(`[${provider}] ${attempt.reason}`);
+      debugBundle = attempt.bundle ?? debugBundle;
+
+      if (attempt.kind === "blocked") {
+        const blocked = (blocksByOrigin.get(origin) ?? 0) + 1;
+        blocksByOrigin.set(origin, blocked);
+        if (blocked > ORIGIN_BLOCK_BUDGET) {
+          failures.push(
+            `[circuit-breaker] ${origin} has now blocked ${blocked} capture(s) in this run — ` +
+              `giving up on it instead of escalating, since further attempts from the same IP ` +
+              `only harden the WAF. Capture it with a warm browser session (see the "cdp" ` +
+              `provider) or import it manually.`,
+          );
+          break;
+        }
+      }
+
+      queue = providersAfterFailure(chain, attempted, attempt.kind);
+      // Escalating right after a block would just hand the WAF another data point.
+      if (queue.length > 0 && attempt.kind === "blocked") {
+        await sleep(BLOCK_COOLDOWN_MS);
+      }
+    }
+
+    if (!bundle) {
+      pageError = `Capture failed after ${attempted.length} attempt(s). ${failures.join(" | ")}`;
+      await prisma.runPage.update({
+        where: { id: rp.id },
+        data: {
+          status: "FAILED",
+          error: pageError.slice(0, 2000),
+          evidenceJson: debugBundle ? slimEvidence(debugBundle) : undefined,
+        },
+      });
+      await prisma.run.update({ where: { id: runId }, data: { donePages: { increment: 1 } } });
+      continue;
+    }
+
+    if (usedBrowser !== browser) {
+      pageError =
+        `Captured with fallback browser "${usedBrowser}" — ${failures.join(" | ")}`;
     }
 
     anyDone = true;
     const entry = bySite.get(site.id) ?? { site, items: [] };
     entry.items.push({ runPageId: rp.id, bundle });
     bySite.set(site.id, entry);
+
+    // Score this page right away so the UI can show its criteria live, without
+    // waiting for the whole run. The site aggregate is still computed at the end.
+    const pageResult = scorePage(bundle, TOPICS, config);
     await prisma.runPage.update({
       where: { id: rp.id },
       data: {
         status: "DONE",
         error: pageError?.slice(0, 2000) ?? null,
         evidenceJson: slimEvidence(bundle),
+        overall: pageResult.overall,
+        geo: pageResult.geo,
+        china: pageResult.china,
+        topicsJson: pageResult.topics as unknown as object,
       },
     });
     await prisma.run.update({
@@ -180,23 +251,9 @@ async function executeRun(runId: number): Promise<void> {
 
   for (const { site, items } of bySite.values()) {
     if (items.length === 0) continue;
+    // Per-page scores were already persisted during capture (same pure scorePage).
     const bundles = items.map((i) => i.bundle);
     const result = scoreSite(site.name, bundles, TOPICS, config);
-
-    // Persist each page's own score. result.pages preserves input (bundles) order.
-    for (let i = 0; i < items.length; i++) {
-      const pr = result.pages[i];
-      if (!pr) continue;
-      await prisma.runPage.update({
-        where: { id: items[i].runPageId },
-        data: {
-          overall: pr.overall,
-          geo: pr.geo,
-          china: pr.china,
-          topicsJson: pr.topics as unknown as object,
-        },
-      });
-    }
 
     await prisma.runSiteScore.upsert({
       where: { runId_siteId: { runId, siteId: site.id } },

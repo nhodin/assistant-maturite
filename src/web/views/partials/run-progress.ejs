@@ -1,9 +1,72 @@
-<div id="run-progress" class="progress-box"
+<%
+  var PCOLS = [
+    {id:1,ab:'Img'},{id:2,ab:'Sld'},{id:3,ab:'Vid'},{id:4,ab:'3P'},{id:5,ab:'TTFB'},
+    {id:6,ab:'JS'},{id:7,ab:'CSS'},{id:8,ab:'CP'},{id:9,ab:'Fnt'},{id:10,ab:'CDN'}
+  ];
+  function pgTopic(topics, id){ var t=(topics||[]).find(function(x){return x.topicId===id}); return t; }
+  var pages = run.runPages || [];
+  var running = pages.filter(function(p){ return p.status === 'RUNNING'; });
+%>
+<div id="run-progress"
      hx-get="/runs/<%= run.id %>/status" hx-trigger="load delay:2s" hx-swap="outerHTML">
-  <div class="spinner"></div>
-  <div>
-    <strong>Capture en cours…</strong>
-    <span class="muted"><%= run.donePages %> / <%= run.totalPages %> pages</span>
-    <div class="bar"><div class="bar-fill" style="width: <%= run.totalPages ? Math.round(run.donePages / run.totalPages * 100) : 0 %>%"></div></div>
+
+  <div class="progress-box">
+    <div class="spinner"></div>
+    <div>
+      <strong>Capture en cours…</strong>
+      <span class="muted"><%= run.donePages %> / <%= run.totalPages %> pages</span>
+      <% if (running.length) { %>
+        <div class="muted url">→ <%= running[0].url %></div>
+      <% } %>
+      <div class="bar"><div class="bar-fill" style="width: <%= run.totalPages ? Math.round(run.donePages / run.totalPages * 100) : 0 %>%"></div></div>
+    </div>
   </div>
+
+  <% if (pages.length) { %>
+    <h2>Résultats en direct</h2>
+    <div class="scroll-x">
+    <table class="grid matrix small">
+      <thead>
+        <tr>
+          <th>Site</th><th>Type</th><th>Statut</th>
+          <% PCOLS.forEach(function(c){ %><th title="topic <%= c.id %>"><%= c.ab %></th><% }) %>
+          <th>Global</th><th>GEO</th><th>China</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+        <% pages.forEach(function(rp){ var done = rp.status === 'DONE'; %>
+          <tr>
+            <td title="<%= rp.url %>"><%= rp.page.site.name %></td>
+            <td><span class="badge"><%= rp.page.kind %></span></td>
+            <td><span class="badge b-<%= rp.status %>"><%= rp.status %></span></td>
+            <% PCOLS.forEach(function(c){ var t = done ? pgTopic(rp.topicsJson, c.id) : undefined; %>
+              <td>
+                <% if (t) { %><span class="score sm <%= scoreClass(t.score) %>"><%= fmtScore(t.score) %></span>
+                <% } else { %><span class="muted">·</span><% } %>
+              </td>
+            <% }) %>
+            <td><% if (done) { %><span class="score sm <%= scoreClass(rp.overall) %>"><%= fmtScore(rp.overall) %></span><% } else { %><span class="muted">·</span><% } %></td>
+            <td><% if (done) { %><span class="score sm <%= scoreClass(rp.geo) %>"><%= fmtScore(rp.geo) %></span><% } else { %><span class="muted">·</span><% } %></td>
+            <td><% if (done) { %><span class="score sm <%= scoreClass(rp.china) %>"><%= fmtScore(rp.china) %></span><% } else { %><span class="muted">·</span><% } %></td>
+            <td>
+              <% if (done) { %>
+                <button class="btn sm" type="button"
+                        hx-get="/runs/<%= run.id %>/pages/<%= rp.id %>/criteria"
+                        hx-target="#crit-<%= rp.id %>" hx-swap="innerHTML">Critères</button>
+              <% } %>
+            </td>
+          </tr>
+          <tr class="crit-slot">
+            <td colspan="<%= PCOLS.length + 7 %>" id="crit-<%= rp.id %>" hx-preserve="true"></td>
+          </tr>
+          <% if (rp.error) { %>
+            <tr>
+              <td colspan="<%= PCOLS.length + 7 %>" class="ev <%= rp.status === 'FAILED' ? 'ko' : 'muted' %>"><%= rp.error %></td>
+            </tr>
+          <% } %>
+        <% }) %>
+      </tbody>
+    </table>
+    </div>
+  <% } %>
 </div>

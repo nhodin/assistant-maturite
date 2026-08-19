@@ -163,3 +163,70 @@ describe("assessCaptureHealth", () => {
     expect(assessCaptureHealth(e).ok).toBe(true)
   })
 })
+
+/**
+ * The failure KIND drives the run executor's retry policy: a WAF verdict means
+ * further attempts from the same IP mostly harden the block, a technical failure
+ * costs nothing to retry with another provider.
+ */
+describe("assessCaptureHealth — failure kind", () => {
+  it("classifies a WAF status on the document as blocked", () => {
+    for (const status of [401, 403, 429, 503]) {
+      const e = makeEvidence({
+        rawHtml: html("<title>Real page</title>"),
+        mainResponseHeaders: HEADERS,
+        requests: [req({ resourceType: "document", status })],
+      })
+      expect(assessCaptureHealth(e).kind).toBe("blocked")
+    }
+  })
+
+  it("classifies a broken URL (404/410) as unusable, not blocked", () => {
+    for (const status of [404, 410]) {
+      const e = makeEvidence({
+        rawHtml: html("<title>Real page</title>"),
+        mainResponseHeaders: HEADERS,
+        requests: [req({ resourceType: "document", status })],
+      })
+      expect(assessCaptureHealth(e).kind).toBe("unusable")
+    }
+  })
+
+  it("classifies a challenge-page title as blocked", () => {
+    const e = makeEvidence({
+      rawHtml: html("<title>Just a moment...</title>"),
+      mainResponseHeaders: HEADERS,
+      requests: [req({ resourceType: "document", status: 200 })],
+    })
+    expect(assessCaptureHealth(e).kind).toBe("blocked")
+  })
+
+  it("classifies markup-with-no-assets as blocked", () => {
+    const e = makeEvidence({
+      rawHtml: html("<title>Some Product</title><img><img><img><img><img><img>"),
+      mainResponseHeaders: HEADERS,
+      requests: [req({ resourceType: "document", status: 200 })],
+    })
+    expect(assessCaptureHealth(e).kind).toBe("blocked")
+  })
+
+  it("classifies an empty raw-HTML capture as unusable — the cause is unknown", () => {
+    const e = makeEvidence({
+      rawHtml: "",
+      mainResponseHeaders: HEADERS,
+      requests: [req({ resourceType: "document", status: 200 })],
+    })
+    expect(assessCaptureHealth(e).kind).toBe("unusable")
+  })
+
+  it("leaves kind unset on a healthy capture", () => {
+    const e = makeEvidence({
+      rawHtml: html("<title>Text-only article</title><img>"),
+      mainResponseHeaders: HEADERS,
+      requests: [req({ resourceType: "document", status: 200 })],
+    })
+    const health = assessCaptureHealth(e)
+    expect(health.ok).toBe(true)
+    expect(health.kind).toBeUndefined()
+  })
+})

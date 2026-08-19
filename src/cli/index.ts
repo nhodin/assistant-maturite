@@ -16,6 +16,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { parse } from "csv-parse/sync";
 import { scoreSite, loadConfig, renderMarkdown, renderCsv } from "../engine/index";
+import { asProvider } from "../collector/browser";
 
 /* ── dynamic imports (built by other agents) ─────────────────────────────── */
 
@@ -96,9 +97,15 @@ program
   .option("--no-cookies", "Skip cookie acceptance")
   .option("--crux-key <key>", "Google CrUX/PSI API key")
   .option(
-    "--browser <playwright|cloak>",
-    "Browser provider (cloak = stealth Chromium for WAF-protected sites)",
+    "--browser <playwright|cloak|cdp>",
+    "Browser provider (cloak = stealth Chromium for WAF-protected sites; " +
+      "cdp = attach to a real Chrome on --cdp-endpoint, else launch the installed one)",
     "playwright",
+  )
+  .option(
+    "--cdp-endpoint <url>",
+    "CDP endpoint the 'cdp' provider attaches to",
+    "http://127.0.0.1:9222",
   )
   .option("--proxy <url>", "Proxy URL, e.g. http://user:pass@host:port")
   .option("--headless", "Force headless mode (cloak defaults to headed)")
@@ -128,8 +135,8 @@ program
     const device = (opts.device as string) === "desktop" ? "desktop" : "mobile";
     const acceptCookies = opts.cookies !== false; // commander: --no-cookies sets cookies=false
     const cruxApiKey = opts.cruxKey as string | undefined;
-    const browser =
-      (opts.browser as string) === "cloak" ? "cloak" : "playwright";
+    const browser = asProvider(opts.browser as string);
+    const cdpEndpoint = opts.cdpEndpoint as string | undefined;
     const proxy = opts.proxy as string | undefined;
     const headless = opts.headless === true ? true : undefined;
 
@@ -154,6 +161,7 @@ program
             acceptCookies,
             cruxApiKey,
             browser,
+            cdpEndpoint,
             proxy,
             headless,
           });

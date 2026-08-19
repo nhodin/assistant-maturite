@@ -125,6 +125,9 @@ export interface SiteResult {
 
 /* ── Collector contract (implemented in src/collector) ────────────────────── */
 
+/** Which Chromium drives the capture. See `CollectOptions.browser`. */
+export type BrowserProvider = "playwright" | "cloak" | "cdp";
+
 export interface CollectOptions {
   device?: Device;
   /** Click the cookie-consent accept button before capturing (topic 4). */
@@ -139,12 +142,25 @@ export interface CollectOptions {
    * Browser provider. "playwright" (default) = vanilla headless Chromium.
    * "cloak" = CloakBrowser stealth Chromium, needed for WAF-protected sites
    * (e.g. Akamai-blocked LVMH brand sites).
+   * "cdp" = a real, user-owned Chrome: attach to one already listening on
+   * `cdpEndpoint`, or launch the installed Chrome headful with a persistent
+   * profile. Highest anti-bot fidelity; needs a graphical session.
    */
-  browser?: "playwright" | "cloak";
+  browser?: BrowserProvider;
   /** Proxy URL passed to the browser provider, e.g. "http://user:pass@host:port". */
   proxy?: string;
-  /** Override headless mode. Defaults: playwright→true, cloak→false (stealth). */
+  /** Override headless mode. Defaults: playwright→true, cloak/cdp→false (stealth). */
   headless?: boolean;
+  /**
+   * CDP endpoint the "cdp" provider tries to attach to before launching its own
+   * Chrome. Defaults to http://127.0.0.1:9222 (or the CDP_ENDPOINT env var).
+   */
+  cdpEndpoint?: string;
+  /**
+   * Persistent Chrome profile directory used when the "cdp" provider has to launch
+   * Chrome itself. Defaults to `<app>/data/chrome-profile`.
+   */
+  chromeProfileDir?: string;
 }
 
 /** The single public entry point the collector must export. */

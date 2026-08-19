@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { prisma } from "../db";
 import { collect } from "../../collector";
-import { openBrowser } from "../../collector/browser";
+import { openBrowser, asProvider } from "../../collector/browser";
 
 function esc(s: string): string {
   return s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]!);
@@ -35,7 +35,7 @@ export async function diagnosticsRoutes(app: FastifyInstance) {
   app.post("/diagnostics/browser", async (req, reply) => {
     reply.type("text/html");
     const b = req.body as any;
-    const browser = b.browser === "cloak" ? "cloak" : "playwright";
+    const browser = asProvider(b.browser);
     const t0 = Date.now();
     let opened;
     try {
@@ -58,7 +58,7 @@ export async function diagnosticsRoutes(app: FastifyInstance) {
     reply.type("text/html");
     const b = req.body as any;
     const url = String(b.url ?? "").trim();
-    const browser = b.browser === "cloak" ? "cloak" : "playwright";
+    const browser = asProvider(b.browser);
     if (!/^https?:\/\//i.test(url)) {
       return reply.send(fail("Please provide a valid http(s) URL."));
     }

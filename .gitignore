@@ -11,3 +11,5 @@ test-results/
 /evidence/
 scratch-*
 .claude/worktrees/
+# Persistent Chrome profile used by the "cdp" browser provider (launch mode)
+/data/chrome-profile/

@@ -2,12 +2,13 @@
  * Debug runner: collects one URL, validates the EvidenceBundle, prints a summary,
  * and writes the full bundle to evidence/<host>.json
  *
- * Usage: npx tsx src/cli/collect.ts <url>
+ * Usage: npx tsx src/cli/collect.ts <url> [playwright|cloak|cdp]
  */
 import { writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
 import { fileURLToPath } from "url";
 import { collect, assessCaptureHealth } from "../collector/index";
+import { asProvider } from "../collector/browser";
 
 const __filename = fileURLToPath(import.meta.url);
 const projectRoot = join(__filename, "..", "..", "..");
@@ -15,11 +16,12 @@ const projectRoot = join(__filename, "..", "..", "..");
 async function main(): Promise<void> {
   const url = process.argv[2];
   if (!url) {
-    console.error("Usage: npx tsx src/cli/collect.ts <url>");
+    console.error("Usage: npx tsx src/cli/collect.ts <url> [playwright|cloak|cdp]");
     process.exit(1);
   }
+  const browser = asProvider(process.argv[3]);
 
-  console.log(`\nCollecting: ${url}`);
+  console.log(`\nCollecting: ${url}  (browser: ${browser})`);
   console.log("This may take up to 60 seconds...\n");
 
   const startMs = Date.now();
@@ -29,6 +31,8 @@ async function main(): Promise<void> {
       device: "mobile",
       acceptCookies: true,
       timeoutMs: 45000,
+      browser,
+      cruxApiKey: process.env.CRUX_API_KEY,
     });
   } catch (err) {
     console.error("Collection failed:", err);

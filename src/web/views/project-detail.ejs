@@ -86,7 +86,15 @@
     </div>
   </div>
 
-  <h3>Dernières valeurs CrUX (terrain, mobile)</h3>
+  <div class="ff-toggle">
+    <a class="ff-tab <%= selectedFF === 'PHONE' ? 'active' : '' %>" href="/projects/<%= project.id %>?ff=PHONE">📱 Mobile</a>
+    <a class="ff-tab <%= selectedFF === 'DESKTOP' ? 'active' : '' %>" href="/projects/<%= project.id %>?ff=DESKTOP">🖥 Desktop</a>
+    <% if (cruxFormFactors && cruxFormFactors.length && !cruxFormFactors.includes(selectedFF)) { %>
+      <span class="muted small">Aucune donnée <%= selectedFF === 'DESKTOP' ? 'desktop' : 'mobile' %> pour l'instant.</span>
+    <% } %>
+  </div>
+
+  <h3>Dernières valeurs CrUX (terrain, <%= selectedFF === 'DESKTOP' ? 'desktop' : 'mobile' %>)</h3>
   <% if (cruxLatest && cruxLatest.length) { %>
     <table class="grid small">
       <thead><tr><th>Périmètre</th><th>LCP</th><th>TTFB</th><th>INP</th><th>CLS</th><th>FCP</th><th>Relevé</th></tr></thead>
@@ -109,7 +117,7 @@
   <% } %>
 
   <% if (cruxTrends && cruxTrends.length) { %>
-    <h3>Tendances CrUX</h3>
+    <h3>Tendances CrUX (<%= selectedFF === 'DESKTOP' ? 'desktop' : 'mobile' %>)</h3>
     <% cruxTrends.forEach(function(chart){ %>
       <div class="chart-card">
         <h4 class="chart-title"><%= chart.label %></h4>
@@ -154,8 +162,11 @@
         <select name="browser">
           <option value="cloak">CloakBrowser (anti-bot, recommandé)</option>
           <option value="playwright">Playwright (headless)</option>
+          <option value="cdp">Chrome réel (CDP — anti-bot max, ouvre une fenêtre)</option>
         </select>
       </label>
+      <p class="muted small">En cas d'échec ou de capture bloquée, les autres navigateurs sont
+        automatiquement réessayés (cloak → playwright → chrome réel).</p>
       <label>Device
         <select name="device">
           <option value="mobile">Mobile</option>

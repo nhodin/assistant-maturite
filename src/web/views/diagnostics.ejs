@@ -15,6 +15,7 @@
     <select name="browser">
       <option value="playwright">Playwright (headless)</option>
       <option value="cloak">CloakBrowser (stealth)</option>
+      <option value="cdp">Chrome réel (CDP)</option>
     </select>
     <button type="submit">Lancer un test (example.com)</button>
   </form>
@@ -28,6 +29,7 @@
     <select name="browser">
       <option value="cloak">CloakBrowser</option>
       <option value="playwright">Playwright</option>
+      <option value="cdp">Chrome réel (CDP)</option>
     </select>
     <button type="submit">Collecter &amp; résumer</button>
   </form>
@@ -35,5 +37,8 @@
 </section>
 
 <p class="muted">⏳ Les tests navigateur/collecte peuvent prendre 10–60 s (téléchargement, anti-bot, scroll).</p>
+<p class="muted">🔎 « Chrome réel (CDP) » se branche sur un Chrome déjà lancé avec
+  <code>--remote-debugging-port=9222</code> (profil, cookies et IP réels) ; sinon il démarre le Chrome
+  installé avec un profil dédié persistant. Une fenêtre s'ouvre à l'écran.</p>
 
 <%- include('partials/footer') %>
