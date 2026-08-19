@@ -11,6 +11,7 @@
  *   --crux-key <key>         Google CrUX/PSI API key
  *   --out <dir>              Output directory (default: out)
  */
+import "dotenv/config"; // .env → CRUX_API_KEY, CLOAKBROWSER_LICENSE_KEY, CLOAK_*
 import { program } from "commander";
 import * as fs from "node:fs";
 import * as path from "node:path";

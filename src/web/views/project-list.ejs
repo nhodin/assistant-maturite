@@ -12,7 +12,7 @@
   <tbody>
     <% projects.forEach(function(p){ %>
       <tr>
-        <td><a href="/projects/<%= p.id %>"><%= p.name %></a><% if (p.mode === 'MONITORING') { %> <span class="badge b-monitor">Suivi</span><% } %></td>
+        <td><a href="/projects/<%= p.id %>"><%= p.name %></a><% if (p.mode === 'MONITORING') { %> <span class="badge b-monitor">Suivi</span><% if (p.monitorPaused) { %> <span class="badge b-paused">⏸ Pause</span><% } %><% } %></td>
         <td><% if (p.client) { %><%= p.client.name %><% } else { %><span class="muted">—</span><% } %></td>
         <td><%= p._count.pages %></td>
         <td><%= p._count.runs %></td>

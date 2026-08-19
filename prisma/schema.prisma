@@ -127,6 +127,7 @@ model Project {
   monitorFrequency MonitorFrequency @default(DAILY)
   monitorNextAt    DateTime? // when the next cycle is due (null = never scheduled)
   monitorLastAt    DateTime? // when the last cycle actually executed
+  monitorPaused    Boolean          @default(false) // paused → the scheduler skips this project
 
   pages         ProjectPage[]
   runs          Run[]

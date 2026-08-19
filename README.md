@@ -86,6 +86,26 @@ npm run db:push                      # create/sync tables (+ prisma generate)
 npm run db:seed-inventory            # optional: seed sites/pages from data/WEBSITES.csv
 ```
 
+### CloakBrowser Pro (optionnel)
+
+Le provider `cloak` marche sans licence (binaire gratuit). Pour activer le Pro,
+une seule ligne à remplir dans `app/.env` :
+
+```
+CLOAKBROWSER_LICENSE_KEY=cb_xxxxxxxx
+```
+
+Puis vérifier — licence, tier du binaire, empreinte stealth, IP sortante :
+
+```bash
+npm run cloak:check
+```
+
+Proxy résidentiel et alignement geoip sont eux aussi pilotés par `.env`
+(`CLOAK_PROXY`, `CLOAK_GEOIP`, `CLOAK_HUMANIZE`, `CLOAK_HUMAN_PRESET`,
+`CLOAK_HEADLESS`) — voir `.env.example`. `CLOAK_GEOIP=1` requiert `npm i mmdb-lib`
+et un proxy.
+
 ## Usage
 
 ```bash

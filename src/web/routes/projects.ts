@@ -281,15 +281,39 @@ export async function projectRoutes(app: FastifyInstance) {
         : null;
     await prisma.project.update({
       where: { id },
-      data: { mode, monitorFrequency, monitorNextAt },
+      // Leaving monitoring clears the pause flag so a later re-activation starts clean.
+      data: {
+        mode,
+        monitorFrequency,
+        monitorNextAt,
+        monitorPaused: mode === "MONITORING" ? project.monitorPaused : false,
+      },
     });
     return reply.redirect(`/projects/${id}`);
   });
 
+  // Pause / resume the automatic collection of a monitoring project.
+  app.post("/projects/:id/monitor-pause", async (req, reply) => {
+    const id = Number((req.params as any).id);
+    const paused = String((req.body as any)?.paused ?? "1") === "1";
+    const project = await prisma.project.findUnique({ where: { id } });
+    if (!project) return reply.redirect("/projects");
+    await prisma.project.update({
+      where: { id },
+      data: {
+        monitorPaused: paused,
+        // Resuming a project whose next cycle was never scheduled starts one now.
+        monitorNextAt: !paused && project.monitorNextAt === null ? new Date() : project.monitorNextAt,
+      },
+    });
+    return reply.redirect(`/projects/${id}?flash=${paused ? "paused" : "resumed"}`);
+  });
+
   // Trigger one monitoring cycle now (CrUX collection + scheduled run).
+  // `force`: an explicit click collects even when the project is paused.
   app.post("/projects/:id/monitor-now", async (req, reply) => {
     const id = Number((req.params as any).id);
-    const res = await runMonitoringCycle(id);
+    const res = await runMonitoringCycle(id, { force: true });
     const flash = res.started
       ? `crux_started`
       : `busy`;

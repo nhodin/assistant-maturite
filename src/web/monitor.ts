@@ -115,6 +115,7 @@ export async function collectCruxForProject(projectId: number): Promise<number> 
 export interface CycleResult {
   started: boolean;
   reason?: string;
+  paused?: boolean;
   runId?: number;
   cruxInserted?: number;
 }
@@ -124,13 +125,22 @@ export interface CycleResult {
  * start a scheduled maturity run. If another run is already active the run is
  * NOT created and `{ started: false }` is returned so the scheduler retries next
  * tick. `monitorLastAt`/`monitorNextAt` advance only when the run actually starts.
+ *
+ * A PAUSED project collects nothing: the cycle is refused unless `force` is set
+ * (the "Collecter maintenant" button, an explicit user action).
  */
-export async function runMonitoringCycle(projectId: number): Promise<CycleResult> {
+export async function runMonitoringCycle(
+  projectId: number,
+  opts: { force?: boolean } = {},
+): Promise<CycleResult> {
   const project = await prisma.project.findUnique({
     where: { id: projectId },
     include: { pages: { include: { page: true } } },
   });
   if (!project) return { started: false, reason: "Project not found" };
+  if (project.monitorPaused && !opts.force) {
+    return { started: false, paused: true, reason: "Monitoring is paused" };
+  }
   if (project.pages.length === 0) {
     return { started: false, reason: "Project has no pages" };
   }
@@ -192,6 +202,7 @@ async function tick(): Promise<void> {
   const due = await prisma.project.findFirst({
     where: {
       mode: "MONITORING",
+      monitorPaused: false,
       OR: [{ monitorNextAt: null }, { monitorNextAt: { lte: now } }],
     },
     orderBy: { monitorNextAt: "asc" },

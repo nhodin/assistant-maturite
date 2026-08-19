@@ -51,6 +51,17 @@ data/WEBSITES.csv      # seed source (website;url_hp;url_plp;url_pdp)
 - **Anti-bot**: LVMH sites sit behind Akamai and block headless Playwright. Use the
   **`cloak`** browser provider (CloakBrowser stealth Chromium) — `--browser cloak` in the
   CLI, default in the UI run form. A residential IP (or proxy) is needed in production.
+  **CloakBrowser Pro** is configured entirely from `.env` — `src/collector/cloak-config.ts`
+  turns `CLOAKBROWSER_LICENSE_KEY` / `CLOAK_PROXY` / `CLOAK_GEOIP` / `CLOAK_HUMANIZE` /
+  `CLOAK_HUMAN_PRESET` / `CLOAK_HEADLESS` into the `launch()` options the provider passes.
+  Optional keys are **omitted**, not set to `undefined`, so cloakbrowser's own fallbacks
+  (env var read by the binary itself, `~/.cloakbrowser/license.key`) stay in play; a blank
+  key value is treated as absent, so the placeholder line in `.env` is harmless. Caller
+  overrides (`--proxy`, explicit headless) win over the environment. `geoip` needs the
+  optional `mmdb-lib` peer and a proxy — both are checked, and a missing one degrades to a
+  warning rather than a failed capture. `npm run cloak:check` prints the resolved config
+  (secrets masked), validates the licence, reports the binary tier and runs one stealth
+  probe.
   **Cloudflare Browser Run was evaluated as a third provider and rejected** (2026-07):
   it's CDP-compatible (Network domain, CSS coverage, PerformanceObserver, mouse/keyboard
   all work — see `src/cli/spike-cloudflare-browser.ts`), but all traffic egresses from
@@ -223,6 +234,7 @@ npm test                                  # vitest (372 tests)
 npm run audit -- --browser cloak          # full audit over data/WEBSITES.csv
 npm run collect -- https://example.com    # capture one URL → evidence/<host>.json
 npm run collect -- <url> cdp              # …with a real Chrome (attach to :9222, else launch)
+npm run cloak:check                       # CloakBrowser licence + binary + stealth smoke test
 npx tsx src/cli/rescore.ts                # re-score evidence/*.json against current topics
 
 # Spike (not wired into the app — see "Anti-bot" above)

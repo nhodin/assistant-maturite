@@ -1,13 +1,17 @@
 <%- include('partials/header', { title, active }) %>
 
 <p><a href="/projects">← Projects</a></p>
-<h1><%= project.name %> <% if (project.mode === 'MONITORING') { %><span class="badge b-monitor">Suivi webperf</span><% } %></h1>
+<h1><%= project.name %> <% if (project.mode === 'MONITORING') { %><span class="badge b-monitor">Suivi webperf</span><% if (project.monitorPaused) { %> <span class="badge b-paused">⏸ En pause</span><% } %><% } %></h1>
 <p class="muted"><% if (project.client) { %>Client : <strong><%= project.client.name %></strong><% } else { %><span>Sans client</span><% } %><% if (project.description) { %> · <%= project.description %><% } %></p>
 
 <% if (flash === 'crux_started') { %>
   <div class="flash ok">Cycle de suivi lancé : CrUX collecté et run démarré.</div>
 <% } else if (flash === 'busy') { %>
   <div class="flash warn">Un run est déjà en cours — réessayez une fois qu'il est terminé.</div>
+<% } else if (flash === 'paused') { %>
+  <div class="flash warn">Suivi en pause : la collecte automatique ne se déclenchera plus.</div>
+<% } else if (flash === 'resumed') { %>
+  <div class="flash ok">Suivi repris : la collecte automatique reprend selon la fréquence configurée.</div>
 <% } %>
 
 <section>
@@ -74,15 +78,30 @@
         <button type="submit" class="btn">Enregistrer</button>
       </form>
       <p class="muted small">
-        Prochain cycle : <% if (project.monitorNextAt) { %><%= fmtDate(project.monitorNextAt) %><% } else { %>—<% } %>
+        <% if (project.monitorPaused) { %>
+          Prochain cycle : <strong>en pause</strong>
+        <% } else { %>
+          Prochain cycle : <% if (project.monitorNextAt) { %><%= fmtDate(project.monitorNextAt) %><% } else { %>—<% } %>
+        <% } %>
         · Dernier : <% if (project.monitorLastAt) { %><%= fmtDate(project.monitorLastAt) %><% } else { %>jamais<% } %>
       </p>
     </div>
     <div>
+      <form method="post" action="/projects/<%= project.id %>/monitor-pause" style="margin-bottom:.5rem">
+        <input type="hidden" name="paused" value="<%= project.monitorPaused ? '0' : '1' %>">
+        <button type="submit" class="btn"><%= project.monitorPaused ? '▶ Reprendre le suivi' : '⏸ Mettre en pause' %></button>
+      </form>
+      <p class="muted small">
+        <% if (project.monitorPaused) { %>
+          Le planificateur ignore ce projet : aucune collecte CrUX ni run programmé.
+        <% } else { %>
+          Suspend la collecte automatique sans changer la configuration du suivi.
+        <% } %>
+      </p>
       <form method="post" action="/projects/<%= project.id %>/monitor-now">
         <button type="submit" class="btn-primary">⟳ Collecter maintenant</button>
       </form>
-      <p class="muted small">Collecte CrUX immédiate + lancement d'un run de maturité.</p>
+      <p class="muted small">Collecte CrUX immédiate + lancement d'un run de maturité<% if (project.monitorPaused) { %> (fonctionne même en pause)<% } %>.</p>
     </div>
   </div>
 

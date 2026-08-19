@@ -45,6 +45,10 @@ table.grid tr:last-child td { border-bottom: none; }
 .scroll-x { overflow-x: auto; }
 .matrix th, .matrix td { text-align: center; white-space: nowrap; }
 .matrix td:nth-child(2) { text-align: left; }
+/* Full-width rows (error message, criteria detail) must not stretch the matrix
+   columns: let them wrap, including inside long URLs. */
+.matrix td.ev, .matrix tr.crit-slot td {
+  text-align: left; white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
 
 .score { display: inline-block; min-width: 34px; text-align: center; padding: .15rem .4rem;
   border-radius: 6px; font-weight: 700; }
@@ -63,6 +67,7 @@ table.grid tr:last-child td { border-bottom: none; }
 .b-PENDING { background: #eceff1; color: #607d8b; }
 .b-FAILED { background: #ffcdd2; color: #c62828; }
 .b-monitor { background: #ede7f6; color: #4527a0; }
+.b-paused { background: #eceff1; color: #455a64; }
 .flash { border-radius: 8px; padding: .5rem .75rem; margin: .5rem 0; font-size: 14px; }
 .flash.ok { background: #e8f5e9; color: #1b5e20; }
 .flash.warn { background: #fff3e0; color: #e65100; }

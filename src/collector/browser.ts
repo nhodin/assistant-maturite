@@ -30,6 +30,7 @@ import { chromium, devices, type BrowserContext, type Page } from "playwright";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { BrowserProvider, CollectOptions } from "../core";
+import { cloakConfigFromEnv, cloakLaunchOptions } from "./cloak-config";
 
 /**
  * Order the providers are tried in when the configured one fails or returns an
@@ -270,12 +271,14 @@ export async function openBrowser(
   if (provider === "cloak") {
     // Lazy import so the ~535 MB stealth binary is only required when actually used.
     const cloak: any = await import("cloakbrowser");
-    const browser = await cloak.launch({
-      headless: opts.headless ?? false, // stealth works best non-headless
-      humanize: true,
-      humanPreset: "careful",
-      ...(opts.proxy ? { proxy: opts.proxy } : {}),
+    // License key, proxy, geoip and humanize settings all come from .env — see
+    // cloak-config.ts. Without them this resolves to the previous behaviour
+    // (free tier, headful, humanize/careful).
+    const launchOptions = cloakLaunchOptions(cloakConfigFromEnv(), {
+      proxy: opts.proxy,
+      headless: opts.headless,
     });
+    const browser = await cloak.launch(launchOptions);
     const context: BrowserContext = await browser.newContext(
       cloakContextOptions(device),
     );

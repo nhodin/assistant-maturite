@@ -4,6 +4,7 @@
  *
  * Usage: npx tsx src/cli/collect.ts <url> [playwright|cloak|cdp]
  */
+import "dotenv/config"; // .env → CLOAKBROWSER_LICENSE_KEY, CLOAK_* (cloak provider)
 import { writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
 import { fileURLToPath } from "url";
