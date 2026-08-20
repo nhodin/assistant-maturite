@@ -46,6 +46,17 @@ export interface Control {
    * Omit for controls that always apply.
    */
   appliesTo?: (e: EvidenceBundle) => boolean;
+  /**
+   * Marks a control whose result cannot come from the bundle alone because it
+   * AGGREGATES the other topics' scores on the same page — today only topic 12's
+   * "sitespeed basics" component, worth 50 of the China score.
+   *
+   * The engine computes such a control AFTER every other topic is scored, from the
+   * China block's own overall (topics 1–10, each on its first criterion), and its
+   * points are PROPORTIONAL: `round(maxPoints × overall / 100)`. Its `evaluate` is
+   * never used for the verdict — it only exists to satisfy the contract.
+   */
+  derivedFromTopics?: boolean;
   /** Pure evaluation. Must not throw on well-formed bundles. */
   evaluate: (e: EvidenceBundle) => ControlVerdict;
 }

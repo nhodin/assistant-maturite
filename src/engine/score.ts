@@ -284,6 +284,86 @@ function computeAggregates(
   };
 }
 
+/* ── derived controls (topic 12's "sitespeed basics") ─────────────────────── */
+
+/**
+ * Fill in the controls flagged `derivedFromTopics`, whose result is a function of
+ * the OTHER topics' scores rather than of the bundle. Today that is topic 12's
+ * 50-point "sitespeed basics" component: on a China page every topic 1–10 is
+ * already reduced to its first criterion (0 or 100), and `basis` is their average
+ * — so the component is simply `round(maxPoints × basis / 100)`.
+ *
+ * Runs on the CHINA block only (it is the only place topic 12 is measured), after
+ * `computeAggregates` produced `basis`, and rewrites the owning topic's score.
+ * Mutates the freshly-built results in place.
+ */
+function applyDerivedControls(
+  topics: TopicModule[],
+  topicResults: TopicResult[],
+  basis: number | null,
+): void {
+  for (const topic of topics) {
+    const derived = topic.controls.filter((c) => c.derivedFromTopics === true);
+    if (derived.length === 0) continue;
+
+    const tr = topicResults.find((t) => t.topicId === topic.id);
+    if (!tr) continue;
+
+    let touched = false;
+    for (const control of derived) {
+      const cr = tr.controls.find((c) => c.controlId === control.id);
+      // Untouched when the mode did not measure it, or it is disabled/N/A: those
+      // decisions are the engine's and stay authoritative.
+      if (!cr || !cr.applicable) continue;
+
+      if (basis === null) {
+        cr.applicable = false;
+        cr.passed = false;
+        cr.pointsAwarded = 0;
+        cr.maxPoints = 0;
+        cr.evidence = "N/A — aucun sujet 1–10 mesurable sur cette page";
+      } else {
+        cr.pointsAwarded = Math.round((cr.maxPoints * basis) / 100);
+        cr.passed = cr.pointsAwarded === cr.maxPoints;
+        cr.evidence =
+          `Sujets 1–10 sur leur 1er critère : ${basis}/100 → ` +
+          `${cr.pointsAwarded}/${cr.maxPoints} pts`;
+      }
+      touched = true;
+    }
+    if (!touched) continue;
+
+    // The topic's score has to be recomputed from the rewritten control.
+    const anyApplicable = tr.controls.some((c) => c.applicable);
+    tr.score = anyApplicable
+      ? Math.min(
+          100,
+          tr.controls.reduce((sum, c) => sum + c.pointsAwarded, 0),
+        )
+      : null;
+  }
+}
+
+/**
+ * Score the CHINA block: the topic results, then the derived controls that depend
+ * on them, then the aggregates — topic 12's score changes under our feet, so it is
+ * re-read after the patch.
+ */
+function chinaBlock(
+  topicResults: TopicResult[],
+  topics: TopicModule[],
+): { topics: TopicResult[]; agg: Aggregates } {
+  const agg = computeAggregates(topicResults, topics);
+  applyDerivedControls(topics, topicResults, agg.overall);
+  return {
+    topics: topicResults,
+    agg: {
+      ...agg,
+      china: topicResults.find((t) => t.topicId === CHINA_ONLY_TOPIC)?.score ?? null,
+    },
+  };
+}
+
 /* ── topic scoring ────────────────────────────────────────────────────────── */
 
 /**
@@ -416,7 +496,10 @@ export function scorePage(
   mode: PageScoringMode = "standard",
 ): PageResult {
   const topicResults = topics.map((t) => scoreTopicOnPage(t, page, config, mode));
-  const { overall, geo, china } = computeAggregates(topicResults, topics);
+  const { overall, geo, china } =
+    mode === "china"
+      ? chinaBlock(topicResults, topics).agg
+      : computeAggregates(topicResults, topics);
   return { url: page.url, mode, topics: topicResults, overall, geo, china };
 }
 
@@ -505,7 +588,9 @@ export function scoreSiteFromPages(
     const topicResults = topics.map((t) =>
       scoreTopicWith(t, config, mode, (control) => byControl.get(control.id) ?? []),
     );
-    return { topics: topicResults, agg: computeAggregates(topicResults, topics) };
+    return mode === "china"
+      ? chinaBlock(topicResults, topics)
+      : { topics: topicResults, agg: computeAggregates(topicResults, topics) };
   };
 
   return combineBlocks(site, blockFor("standard"), blockFor("china"), pages, topics);
@@ -533,7 +618,9 @@ export function scoreSite(
     const bundles = inputs.filter((p) => p.mode === mode).map((p) => p.bundle);
     if (bundles.length === 0) return null;
     const topicResults = topics.map((t) => scoreTopic(t, bundles, config, mode));
-    return { topics: topicResults, agg: computeAggregates(topicResults, topics) };
+    return mode === "china"
+      ? chinaBlock(topicResults, topics)
+      : { topics: topicResults, agg: computeAggregates(topicResults, topics) };
   };
 
   return combineBlocks(

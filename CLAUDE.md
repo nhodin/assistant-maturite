@@ -61,6 +61,16 @@ data/WEBSITES.csv      # seed source (website;url_hp;url_plp;url_pdp)
   modules must never import `geo.ts` back. The removed ids (`geo.ttfb200`, `geo.lcp25`,
   `geo.cls01`, `geo.ssrcontent`, `geo.ssrratio`, `geo.display2s`) may linger as orphan
   `ControlConfig` rows; `config-store` iterates `ALL_CONTROLS`, so they are ignored.
+- **Topic 12 is 50/30/20 and its 50-pt component is DERIVED** (2026-08). `china.basics`
+  carries `derivedFromTopics: true` (`core/types.ts`): its result is not a function of the
+  bundle but of the OTHER topics' scores on the same China page, so the engine computes it
+  in `applyDerivedControls`/`chinaBlock` (`engine/score.ts`) once everything else is
+  scored, and IGNORES its `evaluate` (a placeholder kept only to satisfy the contract).
+  Points are proportional — `round(50 × chinaOverall / 100)` — which makes it the only
+  non-binary criterion in the engine; `passed` means "full component". The remaining
+  criteria are `china.nogfwcritical` (30) and `china.cdnchinapop` (20); `china.nogfwall`,
+  `china.icp` and `china.cnanalytics` were removed and may linger as orphan
+  `ControlConfig` rows.
 - **China pages** (`PageScoringMode` in `core/types.ts`): a page is graded `"standard"`
   (the default) or `"china"` — the latter for a `PageKind.CHINA` page, i.e. one served
   to the Chinese market. The rule lives in ONE function, `planControl` in

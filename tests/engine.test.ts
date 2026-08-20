@@ -599,3 +599,105 @@ describe("China pages: first criterion only, topic 12 only there", () => {
     expect(line[13]).toBe("100"); // China pages overall (topic 1 first criterion)
   });
 });
+
+/* ══════════════════════════════════════════════════════════════════════════ */
+
+describe("derived control: topic 12's sitespeed-basics component", () => {
+  /** 50-pt component computed by the engine from the other topics of the page. */
+  const basics: Control = {
+    id: "t12.basics",
+    topicId: 12,
+    label: "Fondamentaux sitespeed",
+    description: "derived",
+    defaultPoints: 50,
+    derivedFromTopics: true,
+    evaluate: () => ({ passed: false, evidence: "placeholder" }),
+  };
+  const topic12d: TopicModule = {
+    id: 12,
+    name: "China",
+    hasNA: false,
+    standalone: true,
+    controls: [basics, makeControl("t12.c2", 12, 50, alwaysPass)],
+  };
+  /** Non-standalone topic whose FIRST criterion fails. */
+  const topicFirstFails: TopicModule = {
+    id: 4,
+    name: "Third parties",
+    hasNA: false,
+    standalone: false,
+    controls: [makeControl("t4.c1", 4, 30, alwaysFail)],
+  };
+
+  const chinaPage = [{ bundle: makeEvidence(), mode: "china" as const }];
+
+  it("scales the component with the average of topics 1–10", () => {
+    // topic1 and topic10 both pass their first criterion → 100/100 average.
+    const topics = [topic1, topic10, topic12d];
+    const result = scoreSite("site", chinaPage, topics, defaultConfig(topics));
+
+    expect(result.chinaOverall).toBe(100);
+    const t12 = result.chinaTopics!.find((t) => t.topicId === 12)!;
+    const c = t12.controls.find((x) => x.controlId === "t12.basics")!;
+    expect(c.pointsAwarded).toBe(50);
+    expect(c.passed).toBe(true);
+    expect(c.evidence).toContain("100/100");
+    // 50 (derived) + 50 (the other control passes) → topic 12 = 100
+    expect(t12.score).toBe(100);
+    expect(result.china).toBe(100);
+  });
+
+  it("awards half the component when half the topics pass", () => {
+    // topic1 passes its first criterion, topicFirstFails does not → average 50.
+    const topics = [topic1, topicFirstFails, topic12d];
+    const result = scoreSite("site", chinaPage, topics, defaultConfig(topics));
+
+    expect(result.chinaOverall).toBe(50);
+    const t12 = result.chinaTopics!.find((t) => t.topicId === 12)!;
+    const c = t12.controls.find((x) => x.controlId === "t12.basics")!;
+    expect(c.pointsAwarded).toBe(25);
+    expect(c.passed).toBe(false); // partial: not the full component
+    expect(t12.score).toBe(75); // 25 + 50
+    expect(result.china).toBe(75);
+  });
+
+  it("ignores its own evaluate() — the engine decides", () => {
+    // basics.evaluate says "failed"; the engine still awards the full component.
+    const topics = [topic1, topic10, topic12d];
+    const result = scoreSite("site", chinaPage, topics, defaultConfig(topics));
+    const c = result
+      .chinaTopics!.find((t) => t.topicId === 12)!
+      .controls.find((x) => x.controlId === "t12.basics")!;
+    expect(c.evidence).not.toContain("placeholder");
+  });
+
+  it("is N/A when no topic 1–10 is measurable", () => {
+    const topics = [topicNA, topic12d]; // topicNA is N/A on every page
+    const result = scoreSite("site", chinaPage, topics, defaultConfig(topics));
+
+    expect(result.chinaOverall).toBeNull();
+    const t12 = result.chinaTopics!.find((t) => t.topicId === 12)!;
+    const c = t12.controls.find((x) => x.controlId === "t12.basics")!;
+    expect(c.applicable).toBe(false);
+    expect(c.maxPoints).toBe(0);
+    // Only the remaining 50-pt control still counts.
+    expect(t12.score).toBe(50);
+  });
+
+  it("is not measured at all on a standard page", () => {
+    const topics = [topic1, topic12d];
+    const result = scoreSite("site", singlePage, topics, defaultConfig(topics));
+    const t12 = result.topics.find((t) => t.topicId === 12)!;
+    expect(t12.score).toBeNull();
+    expect(t12.controls.every((c) => !c.applicable)).toBe(true);
+  });
+
+  it("survives the stored-results round trip", () => {
+    const topics = [topic1, topic10, topic12d];
+    const cfg = defaultConfig(topics);
+    const fromBundles = scoreSite("site", chinaPage, topics, cfg);
+    const fromStored = scoreSiteFromPages("site", fromBundles.pages, topics, cfg);
+    expect(fromStored.china).toBe(fromBundles.china);
+    expect(fromStored.chinaTopics).toEqual(fromBundles.chinaTopics);
+  });
+});
