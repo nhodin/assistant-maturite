@@ -200,9 +200,15 @@ const fixedHeightControl: Control = {
   topicId: 1,
   label: "Fixed width & height on images (CLS prevention)",
   description:
-    "≥60% of <img> elements have both width and height reserved — via HTML attributes, equivalent inline CSS (style=\"width:...;height:...\"), or an inline aspect-ratio declaration.",
+    "Validated directly when the measured page CLS is < 0.01 (image sizing is demonstrably handled). Otherwise ≥60% of <img> elements must have both width and height reserved — via HTML attributes, equivalent inline CSS (style=\"width:...;height:...\"), or an inline aspect-ratio declaration.",
   defaultPoints: 10,
   evaluate(e) {
+    // A page with virtually no layout shift proves the images are sized correctly,
+    // whatever mechanism is used (attributes, CSS classes, aspect-ratio, containers).
+    const cls = e.perf.cls
+    if (cls !== null && cls < 0.01) {
+      return { passed: true, evidence: `CLS = ${cls} (< 0.01) — image sizing considered handled` }
+    }
     const imgTags = e.rawHtml.match(/<img\b[^>]*>/gi) ?? []
     const total = imgTags.length
     if (total === 0) {
@@ -211,9 +217,10 @@ const fixedHeightControl: Control = {
     const withDimensions = countImgsWithBothDimensions(e.rawHtml)
     const pct = Math.round((withDimensions / total) * 100)
     const passed = withDimensions / total >= 0.6
+    const clsNote = cls === null ? "CLS not measured" : `CLS = ${cls} (≥ 0.01)`
     return {
       passed,
-      evidence: `${withDimensions}/${total} <img> tags have width+height (or aspect-ratio) = ${pct}%`,
+      evidence: `${clsNote} — ${withDimensions}/${total} <img> tags have width+height (or aspect-ratio) = ${pct}%`,
     }
   },
 }

@@ -264,6 +264,27 @@ describe("images.fixedheight", () => {
     expect(result.evidence).toContain("3/4")
   })
 
+  it("passes on CLS < 0.01 even when no img has explicit dimensions", () => {
+    const e = makeEvidence({
+      rawHtml: ['<img src="a.jpg">', '<img src="b.jpg">'].join(""),
+      perf: { cls: 0.005 },
+    })
+    const result = ctrl("images.fixedheight").evaluate(e)
+    expect(result.passed).toBe(true)
+    expect(result.evidence).toMatch(/CLS = 0\.005 \(< 0\.01\)/)
+  })
+
+  it("falls back to the width/height check when CLS ≥ 0.01", () => {
+    const e = makeEvidence({
+      rawHtml: ['<img src="a.jpg">', '<img src="b.jpg">'].join(""),
+      perf: { cls: 0.03 },
+    })
+    const result = ctrl("images.fixedheight").evaluate(e)
+    expect(result.passed).toBe(false)
+    expect(result.evidence).toContain("CLS = 0.03 (≥ 0.01)")
+    expect(result.evidence).toContain("0/2")
+  })
+
   it("does NOT count a class name merely containing the substring aspect-ratio", () => {
     const e = makeEvidence({
       rawHtml: [
