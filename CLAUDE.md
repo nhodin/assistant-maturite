@@ -216,7 +216,8 @@ data/WEBSITES.csv      # seed source (website;url_hp;url_plp;url_pdp)
   @font-face families no longer double-counted with URL stems; slider controls scoped to the
   detected slider markup (`features.sliderHtml`) instead of the whole page; preload controls
   match the preloaded URL to the LCP/poster/slide target; empty-rawHtml captures rejected by
-  the sanity gate; CPU throttling ×4 on mobile capture; HTTP/2 fallback probe for 103s; CDP
+  the sanity gate; CPU throttling ×4 on mobile capture (since 2026-08 off by default and
+  env-driven, see **Capture throttling**); HTTP/2 fallback probe for 103s; CDP
   document headers preferred over the Node fetch). 2 findings are deferred pending a scoring
   policy decision — notably "unmeasured ≠ failed" (a third control outcome), which would
   change score semantics for historical runs.
@@ -285,6 +286,17 @@ npm run spike:cloudflare -- <url>         # Cloudflare Browser Run CDP feasibili
   so a plan/config mismatch surfaces instead of hiding behind a slow run), and measurement
   fidelity — every extra session shares CPU/bandwidth with the one being timed, so lab
   TTFB/LCP drift upward past 2-3 slots.
+- **Capture throttling** (`src/collector/throttling.ts`) — CPU and network throttling are
+  both **off by default** and driven from `.env`: `CAPTURE_CPU_THROTTLING` (multiplier, 1 =
+  off; 4 = Lighthouse mobile slowdown) and `CAPTURE_NETWORK_PROFILE`
+  (`off`|`slow3g`|`slow4g`|`fast4g`, `slow4g` = Lighthouse simulated mobile). Applied over
+  CDP right after `Network.enable`, before any navigation. Off by default because a throttle
+  moves every timing control (TTFB, LCP, long tasks, geo's 2 s render gate), so it must be a
+  declared decision: **a throttled run is comparable with other throttled runs, not with the
+  historical unthrottled ones** — including the ×4 mobile CPU slowdown that used to be
+  unconditional. Structural controls (formats, lazyload, head order, headers) are unaffected.
+  Malformed values degrade to "no throttling" plus a warning rather than failing the capture;
+  the resolved setting is logged at run start and by `npm run collect`.
 - When adding a topic: create `src/topics/NN-name.ts` exporting a `TopicModule`, register it
   in `src/topics/index.ts`, add per-control tests. Points must sum to 100 (enforced by
   `tests/topics.meta.test.ts`).

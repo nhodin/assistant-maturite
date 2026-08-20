@@ -19,6 +19,7 @@ import { prisma } from "./db";
 import { collect, assessCaptureHealth } from "../collector";
 import { asProvider } from "../collector/browser";
 import { captureConcurrencyFromEnv, groupByOrigin, runPool } from "../collector/concurrency";
+import { captureThrottlingFromEnv, describeThrottling } from "../collector/throttling";
 import type { CaptureFailureKind } from "../collector/sanity";
 import { TOPICS } from "../topics";
 import { scoreSiteFromPages, scorePage } from "../engine";
@@ -461,6 +462,11 @@ async function executeRun(runId: number, opts: { resume?: boolean } = {}): Promi
   const buckets = groupByOrigin(toCapture, (rp) => originOf(rp.url));
   const { slots, warning } = captureConcurrencyFromEnv();
   if (warning) console.warn(`Run #${runId}: ${warning}`);
+  // Throttling is off by default; log it either way, so a run's timings can always
+  // be read against the conditions they were measured in.
+  const throttling = captureThrottlingFromEnv();
+  if (throttling.warning) console.warn(`Run #${runId}: ${throttling.warning}`);
+  console.log(`Run #${runId}: throttling — ${describeThrottling(throttling)}`);
   console.log(
     `Run #${runId}${opts.resume ? " (resume)" : ""}: ${toCapture.length} page(s) over ` +
       `${buckets.length} origin(s), ${Math.min(slots, buckets.length)} captured in parallel` +

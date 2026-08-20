@@ -4,7 +4,7 @@
  * fallback chain — a blocked page is retried with the SAME provider turned up
  * (see CaptureMode), never with a weaker Chromium.
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as path from "node:path";
 import {
   asProvider,
@@ -66,5 +66,75 @@ describe("cdpEndpointAlive", () => {
 
   it("returns false on a malformed endpoint instead of throwing", async () => {
     await expect(cdpEndpointAlive("not-a-url", 300)).resolves.toBe(false);
+  });
+});
+
+/**
+ * The escalated retry's persistent profile. cloakbrowser's
+ * `launchPersistentContext` takes ONE options object carrying `userDataDir` —
+ * NOT Playwright's `(userDataDir, options)` signature. Calling it the Playwright
+ * way used to crash the retry with ERR_INVALID_ARG_TYPE ("path" undefined), so
+ * a blocked page lost its only escalation.
+ */
+describe("openCloak (escalated)", () => {
+  const calls: any[] = [];
+
+  beforeEach(() => {
+    calls.length = 0;
+    vi.resetModules();
+    vi.doMock("cloakbrowser", () => ({
+      launchPersistentContext: async (options: any) => {
+        calls.push(options);
+        return { close: async () => {} } as any;
+      },
+      launch: async () => ({
+        newContext: async () => ({ close: async () => {} }),
+        close: async () => {},
+      }),
+    }));
+  });
+
+  afterEach(() => {
+    vi.doUnmock("cloakbrowser");
+    vi.resetModules();
+  });
+
+  it("passes userDataDir inside a single options object", async () => {
+    const { openBrowser } = await import("../src/collector/browser");
+    const root = path.join("C:", "tmp", "profiles");
+    await openBrowser({
+      browser: "cloak",
+      mode: "escalated",
+      device: "mobile",
+      cloakProfileRoot: root,
+    } as any, "https://www.fresh.com/us/home");
+
+    expect(calls).toHaveLength(1);
+    const [options] = calls;
+    expect(options.userDataDir).toBe(path.join(root, "www.fresh.com"));
+    // Headed is the whole point of the escalation.
+    expect(options.headless).toBe(false);
+    // Mobile emulation that has no top-level field must travel in contextOptions.
+    expect(options.viewport).toEqual({ width: 390, height: 844 });
+    expect(options.contextOptions).toMatchObject({ isMobile: true, hasTouch: true });
+  });
+
+  it("falls back to a fresh headed context when the profile cannot be opened", async () => {
+    vi.doMock("cloakbrowser", () => ({
+      launchPersistentContext: async () => {
+        throw new Error("profile locked");
+      },
+      launch: async () => ({
+        newContext: async () => ({ close: async () => {} }),
+        close: async () => {},
+      }),
+    }));
+    const { openBrowser } = await import("../src/collector/browser");
+    const opened = await openBrowser({
+      browser: "cloak",
+      mode: "escalated",
+      device: "mobile",
+    } as any, "https://www.fresh.com/us/home");
+    expect(opened.context).toBeDefined();
   });
 });

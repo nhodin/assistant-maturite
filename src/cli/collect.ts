@@ -10,6 +10,7 @@ import { join } from "path";
 import { fileURLToPath } from "url";
 import { collect, assessCaptureHealth } from "../collector/index";
 import { asProvider } from "../collector/browser";
+import { captureThrottlingFromEnv, describeThrottling } from "../collector/throttling";
 
 const __filename = fileURLToPath(import.meta.url);
 const projectRoot = join(__filename, "..", "..", "..");
@@ -22,7 +23,11 @@ async function main(): Promise<void> {
   }
   const browser = asProvider(process.argv[3]);
 
+  const throttling = captureThrottlingFromEnv();
+  if (throttling.warning) console.warn(throttling.warning);
+
   console.log(`\nCollecting: ${url}  (browser: ${browser})`);
+  console.log(`Throttling: ${describeThrottling(throttling)}`);
   console.log("This may take up to 60 seconds...\n");
 
   const startMs = Date.now();
@@ -49,6 +54,7 @@ async function main(): Promise<void> {
   console.log(`URL:              ${bundle.url}`);
   console.log(`Final URL:        ${bundle.finalUrl}`);
   console.log(`Device:           ${bundle.device}`);
+  console.log(`Throttling:       ${describeThrottling(throttling)}`);
   console.log(`Captured at:      ${bundle.capturedAt}`);
   console.log(`Elapsed:          ${elapsedMs}ms`);
   console.log("");

@@ -50,6 +50,19 @@ table.grid tr:last-child td { border-bottom: none; }
 .matrix td.ev, .matrix tr.crit-slot td {
   text-align: left; white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
 
+/* A note (capture error / fallback story) belongs to the page row ABOVE it.
+   Glued to that row — no separating border, indented, own left rule — so it can
+   never read as an intro to the site on the NEXT line. */
+tr.note-row td.ev { border-top: none; padding-top: 0; padding-left: 1.6rem;
+  box-shadow: inset 3px 0 0 var(--line); background: #fafbfd; }
+tr.note-row td.ev.ko { box-shadow: inset 3px 0 0 var(--ko); }
+.note-for { font-weight: 600; color: var(--ink); }
+/* The page row keeps no bottom rule when its note follows — in the live matrix
+   the (collapsed, still-empty) criteria slot sits between the two. */
+tr.crit-slot td:empty { padding: 0; border-bottom: none; }
+tr:has(+ tr.note-row) td,
+tr:has(+ tr.crit-slot + tr.note-row) td { border-bottom: none; }
+
 .score { display: inline-block; min-width: 34px; text-align: center; padding: .15rem .4rem;
   border-radius: 6px; font-weight: 700; }
 .score.sm { min-width: 26px; padding: .1rem .25rem; font-size: 12px; }

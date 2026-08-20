@@ -294,14 +294,29 @@ async function openCloak(
   if (escalated && url) {
     const profileDir = cloakProfileDirFor(url, opts.cloakProfileRoot);
     // Playwright-compatible builds expose launchPersistentContext; if this one
-    // does not, a fresh headed context is still a real escalation — losing the
-    // warm profile must not cost us the retry.
+    // does not — or if opening the profile fails — a fresh headed context is
+    // still a real escalation: losing the warm profile must not cost us the retry.
     if (typeof cloak.launchPersistentContext === "function") {
-      const context: BrowserContext = await cloak.launchPersistentContext(profileDir, {
-        ...launchOptions,
-        ...contextOptions,
-      });
-      return { context, close: async () => { await context.close(); } };
+      try {
+        // NOTE the shape: cloakbrowser takes ONE options object with
+        // `userDataDir` inside (NOT Playwright's `(dir, options)` signature), and
+        // only surfaces viewport/locale/userAgent at top level — every other
+        // context field has to travel in `contextOptions`, or it is dropped.
+        const { viewport, locale, ...restContext } = contextOptions as Record<string, unknown>;
+        const context: BrowserContext = await cloak.launchPersistentContext({
+          userDataDir: profileDir,
+          ...launchOptions,
+          ...(viewport ? { viewport } : {}),
+          ...(locale ? { locale } : {}),
+          ...(Object.keys(restContext).length ? { contextOptions: restContext } : {}),
+        });
+        return { context, close: async () => { await context.close(); } };
+      } catch (err) {
+        console.warn(
+          `[cloak] persistent profile ${profileDir} unusable (${(err as Error).message}) — ` +
+            `escalating with a fresh headed context instead`,
+        );
+      }
     }
   }
 

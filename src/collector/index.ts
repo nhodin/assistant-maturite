@@ -22,6 +22,7 @@ import { probeNetwork } from "./network";
 import { fetchCrux } from "./crux";
 import { parseHead } from "./head";
 import { openBrowser } from "./browser";
+import { applyThrottling, captureThrottlingFromEnv } from "./throttling";
 
 export { assessCaptureHealth, type CaptureHealth } from "./sanity";
 
@@ -673,15 +674,11 @@ export const collect: CollectFn = async (
     try {
       cdp = await context.newCDPSession(page);
       await cdp.send("Network.enable");
-      // Mobile CPU throttling (4x): lab long-task and LCP signals are meaningless
-      // on desktop-class hardware without it (affects js.splittasks, geo.display2s).
-      if (device === "mobile") {
-        try {
-          await cdp.send("Emulation.setCPUThrottlingRate", { rate: 4 });
-        } catch {
-          // Best effort — throttling failure must not abort capture.
-        }
-      }
+      // CPU and network throttling, both OFF unless CAPTURE_CPU_THROTTLING /
+      // CAPTURE_NETWORK_PROFILE ask for them (see throttling.ts): a throttle moves
+      // every timing control, so it is an explicit operator decision, not a default
+      // a run inherits. Applied before any navigation so it covers the whole load.
+      await applyThrottling(cdp, captureThrottlingFromEnv());
     } catch {
       // CDP unavailable — proceed without it
       cdp = null as unknown as CDPSession;

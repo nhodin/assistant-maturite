@@ -89,8 +89,11 @@
           <td><span class="badge b-<%= rp.status %>"><%= rp.status %></span></td>
         </tr>
         <% if (rp.error) { %>
-          <tr>
-            <td colspan="4" class="ev <%= rp.status === 'FAILED' ? 'ko' : 'muted' %>"><%= rp.error %></td>
+          <tr class="note-row">
+            <td colspan="4" class="ev <%= rp.status === 'FAILED' ? 'ko' : 'muted' %>">
+              <span class="note-for"><%= rp.page.site.name %> · <%= rp.page.kind %> —</span>
+              <%= rp.error %>
+            </td>
           </tr>
         <% } %>
       <% }) %>

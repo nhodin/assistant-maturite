@@ -60,8 +60,13 @@
             <td colspan="<%= PCOLS.length + 7 %>" id="crit-<%= rp.id %>" hx-preserve="true"></td>
           </tr>
           <% if (rp.error) { %>
-            <tr>
-              <td colspan="<%= PCOLS.length + 7 %>" class="ev <%= rp.status === 'FAILED' ? 'ko' : 'muted' %>"><%= rp.error %></td>
+            <%# A note row sits BELOW the page it describes; without the label and
+                the left rule it reads as a header for the NEXT site. %>
+            <tr class="note-row">
+              <td colspan="<%= PCOLS.length + 7 %>" class="ev <%= rp.status === 'FAILED' ? 'ko' : 'muted' %>">
+                <span class="note-for"><%= rp.page.site.name %> · <%= rp.page.kind %> —</span>
+                <%= rp.error %>
+              </td>
             </tr>
           <% } %>
         <% }) %>
