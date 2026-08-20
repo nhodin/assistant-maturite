@@ -49,6 +49,8 @@ async function main() {
       { kind: "HP" as const, url: r["url_hp"] },
       { kind: "PLP" as const, url: r["url_plp"] },
       { kind: "PDP" as const, url: r["url_pdp"] },
+      // Optional China page: graded on the first criterion of each topic + topic 12.
+      { kind: "CHINA" as const, url: r["url_china"] },
     ].filter((p) => p.url);
 
     await prisma.site.create({

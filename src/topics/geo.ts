@@ -1,67 +1,97 @@
 /**
  * Topic 11 — Technical GEO
  * topicId: 11 | hasNA: false | standalone: true
- * Max points: 15+15+10+10+30+15+5 = 100
+ * Max points: 40+30+20+10 = 100
  *
- * Prefer FIELD data (CrUX/PSI), fall back to LAB (perf object).
+ * GEO no longer defines performance thresholds of its own. What a generative
+ * engine actually needs is a page it can fetch, read without executing JS, and
+ * fetch again cheaply — which the other topics already measure. So each GEO
+ * criterion REUSES existing controls verbatim (same evaluate, same verdict) and
+ * only regroups them under GEO's own weighting:
+ *
+ *   40 — Accès au contenu sans JS     ← js.nojsview           (topic 6)
+ *   30 — TTFB & Cache HTML            ← ttfb.ttfb800 AND ttfb.cdncache (topic 5)
+ *   20 — Compression & CDN global     ← cdn.brotli   AND cdn.region    (topic 10)
+ *   10 — Allègement du payload HTML   ← page weight < 1 MB (GEO's own, kept)
+ *
+ * A composite criterion is ALL-OR-NOTHING: both underlying controls must pass,
+ * since a criterion is binary in this engine. The evidence string carries both
+ * verdicts so the report still shows which half failed.
+ *
+ * Reusing the controls (rather than re-implementing the checks) means a fix to
+ * the TTFB or Brotli detection lands in GEO at the same time, and a site can
+ * never be judged differently on the same fact by two topics.
  */
 import type { EvidenceBundle } from "../core"
 import type { Control, TopicModule } from "../core"
-import { bodySlice, wordCount } from "./util"
+import { noJsViewControl } from "./js"
+import { cdnCacheControl, ttfb800Control } from "./ttfbcache"
+import { brotliControl, regionControl } from "./cdn"
 
-// ── field-or-lab helpers ─────────────────────────────────────────────────────
-
-function fieldOrLabTtfb(e: EvidenceBundle): { value: number | null; source: string } {
-  if (e.field?.ttfbMs !== undefined) {
-    return { value: e.field.ttfbMs, source: `field (${e.field.source})` }
-  }
-  return { value: e.perf.ttfbMs, source: "lab" }
+/** Verdict of one borrowed control, prefixed with the criterion it stands for. */
+function delegate(control: Control, e: EvidenceBundle) {
+  const v = control.evaluate(e)
+  return { passed: v.passed, evidence: `« ${control.label} » : ${v.evidence}` }
 }
 
-function fieldOrLabLcp(e: EvidenceBundle): { value: number | null; source: string } {
-  if (e.field?.lcpMs !== undefined) {
-    return { value: e.field.lcpMs, source: `field (${e.field.source})` }
+/**
+ * Two borrowed controls, ANDed. Both verdicts are reported either way, so a
+ * failure always names the half responsible.
+ */
+function both(a: Control, b: Control, e: EvidenceBundle) {
+  const va = a.evaluate(e)
+  const vb = b.evaluate(e)
+  const mark = (ok: boolean) => (ok ? "✓" : "✗")
+  return {
+    passed: va.passed && vb.passed,
+    evidence:
+      `${mark(va.passed)} « ${a.label} » : ${va.evidence} | ` +
+      `${mark(vb.passed)} « ${b.label} » : ${vb.evidence}`,
   }
-  return { value: e.perf.lcpMs, source: "lab" }
-}
-
-function fieldOrLabCls(e: EvidenceBundle): { value: number | null; source: string } {
-  if (e.field?.cls !== undefined) {
-    return { value: e.field.cls, source: `field (${e.field.source})` }
-  }
-  return { value: e.perf.cls, source: "lab" }
 }
 
 // ── controls ─────────────────────────────────────────────────────────────────
 
-const ttfb200Control: Control = {
-  id: "geo.ttfb200",
+/** 40 pts — the crawler must see the content without running JS. */
+const noJsContentControl: Control = {
+  id: "geo.nojscontent",
   topicId: 11,
-  label: "TTFB < 200ms",
-  description: "Time to First Byte below 200ms (field data preferred, lab fallback).",
-  defaultPoints: 15,
-  evaluate(e) {
-    const { value, source } = fieldOrLabTtfb(e)
-    if (value === null) {
-      return {
-        passed: false,
-        evidence: `TTFB unavailable (${source} returned null)`,
-      }
-    }
-    const passed = value < 200
-    return {
-      passed,
-      evidence: `TTFB ${value}ms via ${source} — threshold 200ms`,
-    }
-  },
+  label: "Accès au contenu sans JS",
+  description:
+    "Reprend le critère « Display viewport content without JS » (sujet 6 — JS management) : le HTML serveur porte le contenu du viewport.",
+  defaultPoints: 40,
+  evaluate: (e) => delegate(noJsViewControl, e),
 }
 
+/** 30 pts — the document answers fast and is cached at the edge. */
+const ttfbCacheControl: Control = {
+  id: "geo.ttfbcache",
+  topicId: 11,
+  label: "TTFB & Cache HTML",
+  description:
+    "Reprend « TTFB < 800ms » ET « CDN cache on HTML pages » (sujet 5 — TTFB/Cache). Les deux doivent être validés.",
+  defaultPoints: 30,
+  evaluate: (e) => both(ttfb800Control, cdnCacheControl, e),
+}
+
+/** 20 pts — the document is compressed and served from a distributed edge. */
+const compressionCdnControl: Control = {
+  id: "geo.compressioncdn",
+  topicId: 11,
+  label: "Compression & CDN global",
+  description:
+    "Reprend « Brotli on HTML and text resources » ET « CDN cache by region » (sujet 10 — CDN). Les deux doivent être validés.",
+  defaultPoints: 20,
+  evaluate: (e) => both(brotliControl, regionControl, e),
+}
+
+/** 10 pts — GEO's own criterion: a light page is a cheap page to ingest. */
 const weight1mbControl: Control = {
   id: "geo.weight1mb",
   topicId: 11,
-  label: "Page weight < 1 MB",
+  label: "Allègement du payload HTML (< 1 MB)",
   description: "Total transferred bytes across all requests below 1 MB (lab data).",
-  defaultPoints: 15,
+  defaultPoints: 10,
   evaluate(e) {
     const bytes = e.perf.totalBytes
     if (bytes <= 0) {
@@ -79,114 +109,6 @@ const weight1mbControl: Control = {
   },
 }
 
-const lcp25Control: Control = {
-  id: "geo.lcp25",
-  topicId: 11,
-  label: "LCP < 2.5s",
-  description: "Largest Contentful Paint below 2500ms (field data preferred, lab fallback).",
-  defaultPoints: 10,
-  evaluate(e) {
-    const { value, source } = fieldOrLabLcp(e)
-    if (value === null) {
-      return {
-        passed: false,
-        evidence: `LCP unavailable (${source} returned null)`,
-      }
-    }
-    const passed = value < 2500
-    return {
-      passed,
-      evidence: `LCP ${value}ms via ${source} — threshold 2500ms`,
-    }
-  },
-}
-
-const cls01Control: Control = {
-  id: "geo.cls01",
-  topicId: 11,
-  label: "CLS < 0.1",
-  description: "Cumulative Layout Shift below 0.1 (field data preferred, lab fallback).",
-  defaultPoints: 10,
-  evaluate(e) {
-    const { value, source } = fieldOrLabCls(e)
-    if (value === null) {
-      return {
-        passed: false,
-        evidence: `CLS unavailable (${source} returned null)`,
-      }
-    }
-    const passed = value < 0.1
-    return {
-      passed,
-      evidence: `CLS ${value} via ${source} — threshold 0.1`,
-    }
-  },
-}
-
-const ssrContentControl: Control = {
-  id: "geo.ssrcontent",
-  topicId: 11,
-  label: "Main content present in initial HTML (SSR)",
-  description: "Body of raw HTML contains at least 100 visible words — no critical JS-only content.",
-  defaultPoints: 30,
-  evaluate(e) {
-    const body = bodySlice(e.rawHtml)
-    const wc = wordCount(body)
-    const passed = wc >= 100
-    return {
-      passed,
-      evidence: `Raw HTML body contains ${wc} visible word(s) — threshold 100`,
-    }
-  },
-}
-
-const ssrRatioControl: Control = {
-  id: "geo.ssrratio",
-  topicId: 11,
-  label: "SSR/rendered content ratio > 70%",
-  description: "Visible-text word count in raw HTML divided by rendered DOM word count exceeds 0.7.",
-  defaultPoints: 15,
-  evaluate(e) {
-    const renderedWc = wordCount(e.renderedHtml)
-    if (renderedWc === 0) {
-      return {
-        passed: false,
-        evidence: "rendered DOM unavailable (word count = 0)",
-      }
-    }
-    const rawWc = wordCount(e.rawHtml)
-    const ratio = Math.min(rawWc / renderedWc, 1.0)
-    const pct = Math.round(ratio * 100)
-    const passed = ratio > 0.7
-    return {
-      passed,
-      evidence: `SSR ratio ${pct}% (raw ${rawWc} words / rendered ${renderedWc} words) — threshold 70%`,
-    }
-  },
-}
-
-const display2sControl: Control = {
-  id: "geo.display2s",
-  topicId: 11,
-  label: "Content visible within 2s with JS",
-  description: "Proxy: lab LCP < 2000ms (content displayed within 2 seconds).",
-  defaultPoints: 5,
-  evaluate(e) {
-    const lcp = e.perf.lcpMs
-    if (lcp === null) {
-      return {
-        passed: false,
-        evidence: "LCP unavailable — cannot confirm content visible within 2s",
-      }
-    }
-    const passed = lcp < 2000
-    return {
-      passed,
-      evidence: `Lab LCP ${lcp}ms — threshold 2000ms`,
-    }
-  },
-}
-
 // ── topic module ──────────────────────────────────────────────────────────────
 
 export const geoTopic: TopicModule = {
@@ -195,12 +117,9 @@ export const geoTopic: TopicModule = {
   hasNA: false,
   standalone: true,
   controls: [
-    ttfb200Control,    // 15
-    weight1mbControl,  // 15
-    lcp25Control,      // 10
-    cls01Control,      // 10
-    ssrContentControl, // 30
-    ssrRatioControl,   // 15
-    display2sControl,  //  5
+    noJsContentControl,    // 40
+    ttfbCacheControl,      // 30
+    compressionCdnControl, // 20
+    weight1mbControl,      // 10
   ],
 }

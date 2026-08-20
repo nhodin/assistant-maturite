@@ -31,8 +31,18 @@ import type {
   BrowserProvider,
   CaptureMode,
   PageResult,
+  PageScoringMode,
   TopicResult,
 } from "../core";
+import { isChinaKind } from "./categories";
+
+/**
+ * How a page is graded, from its inventory kind. A CHINA page is scored on the
+ * first criterion of each topic plus topic 12; every other kind is standard.
+ */
+function modeOfKind(kind: string): PageScoringMode {
+  return isChinaKind(kind) ? "china" : "standard";
+}
 
 /** Scheme + host + port — the unit a WAF rate-limits on, and so the unit we bucket by. */
 function originOf(url: string): string {
@@ -325,13 +335,22 @@ async function executeRun(runId: number, opts: { resume?: boolean } = {}): Promi
 
     const scored = await prisma.runPage.findMany({
       where: { runId, status: "DONE", page: { siteId: site.id } },
-      select: { url: true, topicsJson: true, overall: true, geo: true, china: true },
+      select: {
+        url: true,
+        mode: true,
+        topicsJson: true,
+        overall: true,
+        geo: true,
+        china: true,
+      },
       orderBy: { id: "asc" },
     });
     const pageResults: PageResult[] = scored
       .filter((rp) => rp.topicsJson !== null)
       .map((rp) => ({
         url: rp.url,
+        // Stored per page: China pages and standard pages are aggregated apart.
+        mode: (rp.mode === "china" ? "china" : "standard") as PageScoringMode,
         topics: rp.topicsJson as unknown as TopicResult[],
         overall: rp.overall,
         geo: rp.geo,
@@ -349,14 +368,18 @@ async function executeRun(runId: number, opts: { resume?: boolean } = {}): Promi
         overall: result.overall,
         geo: result.geo,
         china: result.china,
+        chinaOverall: result.chinaOverall,
         topicsJson: result.topics as unknown as object,
+        chinaTopicsJson: (result.chinaTopics ?? undefined) as unknown as object,
       },
       update: {
         category: site.category,
         overall: result.overall,
         geo: result.geo,
         china: result.china,
+        chinaOverall: result.chinaOverall,
         topicsJson: result.topics as unknown as object,
+        chinaTopicsJson: (result.chinaTopics ?? null) as unknown as object,
       },
     });
   };
@@ -433,11 +456,13 @@ async function executeRun(runId: number, opts: { resume?: boolean } = {}): Promi
 
     // Score this page right away so the UI can show its criteria live, and so the
     // site aggregate can be rebuilt from these stored results later (settleSite).
-    const pageResult = scorePage(bundle, TOPICS, config);
+    const scoringMode = modeOfKind(rp.page.kind);
+    const pageResult = scorePage(bundle, TOPICS, config, scoringMode);
     await prisma.runPage.update({
       where: { id: rp.id },
       data: {
         status: "DONE",
+        mode: scoringMode,
         // Only an escalated capture has a story to tell: it says WHY the standard
         // attempt failed, and warns that a warm profile weakens Topic 4 evidence.
         error: rescueNote?.slice(0, 2000) ?? null,

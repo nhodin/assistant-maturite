@@ -25,6 +25,9 @@ enum PageKind {
   HP
   PLP
   PDP
+  // A page served to the Chinese market: scored on the first criterion of each
+  // topic only, plus topic 12 (China Market Access), and aggregated apart.
+  CHINA
   OTHER
 }
 
@@ -207,6 +210,9 @@ model RunPage {
   pageId       Int
   url          String    @db.Text
   status       RunStatus @default(PENDING)
+  // Scoring mode this page was graded in: "standard" | "china". Copied from the
+  // page kind at capture time so a later inventory edit cannot rewrite history.
+  mode         String    @default("standard")
   evidenceJson Json? // captured EvidenceBundle (large)
   // Per-page scores. Null on legacy runs captured before per-page scoring existed.
   overall      Int?
@@ -230,8 +236,13 @@ model RunSiteScore {
   category   Category
   overall    Int?
   geo        Int?
+  // Topic 12, measured on the CHINA pages only (null when the site has none).
   china      Int?
-  topicsJson Json // TopicResult[] (per-topic scores + control evidence)
+  // Synthesis of the CHINA pages: average of topics 1-10, each reduced to its
+  // first criterion. Null when the site has no China page.
+  chinaOverall    Int?
+  topicsJson      Json // TopicResult[] over the standard pages
+  chinaTopicsJson Json? // TopicResult[] over the China pages
 
   @@unique([runId, siteId])
   @@index([runId])

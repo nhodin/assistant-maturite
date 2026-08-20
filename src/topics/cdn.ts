@@ -61,7 +61,7 @@ const CDN_HEADERS = [
 
 // ── controls ─────────────────────────────────────────────────────────────────
 
-const brotliControl: Control = {
+export const brotliControl: Control = {
   id: "cdn.brotli",
   topicId: 10,
   label: "Brotli compression on HTML and text resources",
@@ -119,7 +119,7 @@ const longTtlControl: Control = {
   },
 }
 
-const regionControl: Control = {
+export const regionControl: Control = {
   id: "cdn.region",
   topicId: 10,
   label: "CDN with regional distribution (inferred)",

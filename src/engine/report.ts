@@ -32,6 +32,15 @@ function topicColIdx(topicId: number): number {
   return topicId - 1;
 }
 
+/** Score of one topic in a topic list, as a CSV/MD cell. */
+function topicScore(topics: TopicResult[] | null, topicId: number): number | null {
+  return topics?.find((t) => t.topicId === topicId)?.score ?? null;
+}
+
+function cell(score: number | null): string {
+  return score === null ? "N/A" : String(score);
+}
+
 /* ── Markdown ─────────────────────────────────────────────────────────────── */
 
 export function renderMarkdown(
@@ -48,6 +57,10 @@ export function renderMarkdown(
   );
   lines.push(
     "**Scoring:** Cumulative 0–100 per topic. N/A permitted for Slider/Video when elements absent on all pages.",
+  );
+  lines.push(
+    "**China pages:** pages flagged China are scored apart — each topic is reduced to its first criterion (0 or 100) " +
+      "and topic 12 (China Market Access) is measured there and only there.",
   );
   lines.push("");
   lines.push("---");
@@ -91,6 +104,36 @@ export function renderMarkdown(
   );
   lines.push(`| **Average** | ${averages.map((a) => `**${a}**`).join(" | ")} |`);
   lines.push("");
+
+  // ── China pages summary (only when at least one site has China pages) ────
+  const withChina = results.filter((r) => r.chinaTopics !== null);
+  if (withChina.length > 0) {
+    lines.push("## Score Summary — China pages");
+    lines.push("");
+    lines.push(
+      "_Each topic is the first criterion of that topic only (0 or 100). Topic 12 is scored in full._",
+    );
+    lines.push("");
+    const cnNames = withChina.map((r) => r.site);
+    const cnHeader = ["Topic", ...cnNames];
+    lines.push(`| ${cnHeader.join(" | ")} |`);
+    lines.push(`| ${cnHeader.map(() => "---").join(" | ")} |`);
+    for (const topicId of allTopicIds) {
+      const topicName =
+        withChina
+          .flatMap((r) => r.chinaTopics ?? [])
+          .find((t) => t.topicId === topicId)?.name ?? `Topic ${topicId}`;
+      const scores = withChina.map((r) => cell(topicScore(r.chinaTopics, topicId)));
+      lines.push(`| ${topicId}. ${topicName} | ${scores.join(" | ")} |`);
+    }
+    lines.push(
+      `| **Average** | ${withChina
+        .map((r) => `**${cell(r.chinaOverall)}**`)
+        .join(" | ")} |`,
+    );
+    lines.push("");
+  }
+
   lines.push("---");
   lines.push("");
 
@@ -99,29 +142,25 @@ export function renderMarkdown(
     lines.push(`## ${siteResult.site}`);
     lines.push("");
 
-    for (const topicResult of siteResult.topics) {
-      const scoreLabel =
-        topicResult.score === null ? "N/A" : `${topicResult.score}/100`;
-      lines.push(`### ${topicResult.topicId}. ${topicResult.name} — ${scoreLabel}`);
+    const hasStandard = siteResult.topics.some((t) => t.score !== null);
+    if (!hasStandard && siteResult.chinaTopics !== null) {
+      lines.push("_This site was audited on China pages only._");
       lines.push("");
-
-      if (topicResult.score === null && topicResult.controls.every((c) => !c.applicable)) {
-        lines.push(`No applicable elements detected on any evaluated page.`);
-        lines.push("");
-        continue;
+    } else {
+      for (const topicResult of siteResult.topics) {
+        pushTopicTable(lines, topicResult, 3);
       }
+    }
 
-      lines.push("| Criterion | Pts | Result | Evidence |");
-      lines.push("| --- | --- | --- | --- |");
-      for (const cr of topicResult.controls) {
-        const pts = cr.applicable
-          ? `${cr.pointsAwarded}/${cr.maxPoints}`
-          : "—";
-        lines.push(
-          `| ${cr.label} | ${pts} | ${resultIcon(cr)} | ${cr.evidence} |`,
-        );
-      }
+    // China pages: their own block, never averaged with the standard pages.
+    if (siteResult.chinaTopics !== null) {
+      lines.push(
+        `### Pages China — ${cell(siteResult.chinaOverall)}/100 (topics 1–10, first criterion each)`,
+      );
       lines.push("");
+      for (const topicResult of siteResult.chinaTopics) {
+        pushTopicTable(lines, topicResult, 4);
+      }
     }
 
     lines.push("---");
@@ -131,25 +170,55 @@ export function renderMarkdown(
   return lines.join("\n");
 }
 
+/** One topic table (heading + criteria) appended to `lines`. */
+function pushTopicTable(
+  lines: string[],
+  topicResult: TopicResult,
+  headingLevel: number,
+): void {
+  const h = "#".repeat(headingLevel);
+  const scoreLabel = topicResult.score === null ? "N/A" : `${topicResult.score}/100`;
+  lines.push(`${h} ${topicResult.topicId}. ${topicResult.name} — ${scoreLabel}`);
+  lines.push("");
+
+  if (topicResult.score === null && topicResult.controls.every((c) => !c.applicable)) {
+    lines.push(`No applicable elements detected on any evaluated page.`);
+    lines.push("");
+    return;
+  }
+
+  lines.push("| Criterion | Pts | Result | Evidence |");
+  lines.push("| --- | --- | --- | --- |");
+  for (const cr of topicResult.controls) {
+    const pts = cr.applicable ? `${cr.pointsAwarded}/${cr.maxPoints}` : "—";
+    lines.push(`| ${cr.label} | ${pts} | ${resultIcon(cr)} | ${cr.evidence} |`);
+  }
+  lines.push("");
+}
+
 /* ── CSV ─────────────────────────────────────────────────────────────────── */
 
 export function renderCsv(results: SiteResult[]): string {
   const HEADER =
-    "Website;Image management score;Slider management score;Video management score;Third parties score;TTFB/Cache score;JS management score;CSS management score;Critical path score;Fonts management score;CDN score;Technical GEO score;China Market Access score";
+    "Website;Image management score;Slider management score;Video management score;Third parties score;TTFB/Cache score;JS management score;CSS management score;Critical path score;Fonts management score;CDN score;Technical GEO score;China Market Access score;China pages overall score";
 
   const rows: string[] = [HEADER];
 
   for (const r of results) {
     const cols: string[] = new Array(12).fill("");
 
+    // Columns 1–11 come from the standard (non-China) pages.
     for (const t of r.topics) {
       const idx = topicColIdx(t.topicId);
-      if (idx >= 0 && idx < 12) {
-        cols[idx] = t.score === null ? "N/A" : String(t.score);
+      if (idx >= 0 && idx < 11) {
+        cols[idx] = cell(t.score);
       }
     }
+    // Topic 12 is measured on the China pages only.
+    cols[11] = cell(topicScore(r.chinaTopics, 12));
 
-    rows.push([r.site, ...cols].join(";"));
+    // Trailing column: the China-pages synthesis (topics 1–10, first criterion each).
+    rows.push([r.site, ...cols, cell(r.chinaOverall)].join(";"));
   }
 
   return rows.join("\n");

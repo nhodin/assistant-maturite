@@ -49,6 +49,33 @@ data/WEBSITES.csv      # seed source (website;url_hp;url_plp;url_pdp)
 - **Scoring** (matches `../CLAUDE.md`): topic score = sum of awarded points, capped 100;
   `appliesTo`→false means N/A (excluded from the topic max); Overall = average of topics
   **1–10** (excluding fully-N/A); topics **11 (GEO)** and **12 (China)** are standalone.
+- **Topic 11 (GEO) reuses other topics' controls** (2026-08). GEO defines no thresholds
+  of its own any more: `topics/geo.ts` imports the borrowed controls and delegates to
+  their `evaluate` — `geo.nojscontent` (40) ← `js.nojsview`, `geo.ttfbcache` (30) ←
+  `ttfb.ttfb800` AND `ttfb.cdncache`, `geo.compressioncdn` (20) ← `cdn.brotli` AND
+  `cdn.region`, plus its own `geo.weight1mb` (10). A composite is ALL-OR-NOTHING (a
+  control is binary here) and its evidence string reports both halves, so the failing
+  one is still nameable. Reusing the controls means a detection fix lands in GEO at the
+  same time, and no site is judged differently on the same fact by two topics. The
+  borrowed controls are `export`ed from `js.ts`/`ttfbcache.ts`/`cdn.ts` for this — those
+  modules must never import `geo.ts` back. The removed ids (`geo.ttfb200`, `geo.lcp25`,
+  `geo.cls01`, `geo.ssrcontent`, `geo.ssrratio`, `geo.display2s`) may linger as orphan
+  `ControlConfig` rows; `config-store` iterates `ALL_CONTROLS`, so they are ignored.
+- **China pages** (`PageScoringMode` in `core/types.ts`): a page is graded `"standard"`
+  (the default) or `"china"` — the latter for a `PageKind.CHINA` page, i.e. one served
+  to the Chinese market. The rule lives in ONE function, `planControl` in
+  `engine/score.ts`; controls stay pure and know nothing about it.
+  - `"china"`: topics 1–11 keep only their FIRST enabled criterion, which carries the
+    whole topic (`CHINA_TOPIC_POINTS` = 100 → the topic reads 0 or 100, on the same
+    scale as a standard score); every other criterion is N/A. Topic 12 is scored in full.
+  - `"standard"`: topics 1–11 as before, and topic 12 is N/A — China Market Access is
+    only measured on a China page.
+  - A site may mix both. They are aggregated in **two separate blocks** and never
+    averaged together: `SiteResult.topics/overall/geo` (standard pages) vs
+    `SiteResult.chinaTopics/chinaOverall/china` (China pages, the last one being topic 12).
+    `RunSiteScore` persists both (`chinaTopicsJson`, `chinaOverall`), `RunPage.mode`
+    records the family a page was graded in so a later inventory edit cannot rewrite
+    history, and the CSV export appends a `China pages overall score` column.
 - **Anti-bot**: LVMH sites sit behind Akamai and block headless Playwright. Use the
   **`cloak`** browser provider (CloakBrowser stealth Chromium) — `--browser cloak` in the
   CLI, default in the UI run form. A residential IP (or proxy) is needed in production.
@@ -236,7 +263,8 @@ data/WEBSITES.csv      # seed source (website;url_hp;url_plp;url_pdp)
 
 ## Data model (Prisma / MySQL)
 
-`Site → Page` (inventory, Site has a Category) · `Project → ProjectPage` (page selection;
+`Site → Page` (inventory, Site has a Category, Page has a PageKind — `CHINA` marks a
+China page) · `Project → ProjectPage` (page selection;
 Project has `mode` STANDARD/MONITORING + monitor frequency/next-due) · `Run → RunPage`
 (per-page capture + slim evidence; Run has `source` manual/scheduled) + `RunSiteScore`
 (aggregated per-site, ranked) · `CruxSnapshot` (per-project CrUX p75 samples, scope

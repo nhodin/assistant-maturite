@@ -67,6 +67,8 @@ interface SiteRow {
   url_hp: string;
   url_plp: string;
   url_pdp: string;
+  /** Optional page served to the Chinese market — graded with the China rule. */
+  url_china: string;
 }
 
 function parseCsv(filePath: string): SiteRow[] {
@@ -85,6 +87,7 @@ function parseCsv(filePath: string): SiteRow[] {
     url_hp: r["url_hp"] ?? "",
     url_plp: r["url_plp"] ?? "",
     url_pdp: r["url_pdp"] ?? "",
+    url_china: r["url_china"] ?? "",
   }));
 }
 
@@ -146,12 +149,15 @@ program
 
     for (const site of sites) {
       console.log(`\n[${site.website}] Auditing…`);
-      const pages: import("../core/schema").EvidenceBundle[] = [];
+      const pages: import("../core/types").ScoredPageInput[] = [];
 
       const urlMap: Record<string, string> = {
         hp: site.url_hp,
         plp: site.url_plp,
         pdp: site.url_pdp,
+        // A "china" column, when present, is scored on the first criterion of each
+        // topic plus topic 12, and aggregated in its own block. See PageScoringMode.
+        china: site.url_china,
       };
 
       for (const [kind, url] of Object.entries(urlMap)) {
@@ -167,7 +173,7 @@ program
             proxy,
             headless,
           });
-          pages.push(bundle);
+          pages.push({ bundle, mode: kind === "china" ? "china" : "standard" });
 
           // Write raw evidence
           const evidenceFile = path.join(
@@ -191,7 +197,10 @@ program
       const result = scoreSite(site.website, pages, TOPICS, config);
       siteResults.push(result);
       console.log(
-        `  overall: ${result.overall !== null ? result.overall : "N/A"}`,
+        `  overall: ${result.overall !== null ? result.overall : "N/A"}` +
+          (result.chinaOverall !== null
+            ? `  ·  China pages: ${result.chinaOverall} (access ${result.china ?? "N/A"})`
+            : ""),
       );
     }
 

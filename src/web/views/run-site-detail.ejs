@@ -5,43 +5,47 @@
 <p class="muted"><%= categoryLabel(score.category) %></p>
 
 <%
-  var pgs = pages || [];
-  var hasPageScores = pgs.some(function(p){ return p.topics && p.topics.length; });
+  var allPages = pages || [];
+  // The two families are never mixed: a China page is graded on the first
+  // criterion of each topic (plus topic 12), a standard page on all of them.
+  var stdPages = allPages.filter(function(p){ return !p.isChina; });
+  var cnPages  = allPages.filter(function(p){ return p.isChina; });
+  var cnTopics = chinaTopics || null;
+  function hasScores(list){ return list.some(function(p){ return p.topics && p.topics.length; }); }
   function pTopic(p, id){ return (p.topics || []).find(function(t){ return t.topicId === id; }); }
   function pCtrl(pt, cid){ return pt ? (pt.controls || []).find(function(c){ return c.controlId === cid; }) : undefined; }
 %>
 
-<h2>Synthèse</h2>
+<h2>Synthèse<% if (cnPages.length) { %> — pages hors China<% } %></h2>
+<% if (!stdPages.length) { %>
+  <p class="muted">Aucune page hors China dans ce run : seul le bloc China ci-dessous est renseigné.</p>
+<% } else { %>
+<%
+  var hasPageScores = hasScores(stdPages);
+%>
 <div class="scroll-x">
 <table class="grid small">
   <thead>
     <tr>
       <th></th>
-      <% if (hasPageScores) { pgs.forEach(function(p){ %><th title="<%= p.url %>"><%= p.label %></th><% }); } %>
+      <% if (hasPageScores) { stdPages.forEach(function(p){ %><th title="<%= p.url %>"><%= p.label %></th><% }); } %>
       <th>Site</th>
     </tr>
   </thead>
   <tbody>
     <tr>
       <td><strong>Global</strong></td>
-      <% if (hasPageScores) { pgs.forEach(function(p){ %>
+      <% if (hasPageScores) { stdPages.forEach(function(p){ %>
         <td><span class="score sm <%= scoreClass(p.overall) %>"><%= fmtScore(p.overall) %></span></td>
       <% }); } %>
       <td><span class="score <%= scoreClass(score.overall) %>"><%= fmtScore(score.overall) %></span></td>
     </tr>
     <tr>
       <td>GEO</td>
-      <% if (hasPageScores) { pgs.forEach(function(p){ %>
+      <% if (hasPageScores) { stdPages.forEach(function(p){ %>
         <td><span class="score sm <%= scoreClass(p.geo) %>"><%= fmtScore(p.geo) %></span></td>
       <% }); } %>
       <td><span class="score <%= scoreClass(score.geo) %>"><%= fmtScore(score.geo) %></span></td>
-    </tr>
-    <tr>
-      <td>China</td>
-      <% if (hasPageScores) { pgs.forEach(function(p){ %>
-        <td><span class="score sm <%= scoreClass(p.china) %>"><%= fmtScore(p.china) %></span></td>
-      <% }); } %>
-      <td><span class="score <%= scoreClass(score.china) %>"><%= fmtScore(score.china) %></span></td>
     </tr>
   </tbody>
 </table>
@@ -50,60 +54,127 @@
 <% if (!hasPageScores) { %>
   <p class="muted">Détail par page indisponible (run antérieur à l'ajout du score par page). Seul le score site agrégé est affiché.</p>
 <% } %>
+<% } %>
 
-<% (topics || []).forEach(function(t){ %>
-  <h2><%= t.topicId %>. <%= t.name %> —
-    <span class="score <%= scoreClass(t.score) %>"><%= fmtScore(t.score) %><% if (t.score !== null){ %>/100<% } %></span>
-  </h2>
-  <% if (t.score === null) { %>
-    <p class="muted">N/A — aucun élément applicable détecté.</p>
-  <% } else { %>
-    <div class="scroll-x">
-    <table class="grid small crit">
-      <thead>
-        <tr>
-          <th>Critère</th>
-          <% if (hasPageScores) { pgs.forEach(function(p){ %><th title="<%= p.url %>"><%= p.label %></th><% }); } %>
-          <th>Site (pts)</th>
-          <th>Évidence</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr class="topic-row">
-          <td><strong>Score topic</strong></td>
-          <% if (hasPageScores) { pgs.forEach(function(p){ var pt = pTopic(p, t.topicId); var sc = pt ? pt.score : null; %>
-            <td><span class="score sm <%= scoreClass(sc) %>"><%= pt ? fmtScore(pt.score) : '—' %></span></td>
-          <% }); } %>
-          <td><span class="score sm <%= scoreClass(t.score) %>"><%= fmtScore(t.score) %></span></td>
-          <td></td>
-        </tr>
-        <% (t.controls || []).forEach(function(c){ %>
+<% if (cnPages.length) { %>
+  <h2>Synthèse — pages China</h2>
+  <p class="muted">
+    Sur une page China, chaque sujet est réduit à son <strong>premier critère</strong> (0 ou 100)
+    et le sujet 12 « China Market Access » n'est mesuré que là.
+  </p>
+  <%
+    var hasCnScores = hasScores(cnPages);
+  %>
+  <div class="scroll-x">
+  <table class="grid small">
+    <thead>
+      <tr>
+        <th></th>
+        <% if (hasCnScores) { cnPages.forEach(function(p){ %><th title="<%= p.url %>"><%= p.label %></th><% }); } %>
+        <th>Site</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Global China</strong></td>
+        <% if (hasCnScores) { cnPages.forEach(function(p){ %>
+          <td><span class="score sm <%= scoreClass(p.overall) %>"><%= fmtScore(p.overall) %></span></td>
+        <% }); } %>
+        <td><span class="score <%= scoreClass(score.chinaOverall) %>"><%= fmtScore(score.chinaOverall) %></span></td>
+      </tr>
+      <tr>
+        <td>China Market Access</td>
+        <% if (hasCnScores) { cnPages.forEach(function(p){ %>
+          <td><span class="score sm <%= scoreClass(p.china) %>"><%= fmtScore(p.china) %></span></td>
+        <% }); } %>
+        <td><span class="score <%= scoreClass(score.china) %>"><%= fmtScore(score.china) %></span></td>
+      </tr>
+      <tr>
+        <td>GEO</td>
+        <% if (hasCnScores) { cnPages.forEach(function(p){ %>
+          <td><span class="score sm <%= scoreClass(p.geo) %>"><%= fmtScore(p.geo) %></span></td>
+        <% }); } %>
+        <td>
+          <% var cnGeo = (cnTopics || []).find(function(t){ return t.topicId === 11; }); %>
+          <span class="score <%= scoreClass(cnGeo ? cnGeo.score : null) %>"><%= fmtScore(cnGeo ? cnGeo.score : null) %></span>
+        </td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+<% } %>
+
+<%
+  // One topic block (site column + per-page columns), reused by both families.
+  function renderTopics(topicList, familyPages) {
+    var hasCols = hasScores(familyPages);
+%>
+  <% (topicList || []).forEach(function(t){ %>
+    <h3><%= t.topicId %>. <%= t.name %> —
+      <span class="score <%= scoreClass(t.score) %>"><%= fmtScore(t.score) %><% if (t.score !== null){ %>/100<% } %></span>
+    </h3>
+    <% if (t.score === null) { %>
+      <p class="muted">N/A — aucun critère applicable.</p>
+    <% } else { %>
+      <div class="scroll-x">
+      <table class="grid small crit">
+        <thead>
           <tr>
-            <td><%= c.label %></td>
-            <% if (hasPageScores) { pgs.forEach(function(p){ var pc = pCtrl(pTopic(p, t.topicId), c.controlId); %>
-              <td>
-                <% if (!pc || !pc.applicable) { %><span class="muted">N/A</span>
-                <% } else if (pc.passed) { %><span class="ok" title="<%= pc.evidence %>">✓</span>
-                <% } else { %><span class="ko" title="<%= pc.evidence %>">✗</span><% } %>
-              </td>
-            <% }); } %>
-            <td>
-              <% if (c.applicable) { %><%= c.pointsAwarded %>/<%= c.maxPoints %>
-              <% } else { %><span class="muted">N/A</span><% } %>
-            </td>
-            <td class="ev">
-              <% if (hasPageScores) { pgs.forEach(function(p){ var pc = pCtrl(pTopic(p, t.topicId), c.controlId); %>
-                <div><span class="muted"><%= p.label %>:</span>
-                  <% if (!pc || !pc.applicable) { %>N/A<% } else { %><%= pc.evidence %><% } %>
-                </div>
-              <% }); } else { %>—<% } %>
-            </td>
+            <th>Critère</th>
+            <% if (hasCols) { familyPages.forEach(function(p){ %><th title="<%= p.url %>"><%= p.label %></th><% }); } %>
+            <th>Site (pts)</th>
+            <th>Évidence</th>
           </tr>
-        <% }) %>
-      </tbody>
-    </table>
-    </div>
-  <% } %>
-<% }) %>
+        </thead>
+        <tbody>
+          <tr class="topic-row">
+            <td><strong>Score topic</strong></td>
+            <% if (hasCols) { familyPages.forEach(function(p){ var pt = pTopic(p, t.topicId); %>
+              <td><span class="score sm <%= scoreClass(pt ? pt.score : null) %>"><%= pt ? fmtScore(pt.score) : '—' %></span></td>
+            <% }); } %>
+            <td><span class="score sm <%= scoreClass(t.score) %>"><%= fmtScore(t.score) %></span></td>
+            <td></td>
+          </tr>
+          <% (t.controls || []).forEach(function(c){ %>
+            <tr>
+              <td><%= c.label %></td>
+              <% if (hasCols) { familyPages.forEach(function(p){ var pc = pCtrl(pTopic(p, t.topicId), c.controlId); %>
+                <td>
+                  <% if (!pc || !pc.applicable) { %><span class="muted">N/A</span>
+                  <% } else if (pc.passed) { %><span class="ok" title="<%= pc.evidence %>">✓</span>
+                  <% } else { %><span class="ko" title="<%= pc.evidence %>">✗</span><% } %>
+                </td>
+              <% }); } %>
+              <td>
+                <% if (c.applicable) { %><%= c.pointsAwarded %>/<%= c.maxPoints %>
+                <% } else { %><span class="muted">N/A</span><% } %>
+              </td>
+              <td class="ev">
+                <% if (hasCols) { familyPages.forEach(function(p){ var pc = pCtrl(pTopic(p, t.topicId), c.controlId); %>
+                  <div><span class="muted"><%= p.label %>:</span>
+                    <% if (!pc || !pc.applicable) { %>N/A<% } else { %><%= pc.evidence %><% } %>
+                  </div>
+                <% }); } else { %>—<% } %>
+              </td>
+            </tr>
+          <% }) %>
+        </tbody>
+      </table>
+      </div>
+    <% } %>
+  <% }) %>
+<%
+  }
+%>
+
+<% if (stdPages.length) { %>
+  <h2>Détail par sujet<% if (cnPages.length) { %> — pages hors China<% } %></h2>
+  <% renderTopics(topics, stdPages) %>
+<% } %>
+
+<% if (cnTopics) { %>
+  <h2>Détail par sujet — pages China</h2>
+  <% renderTopics(cnTopics, cnPages) %>
+<% } %>
 
 <%- include('partials/footer') %>

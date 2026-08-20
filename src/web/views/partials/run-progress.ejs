@@ -30,14 +30,14 @@
         <tr>
           <th>Site</th><th>Type</th><th>Statut</th>
           <% PCOLS.forEach(function(c){ %><th title="topic <%= c.id %>"><%= c.ab %></th><% }) %>
-          <th>Global</th><th>GEO</th><th>China</th><th></th>
+          <th>Global</th><th>GEO</th><th title="Sujet 12 — pages China uniquement">CN Access</th><th></th>
         </tr>
       </thead>
       <tbody>
         <% pages.forEach(function(rp){ var done = rp.status === 'DONE'; %>
           <tr>
             <td title="<%= rp.url %>"><%= rp.page.site.name %></td>
-            <td><span class="badge"><%= rp.page.kind %></span></td>
+            <td><span class="badge<%= rp.page.kind === 'CHINA' ? ' b-china' : '' %>"><%= rp.page.kind %></span></td>
             <td><span class="badge b-<%= rp.status %>"><%= rp.status %></span></td>
             <% PCOLS.forEach(function(c){ var t = done ? pgTopic(rp.topicsJson, c.id) : undefined; %>
               <td>

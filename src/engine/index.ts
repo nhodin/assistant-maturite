@@ -5,7 +5,12 @@
  *   import { scoreSite, renderMarkdown, renderCsv, loadConfig } from "./engine"
  */
 import * as fs from "node:fs";
-import type { TopicModule, ControlConfig, SiteResult } from "../core/types";
+import type {
+  TopicModule,
+  ControlConfig,
+  ScoredPageInput,
+  SiteResult,
+} from "../core/types";
 import { DEFAULT_CONTROL_CONFIG } from "../core/types";
 import type { EvidenceBundle } from "../core/schema";
 import { scoreSite as _scoreSite } from "./score";
@@ -80,13 +85,16 @@ export function loadConfig(topics: TopicModule[], path?: string): ConfigMap {
  * Score a single site across all its pages for all provided topics.
  *
  * @param site     Display name of the site (e.g. "BULY1803").
- * @param pages    One EvidenceBundle per page (HP/PLP/PDP).
+ * @param pages    One entry per page (HP/PLP/PDP…). A bare EvidenceBundle is scored
+ *                 as a standard page; pass `{ bundle, mode: "china" }` for a China
+ *                 page, which is graded on the first criterion of each topic only
+ *                 (plus topic 12) and aggregated in its own block.
  * @param topics   Topic modules to evaluate (dependency-injected for testability).
  * @param config   Optional ConfigMap; defaults to defaultConfig(topics).
  */
 export function scoreSite(
   site: string,
-  pages: EvidenceBundle[],
+  pages: (EvidenceBundle | ScoredPageInput)[],
   topics: TopicModule[],
   config?: ConfigMap,
 ): SiteResult {

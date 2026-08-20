@@ -69,7 +69,8 @@ const deferControl: Control = {
   },
 }
 
-const noJsViewControl: Control = {
+/** Reused verbatim by topic 11 (Technical GEO) — see topics/geo.ts. */
+export const noJsViewControl: Control = {
   id: "js.nojsview",
   topicId: 6,
   label: "Viewport content without JS (SSR word count)",

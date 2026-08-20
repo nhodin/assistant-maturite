@@ -9,6 +9,7 @@ import type { EvidenceBundle } from "../src/core/schema";
 import {
   defaultConfig,
   scoreSite,
+  scoreSiteFromPages,
   renderCsv,
   renderMarkdown,
   type ConfigMap,
@@ -344,15 +345,17 @@ describe("5. overall average of non-standalone topics; standalone 11/12 → geo/
     expect(result.china).toBeNull();
   });
 
-  it("standalone topics 11 and 12 go to geo/china, not overall", () => {
+  it("standalone topic 11 goes to geo, not overall; topic 12 is China-pages only", () => {
     const topics = [topic1, topic10, topic11, topic12];
     const cfg = defaultConfig(topics);
     const result = scoreSite("site", singlePage, topics, cfg);
 
     // topic11 standalone, c1 passes → geo=50
-    // topic12 standalone, c1 fails → china=0
     expect(result.geo).toBe(50);
-    expect(result.china).toBe(0);
+    // topic12 is only measured on China pages — there are none here.
+    expect(result.china).toBeNull();
+    expect(result.chinaTopics).toBeNull();
+    expect(result.chinaOverall).toBeNull();
 
     // overall still only 25 (topics 1 and 10)
     expect(result.overall).toBe(25);
@@ -423,7 +426,7 @@ describe("renderMarkdown and renderCsv smoke tests", () => {
 
     const lines = csv.split("\n");
     expect(lines[0]).toBe(
-      "Website;Image management score;Slider management score;Video management score;Third parties score;TTFB/Cache score;JS management score;CSS management score;Critical path score;Fonts management score;CDN score;Technical GEO score;China Market Access score",
+      "Website;Image management score;Slider management score;Video management score;Third parties score;TTFB/Cache score;JS management score;CSS management score;Critical path score;Fonts management score;CDN score;Technical GEO score;China Market Access score;China pages overall score",
     );
     // Second line should contain TESTSITE and scores for topic1 and topic10
     expect(lines[1]).toContain("TESTSITE");
@@ -454,5 +457,145 @@ describe("loadConfig merges file overrides", () => {
       pointsOverride: null,
       naForced: false,
     });
+  });
+});
+
+/* ══════════════════════════════════════════════════════════════════════════ */
+
+describe("China pages: first criterion only, topic 12 only there", () => {
+  /** Topic whose FIRST criterion fails and whose second one passes. */
+  const topicFirstFails: TopicModule = {
+    id: 4,
+    name: "Third parties",
+    hasNA: false,
+    standalone: false,
+    controls: [
+      makeControl("t4.c1", 4, 30, alwaysFail),
+      makeControl("t4.c2", 4, 25, alwaysPass),
+    ],
+  };
+
+  const chinaPage = [{ bundle: makeEvidence(), mode: "china" as const }];
+
+  it("keeps only the first criterion of a topic, worth 100", () => {
+    const topics = [topic1];
+    const cfg = defaultConfig(topics);
+    const result = scoreSite("site", chinaPage, topics, cfg);
+
+    // Standard block is empty: nothing was audited outside China.
+    expect(result.overall).toBeNull();
+
+    const t1 = result.chinaTopics!.find((t) => t.topicId === 1)!;
+    expect(t1.score).toBe(100); // t1.c1 passes and carries the whole topic
+
+    const c1 = t1.controls.find((c) => c.controlId === "t1.c1")!;
+    expect(c1.applicable).toBe(true);
+    expect(c1.maxPoints).toBe(100);
+    expect(c1.pointsAwarded).toBe(100);
+
+    const c2 = t1.controls.find((c) => c.controlId === "t1.c2")!;
+    expect(c2.applicable).toBe(false);
+    expect(c2.maxPoints).toBe(0);
+    expect(c2.evidence).toContain("1er critère");
+  });
+
+  it("scores 0 when the first criterion fails, whatever the others do", () => {
+    const topics = [topicFirstFails];
+    const cfg = defaultConfig(topics);
+    const result = scoreSite("site", chinaPage, topics, cfg);
+
+    const t4 = result.chinaTopics!.find((t) => t.topicId === 4)!;
+    expect(t4.score).toBe(0);
+    expect(result.chinaOverall).toBe(0);
+  });
+
+  it("hands the topic to the next criterion when the first one is disabled", () => {
+    const topics = [topicFirstFails];
+    const cfg: ConfigMap = {
+      ...defaultConfig(topics),
+      "t4.c1": { enabled: false, pointsOverride: null, naForced: false },
+    };
+    const result = scoreSite("site", chinaPage, topics, cfg);
+
+    // t4.c2 passes → the topic is validated on its first ENABLED criterion.
+    const t4 = result.chinaTopics!.find((t) => t.topicId === 4)!;
+    expect(t4.score).toBe(100);
+    expect(t4.controls.find((c) => c.controlId === "t4.c2")!.maxPoints).toBe(100);
+  });
+
+  it("scores topic 12 in full on a China page and N/A elsewhere", () => {
+    const topics = [topic1, topic12];
+    const cfg = defaultConfig(topics);
+
+    const chinaOnly = scoreSite("site", chinaPage, topics, cfg);
+    // topic12's single control fails → 0, but it IS measured.
+    expect(chinaOnly.china).toBe(0);
+    const t12 = chinaOnly.chinaTopics!.find((t) => t.topicId === 12)!;
+    expect(t12.controls[0].applicable).toBe(true);
+    expect(t12.controls[0].maxPoints).toBe(40); // its declared points, not 100
+
+    const standardOnly = scoreSite("site", singlePage, topics, cfg);
+    expect(standardOnly.china).toBeNull();
+    const std12 = standardOnly.topics.find((t) => t.topicId === 12)!;
+    expect(std12.score).toBeNull();
+    expect(std12.controls[0].applicable).toBe(false);
+    expect(std12.controls[0].evidence).toContain("pages China");
+  });
+
+  it("keeps the two families apart on a mixed site", () => {
+    const topics = [topic1, topic10, topic11, topic12];
+    const cfg = defaultConfig(topics);
+    const result = scoreSite(
+      "site",
+      [makeEvidence(), { bundle: makeEvidence(), mode: "china" as const }],
+      topics,
+      cfg,
+    );
+
+    // Standard block: unchanged rules (topic1 = 30, topic10 = 20 → overall 25).
+    expect(result.overall).toBe(25);
+    expect(result.geo).toBe(50);
+    expect(result.topics.find((t) => t.topicId === 1)!.score).toBe(30);
+
+    // China block: each topic on its first criterion only.
+    expect(result.chinaTopics!.find((t) => t.topicId === 1)!.score).toBe(100);
+    expect(result.chinaOverall).toBe(100); // topics 1 and 10 both pass their first criterion
+    expect(result.china).toBe(0); // topic 12 fails
+
+    expect(result.pages.map((p) => p.mode)).toEqual(["standard", "china"]);
+  });
+
+  it("aggregates from stored page results exactly like from bundles", () => {
+    const topics = [topic1, topic10, topic11, topic12];
+    const cfg = defaultConfig(topics);
+    const inputs = [
+      makeEvidence({ url: "https://x/a" }),
+      { bundle: makeEvidence({ url: "https://x/cn" }), mode: "china" as const },
+    ];
+    const fromBundles = scoreSite("site", inputs, topics, cfg);
+    const fromStored = scoreSiteFromPages("site", fromBundles.pages, topics, cfg);
+
+    expect(fromStored.overall).toBe(fromBundles.overall);
+    expect(fromStored.geo).toBe(fromBundles.geo);
+    expect(fromStored.china).toBe(fromBundles.china);
+    expect(fromStored.chinaOverall).toBe(fromBundles.chinaOverall);
+    expect(fromStored.chinaTopics).toEqual(fromBundles.chinaTopics);
+  });
+
+  it("puts the China block in its own CSV columns", () => {
+    const topics = [topic1, topic12];
+    const cfg = defaultConfig(topics);
+    const result = scoreSite(
+      "MIXED",
+      [makeEvidence(), { bundle: makeEvidence(), mode: "china" as const }],
+      topics,
+      cfg,
+    );
+    const line = renderCsv([result]).split("\n")[1].split(";");
+
+    expect(line[0]).toBe("MIXED");
+    expect(line[1]).toBe("30"); // topic 1, standard pages
+    expect(line[12]).toBe("0"); // topic 12, China pages
+    expect(line[13]).toBe("100"); // China pages overall (topic 1 first criterion)
   });
 });

@@ -4,9 +4,16 @@
  * Aggregation rules (per CLAUDE.md):
  * - Per page/control: skip disabled; N/A if appliesTo===false or naForced.
  *   A control is binary on a page: full points or 0.
+ * - A page is graded in one of two MODES (see `PageScoringMode`):
+ *   "standard" scores topics 1–11 fully and leaves topic 12 N/A; "china" keeps
+ *   only the FIRST measured criterion of topics 1–11 — worth CHINA_TOPIC_POINTS
+ *   (100), so the topic reads 0 or 100 — and scores topic 12 in full.
  * - Across pages (site): each criterion is the PROPORTIONAL AVERAGE of its
  *   per-page results — `round(points × passedPages / applicablePages)`. A control
  *   is N/A for the site only if N/A on ALL pages.
+ *   The two families of page are aggregated SEPARATELY: the standard pages feed
+ *   `topics`/`overall`/`geo`, the China pages feed `chinaTopics`/`chinaOverall`/
+ *   `china`. They are never averaged together.
  * - Topic score: sum of (per-page) pointsAwarded for a page, or sum of the
  *   averaged criteria for the site; capped at 100. null if ALL controls N/A.
  * - Overall: average of non-standalone topics 1–10 whose score is not null.
@@ -16,10 +23,13 @@ import type {
   ControlConfig,
   ControlResult,
   PageResult,
+  PageScoringMode,
+  ScoredPageInput,
   SiteResult,
   TopicModule,
   TopicResult,
 } from "../core/types";
+import { CHINA_TOPIC_POINTS } from "../core/types";
 import type { EvidenceBundle } from "../core/schema";
 import type { ConfigMap } from "./index";
 
@@ -39,6 +49,83 @@ function resolvePoints(control: Control, cfg: ControlConfig): number {
   return cfg.pointsOverride ?? control.defaultPoints;
 }
 
+/** Accept a bare bundle (standard page) or an explicit {bundle, mode} pair. */
+function asPageInput(p: EvidenceBundle | ScoredPageInput): Required<ScoredPageInput> {
+  return "bundle" in p
+    ? { bundle: p.bundle, mode: p.mode ?? "standard" }
+    : { bundle: p, mode: "standard" };
+}
+
+/** Page results carry their mode; anything captured before China pages is standard. */
+function modeOf(page: Pick<PageResult, "mode">): PageScoringMode {
+  return page.mode === "china" ? "china" : "standard";
+}
+
+/* ── mode plan: which criteria a mode measures, and for how many points ───── */
+
+/**
+ * Index of the first control of `topic` that the configuration still measures.
+ * On a China page THIS is the criterion that carries the topic, so a control
+ * disabled in Settings hands the role to the next one instead of blanking the
+ * whole topic. -1 when the topic has no enabled control at all.
+ */
+function firstMeasuredIndex(topic: TopicModule, config: ConfigMap): number {
+  return topic.controls.findIndex((c) => getConfig(config, c.id).enabled);
+}
+
+interface ControlPlan {
+  /** false → the mode does not measure this criterion: N/A, no points, no max. */
+  measured: boolean;
+  /** Points the criterion is worth in this mode (0 when not measured). */
+  points: number;
+  /** Evidence string to show for a criterion the mode does not measure. */
+  skipReason: string;
+}
+
+const CHINA_ONLY_TOPIC = 12;
+
+/**
+ * What `mode` does with one criterion. This is the ONLY place the China rule
+ * lives: everything else (per-page evaluation, site aggregation, reports) just
+ * reads `measured` / `points`.
+ */
+function planControl(
+  topic: TopicModule,
+  control: Control,
+  index: number,
+  cfg: ControlConfig,
+  mode: PageScoringMode,
+  firstIdx: number,
+): ControlPlan {
+  const base = resolvePoints(control, cfg);
+
+  if (mode === "china") {
+    // Topic 12 is the point of a China page — scored in full, as declared.
+    if (topic.id === CHINA_ONLY_TOPIC) {
+      return { measured: true, points: base, skipReason: "" };
+    }
+    // Every other topic is reduced to its foundational criterion, which carries
+    // the whole topic so the score stays on the 0–100 scale.
+    return index === firstIdx
+      ? { measured: true, points: CHINA_TOPIC_POINTS, skipReason: "" }
+      : {
+          measured: false,
+          points: 0,
+          skipReason: "N/A — page China : seul le 1er critère du sujet est évalué",
+        };
+  }
+
+  // Standard page: topic 12 means nothing here.
+  if (topic.id === CHINA_ONLY_TOPIC) {
+    return {
+      measured: false,
+      points: 0,
+      skipReason: "N/A — sujet évalué uniquement sur les pages China",
+    };
+  }
+  return { measured: true, points: base, skipReason: "" };
+}
+
 /* ── per-page evaluation ──────────────────────────────────────────────────── */
 
 interface PageControlEval {
@@ -50,48 +137,43 @@ interface PageControlEval {
   evidence: string;
 }
 
+function naEval(controlId: string, evidence: string): PageControlEval {
+  return {
+    controlId,
+    applicable: false,
+    passed: false,
+    pointsAwarded: 0,
+    maxPoints: 0,
+    evidence,
+  };
+}
+
 function evalControlOnPage(
   control: Control,
   page: EvidenceBundle,
   cfg: ControlConfig,
+  plan: ControlPlan,
 ): PageControlEval {
-  const pts = resolvePoints(control, cfg);
-
   // Disabled: skip entirely (callers filter these out)
-  if (!cfg.enabled) {
-    return {
-      controlId: control.id,
-      applicable: false,
-      passed: false,
-      pointsAwarded: 0,
-      maxPoints: 0,
-      evidence: "disabled",
-    };
-  }
+  if (!cfg.enabled) return naEval(control.id, "disabled");
+
+  // The scoring mode does not measure this criterion on this page.
+  if (!plan.measured) return naEval(control.id, plan.skipReason);
 
   // N/A gate
   const isNA =
     cfg.naForced ||
     (control.appliesTo !== undefined && control.appliesTo(page) === false);
 
-  if (isNA) {
-    return {
-      controlId: control.id,
-      applicable: false,
-      passed: false,
-      pointsAwarded: 0,
-      maxPoints: 0,
-      evidence: "N/A",
-    };
-  }
+  if (isNA) return naEval(control.id, "N/A");
 
   const verdict = control.evaluate(page);
   return {
     controlId: control.id,
     applicable: true,
     passed: verdict.passed,
-    pointsAwarded: verdict.passed ? pts : 0,
-    maxPoints: pts,
+    pointsAwarded: verdict.passed ? plan.points : 0,
+    maxPoints: plan.points,
     evidence: verdict.evidence,
   };
 }
@@ -119,9 +201,9 @@ export interface PageControlFacts {
 }
 
 function aggregateFacts(
-  control: Control,
   facts: PageControlFacts[],
   cfg: ControlConfig,
+  plan: ControlPlan,
 ): SiteControlAgg {
   if (!cfg.enabled) {
     return {
@@ -130,6 +212,15 @@ function aggregateFacts(
       pointsAwarded: 0,
       maxPoints: 0,
       evidence: "disabled",
+    };
+  }
+  if (!plan.measured) {
+    return {
+      applicable: false,
+      passed: false,
+      pointsAwarded: 0,
+      maxPoints: 0,
+      evidence: plan.skipReason,
     };
   }
 
@@ -147,30 +238,33 @@ function aggregateFacts(
     };
   }
 
-  const pts = resolvePoints(control, cfg);
-
   // Proportional average: criterion is worth points × (passed pages / applicable pages).
   const passedCount = applicableEvals.filter((e) => e.passed).length;
   const total = applicableEvals.length;
-  const pointsAwarded = Math.round((pts * passedCount) / total);
+  const pointsAwarded = Math.round((plan.points * passedCount) / total);
 
   return {
     applicable: true,
     // "passed" at site level means: validated on EVERY applicable page.
     passed: passedCount === total,
     pointsAwarded,
-    maxPoints: pts,
+    maxPoints: plan.points,
     evidence: `Validé sur ${passedCount}/${total} page(s)`,
   };
 }
 
-
 /* ── shared overall/geo/china computation ─────────────────────────────────── */
+
+interface Aggregates {
+  overall: number | null;
+  geo: number | null;
+  china: number | null;
+}
 
 function computeAggregates(
   topicResults: TopicResult[],
   topics: TopicModule[],
-): { overall: number | null; geo: number | null; china: number | null } {
+): Aggregates {
   const mainTopics = topicResults.filter((t) => {
     const topic = topics.find((tp) => tp.id === t.topicId);
     return topic !== undefined && !topic.standalone && t.score !== null;
@@ -186,7 +280,7 @@ function computeAggregates(
   return {
     overall,
     geo: topicResults.find((t) => t.topicId === 11)?.score ?? null,
-    china: topicResults.find((t) => t.topicId === 12)?.score ?? null,
+    china: topicResults.find((t) => t.topicId === CHINA_ONLY_TOPIC)?.score ?? null,
   };
 }
 
@@ -196,15 +290,20 @@ function computeAggregates(
  * Site-level topic scoring, parameterised by where the per-page facts come from:
  * freshly evaluated bundles (`scoreTopic`) or stored per-page ControlResults
  * (`scoreSiteFromPages`). One implementation of the aggregation rule, two sources.
+ *
+ * All the pages feeding one call MUST share the same `mode` — the China pages and
+ * the standard pages of a site are aggregated in two separate passes.
  */
 function scoreTopicWith(
   topic: TopicModule,
   config: ConfigMap,
+  mode: PageScoringMode,
   factsFor: (control: Control, cfg: ControlConfig) => PageControlFacts[],
 ): TopicResult {
   const controlResults: ControlResult[] = [];
+  const firstIdx = firstMeasuredIndex(topic, config);
 
-  for (const control of topic.controls) {
+  topic.controls.forEach((control, index) => {
     const cfg = getConfig(config, control.id);
 
     if (!cfg.enabled) {
@@ -218,10 +317,11 @@ function scoreTopicWith(
         maxPoints: resolvePoints(control, cfg),
         evidence: "disabled",
       });
-      continue;
+      return;
     }
 
-    const agg = aggregateFacts(control, factsFor(control, cfg), cfg);
+    const plan = planControl(topic, control, index, cfg, mode, firstIdx);
+    const agg = aggregateFacts(factsFor(control, cfg), cfg, plan);
     controlResults.push({
       controlId: control.id,
       label: control.label,
@@ -231,7 +331,7 @@ function scoreTopicWith(
       maxPoints: agg.maxPoints,
       evidence: agg.evidence,
     });
-  }
+  });
 
   // All N/A → topic score null
   const anyApplicable = controlResults.some((c) => c.applicable);
@@ -248,10 +348,21 @@ function scoreTopic(
   topic: TopicModule,
   pages: EvidenceBundle[],
   config: ConfigMap,
+  mode: PageScoringMode,
 ): TopicResult {
-  return scoreTopicWith(topic, config, (control, cfg) =>
-    pages.map((p) => evalControlOnPage(control, p, cfg)),
-  );
+  const firstIdx = firstMeasuredIndex(topic, config);
+  const indexOf = new Map(topic.controls.map((c, i) => [c.id, i]));
+  return scoreTopicWith(topic, config, mode, (control, cfg) => {
+    const plan = planControl(
+      topic,
+      control,
+      indexOf.get(control.id) ?? -1,
+      cfg,
+      mode,
+      firstIdx,
+    );
+    return pages.map((p) => evalControlOnPage(control, p, cfg, plan));
+  });
 }
 
 /* ── single-page topic scoring (binary per control) ──────────────────────── */
@@ -260,10 +371,13 @@ function scoreTopicOnPage(
   topic: TopicModule,
   page: EvidenceBundle,
   config: ConfigMap,
+  mode: PageScoringMode,
 ): TopicResult {
-  const controlResults: ControlResult[] = topic.controls.map((control) => {
+  const firstIdx = firstMeasuredIndex(topic, config);
+  const controlResults: ControlResult[] = topic.controls.map((control, index) => {
     const cfg = getConfig(config, control.id);
-    const ev = evalControlOnPage(control, page, cfg);
+    const plan = planControl(topic, control, index, cfg, mode, firstIdx);
+    const ev = evalControlOnPage(control, page, cfg, plan);
     return {
       controlId: control.id,
       label: control.label,
@@ -291,15 +405,61 @@ function scoreTopicOnPage(
 
 /* ── public ───────────────────────────────────────────────────────────────── */
 
-/** Score a single page (one EvidenceBundle) across all topics. */
+/**
+ * Score a single page (one EvidenceBundle) across all topics.
+ * `mode` decides which criteria are measured — see `PageScoringMode`.
+ */
 export function scorePage(
   page: EvidenceBundle,
   topics: TopicModule[],
   config: ConfigMap,
+  mode: PageScoringMode = "standard",
 ): PageResult {
-  const topicResults = topics.map((t) => scoreTopicOnPage(t, page, config));
+  const topicResults = topics.map((t) => scoreTopicOnPage(t, page, config, mode));
   const { overall, geo, china } = computeAggregates(topicResults, topics);
-  return { url: page.url, topics: topicResults, overall, geo, china };
+  return { url: page.url, mode, topics: topicResults, overall, geo, china };
+}
+
+/** Assemble a SiteResult from the two per-mode aggregates. */
+function combineBlocks(
+  site: string,
+  standard: { topics: TopicResult[]; agg: Aggregates } | null,
+  china: { topics: TopicResult[]; agg: Aggregates } | null,
+  pages: PageResult[],
+  topics: TopicModule[],
+): SiteResult {
+  // A site with no standard page still needs a shaped (all-N/A) topic list, so the
+  // reports and the UI can render it without special-casing every access.
+  const standardTopics =
+    standard?.topics ?? topics.map((t) => emptyTopicResult(t));
+  return {
+    site,
+    topics: standardTopics,
+    overall: standard?.agg.overall ?? null,
+    geo: standard?.agg.geo ?? null,
+    // Topic 12 lives on the China pages only.
+    china: china?.agg.china ?? null,
+    chinaTopics: china?.topics ?? null,
+    chinaOverall: china?.agg.overall ?? null,
+    pages,
+  };
+}
+
+function emptyTopicResult(topic: TopicModule): TopicResult {
+  return {
+    topicId: topic.id,
+    name: topic.name,
+    score: null,
+    controls: topic.controls.map((c) => ({
+      controlId: c.id,
+      label: c.label,
+      applicable: false,
+      passed: false,
+      pointsAwarded: 0,
+      maxPoints: 0,
+      evidence: "Aucune page évaluée",
+    })),
+  };
 }
 
 /**
@@ -316,6 +476,9 @@ export function scorePage(
  * after that page was scored) counts as N/A on that page, so the aggregate is
  * computed from the pages that actually know about it rather than silently
  * failing them.
+ *
+ * Pages are split by `PageResult.mode` first: China pages never contribute to the
+ * standard aggregate, and vice versa.
  */
 export function scoreSiteFromPages(
   site: string,
@@ -323,50 +486,61 @@ export function scoreSiteFromPages(
   topics: TopicModule[],
   config: ConfigMap,
 ): SiteResult {
-  // controlId → its result on each page, in page order.
-  const byControl = new Map<string, PageControlFacts[]>();
-  for (const page of pages) {
-    for (const topic of page.topics) {
-      for (const c of topic.controls) {
-        const list = byControl.get(c.controlId) ?? [];
-        list.push({ applicable: c.applicable, passed: c.passed, evidence: c.evidence });
-        byControl.set(c.controlId, list);
+  const blockFor = (mode: PageScoringMode) => {
+    const ofMode = pages.filter((p) => modeOf(p) === mode);
+    if (ofMode.length === 0) return null;
+
+    // controlId → its result on each page of this family, in page order.
+    const byControl = new Map<string, PageControlFacts[]>();
+    for (const page of ofMode) {
+      for (const topic of page.topics) {
+        for (const c of topic.controls) {
+          const list = byControl.get(c.controlId) ?? [];
+          list.push({ applicable: c.applicable, passed: c.passed, evidence: c.evidence });
+          byControl.set(c.controlId, list);
+        }
       }
     }
-  }
 
-  const topicResults = topics.map((t) =>
-    scoreTopicWith(t, config, (control) => byControl.get(control.id) ?? []),
-  );
-  const { overall, geo, china } = computeAggregates(topicResults, topics);
+    const topicResults = topics.map((t) =>
+      scoreTopicWith(t, config, mode, (control) => byControl.get(control.id) ?? []),
+    );
+    return { topics: topicResults, agg: computeAggregates(topicResults, topics) };
+  };
 
-  return { site, topics: topicResults, overall, geo, china, pages };
+  return combineBlocks(site, blockFor("standard"), blockFor("china"), pages, topics);
 }
 
+/**
+ * Score a whole site from live bundles. Pages may be passed as bare
+ * `EvidenceBundle`s (all standard) or as `{ bundle, mode }` pairs when the site
+ * mixes standard and China pages.
+ */
 export function scoreSite(
   site: string,
-  pages: EvidenceBundle[],
+  pages: (EvidenceBundle | ScoredPageInput)[],
   topics: TopicModule[],
   config: ConfigMap,
 ): SiteResult {
+  const inputs = pages.map(asPageInput);
+
   // Per-page breakdown (binary), in input order.
-  const pageResults: PageResult[] = pages.map((p) =>
-    scorePage(p, topics, config),
+  const pageResults: PageResult[] = inputs.map((p) =>
+    scorePage(p.bundle, topics, config, p.mode),
   );
 
-  // Site aggregate: each criterion is the proportional average across pages.
-  const topicResults: TopicResult[] = topics.map((t) =>
-    scoreTopic(t, pages, config),
-  );
-
-  const { overall, geo, china } = computeAggregates(topicResults, topics);
-
-  return {
-    site,
-    topics: topicResults,
-    overall,
-    geo,
-    china,
-    pages: pageResults,
+  const blockFor = (mode: PageScoringMode) => {
+    const bundles = inputs.filter((p) => p.mode === mode).map((p) => p.bundle);
+    if (bundles.length === 0) return null;
+    const topicResults = topics.map((t) => scoreTopic(t, bundles, config, mode));
+    return { topics: topicResults, agg: computeAggregates(topicResults, topics) };
   };
+
+  return combineBlocks(
+    site,
+    blockFor("standard"),
+    blockFor("china"),
+    pageResults,
+    topics,
+  );
 }

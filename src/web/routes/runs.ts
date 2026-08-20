@@ -4,6 +4,7 @@ import { activeRun, resumeRun } from "../runner";
 import { parseClientId, listClients } from "../clients";
 import { renderCsv } from "../../engine/report";
 import type { SiteResult, TopicResult } from "../../core/types";
+import { isChinaKind } from "../categories";
 
 export async function runRoutes(app: FastifyInstance) {
   app.get("/runs", async (req, reply) => {
@@ -103,9 +104,12 @@ export async function runRoutes(app: FastifyInstance) {
     const results = [...run.runSiteScores]
       .sort((a, b) => a.site.name.localeCompare(b.site.name))
       .map(
-        (s): Pick<SiteResult, "site" | "topics"> => ({
+        (s): Pick<SiteResult, "site" | "topics" | "chinaTopics" | "chinaOverall"> => ({
           site: s.site.name,
           topics: (s.topicsJson as unknown as TopicResult[]) ?? [],
+          // China pages are a separate block in the CSV, never merged with the rest.
+          chinaTopics: (s.chinaTopicsJson as unknown as TopicResult[]) ?? null,
+          chinaOverall: s.chinaOverall,
         }),
       );
 
@@ -178,6 +182,8 @@ export async function runRoutes(app: FastifyInstance) {
       label: rp.page.label || rp.page.kind,
       url: rp.url,
       status: rp.status,
+      // Grading family of the page: the two are displayed in separate blocks.
+      isChina: rp.mode === "china" || isChinaKind(rp.page.kind),
       overall: rp.overall,
       geo: rp.geo,
       china: rp.china,
@@ -189,6 +195,7 @@ export async function runRoutes(app: FastifyInstance) {
       title: `${score.site.name} — Run #${id}`,
       score,
       topics: score.topicsJson as any[],
+      chinaTopics: (score.chinaTopicsJson as any[]) ?? null,
       pages,
     });
   });

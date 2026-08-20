@@ -9,7 +9,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import { EvidenceBundleSchema, type EvidenceBundle } from "../core";
+import { EvidenceBundleSchema, type EvidenceBundle, type ScoredPageInput } from "../core";
 import { TOPICS } from "../topics";
 import { scoreSite, renderMarkdown, renderCsv, loadConfig } from "../engine";
 import { parseHead } from "../collector/head";
@@ -26,12 +26,14 @@ const files = fs
   .readdirSync(evidenceDir)
   .filter((f) => f.endsWith(".json"));
 
-// Group by site: filename is "<site>-<kind>.json"; kind ∈ {hp,plp,pdp}.
-const bySite = new Map<string, EvidenceBundle[]>();
+// Group by site: filename is "<site>-<kind>.json"; kind ∈ {hp,plp,pdp,china}.
+// A "-china" file is re-scored with the China rule (first criterion per topic + topic 12).
+const bySite = new Map<string, ScoredPageInput[]>();
 for (const f of files) {
   const base = f.replace(/\.json$/, "");
-  const m = base.match(/^(.*)-(hp|plp|pdp)$/i);
+  const m = base.match(/^(.*)-(hp|plp|pdp|china)$/i);
   const site = m ? m[1] : base;
+  const mode = m && m[2].toLowerCase() === "china" ? "china" : "standard";
   let bundle: EvidenceBundle;
   try {
     bundle = EvidenceBundleSchema.parse(
@@ -45,7 +47,7 @@ for (const f of files) {
     continue;
   }
   const arr = bySite.get(site) ?? [];
-  arr.push(bundle);
+  arr.push({ bundle, mode });
   bySite.set(site, arr);
 }
 
@@ -70,6 +72,7 @@ console.log("Re-scored", results.length, "site(s) from", files.length, "evidence
 console.log("── Summary ──────────────────────────────");
 for (const r of results) {
   console.log(
-    `${r.site.padEnd(24)} overall=${r.overall ?? "N/A"}  GEO=${r.geo ?? "—"}  China=${r.china ?? "—"}`,
+    `${r.site.padEnd(24)} overall=${r.overall ?? "N/A"}  GEO=${r.geo ?? "—"}  ` +
+      `China(pages)=${r.chinaOverall ?? "—"}  China(access)=${r.china ?? "—"}`,
   );
 }

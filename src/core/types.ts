@@ -62,6 +62,35 @@ export interface TopicModule {
   controls: Control[];
 }
 
+/* ── Page scoring mode ────────────────────────────────────────────────────── */
+
+/**
+ * How a page is graded.
+ *
+ * - `"standard"` (the default): topics 1–11 are scored on all their criteria and
+ *   topic 12 (China Market Access) is N/A — it only means something on a page
+ *   actually served to the Chinese market.
+ * - `"china"`: the page is a China page. Topics 1–11 are reduced to their FIRST
+ *   criterion — the foundational one, e.g. "Basic lazyloading" for Images — which
+ *   then carries the whole topic (`CHINA_TOPIC_POINTS`, so the topic reads 0 or 100
+ *   and stays on the same 0–100 scale as a standard score); every other criterion
+ *   is N/A. Topic 12 is scored in full, and ONLY here.
+ *
+ * A site may mix both families of page. They are aggregated separately — see
+ * `SiteResult.chinaTopics` — and never averaged together.
+ */
+export type PageScoringMode = "standard" | "china";
+
+/** Points the single measured criterion of a topic carries on a China page. */
+export const CHINA_TOPIC_POINTS = 100;
+
+/** A page to score together with the mode it must be graded in. */
+export interface ScoredPageInput {
+  bundle: EvidenceBundle;
+  /** Defaults to "standard". */
+  mode?: PageScoringMode;
+}
+
 /* ── Result shapes produced by the engine ─────────────────────────────────── */
 
 export interface ControlResult {
@@ -97,6 +126,11 @@ export interface PageResult {
   url: string;
   /** Optional caller-supplied label (HP/PLP/PDP). The engine leaves it undefined. */
   label?: string;
+  /**
+   * How this page was graded. Absent on page results persisted before China pages
+   * existed, which every consumer must read as "standard".
+   */
+  mode?: PageScoringMode;
   topics: TopicResult[];
   /** Average of topics 1–10 for this page, excluding N/A. */
   overall: number | null;
@@ -109,17 +143,32 @@ export interface PageResult {
 export interface SiteResult {
   site: string;
   /**
-   * Per-topic site scores. Each criterion is the PROPORTIONAL AVERAGE of its
-   * per-page results: `round(points × passedPages / applicablePages)`.
+   * Per-topic site scores over the STANDARD (non-China) pages. Each criterion is
+   * the PROPORTIONAL AVERAGE of its per-page results:
+   * `round(points × passedPages / applicablePages)`.
    */
   topics: TopicResult[];
-  /** Average of topics 1–10, excluding N/A. */
+  /** Average of topics 1–10 over the standard pages, excluding N/A. */
   overall: number | null;
-  /** Topic 11 standalone. */
+  /** Topic 11 standalone, over the standard pages. */
   geo: number | null;
-  /** Topic 12 standalone. */
+  /**
+   * Topic 12 standalone — scored over the CHINA pages ONLY. Null when the site has
+   * no China page.
+   */
   china: number | null;
-  /** Per-page breakdown, in input order. */
+  /**
+   * Per-topic scores over the CHINA pages: topics 1–11 reduced to their first
+   * criterion (worth `CHINA_TOPIC_POINTS`), topic 12 in full. Null when the site
+   * has no China page.
+   */
+  chinaTopics: TopicResult[] | null;
+  /**
+   * Average of topics 1–10 over the China pages — the "China readiness" companion
+   * of `overall`. Null when the site has no China page.
+   */
+  chinaOverall: number | null;
+  /** Per-page breakdown, in input order (both families). */
   pages: PageResult[];
 }
 

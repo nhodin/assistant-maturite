@@ -76,6 +76,8 @@ tr:has(+ tr.crit-slot + tr.note-row) td { border-bottom: none; }
 .badge { display: inline-block; padding: .1rem .45rem; border-radius: 5px; font-size: 11px;
   background: #e3eaf3; color: #455a74; font-weight: 600; }
 .b-DONE { background: #c8e6c9; color: #1b5e20; }
+/* China pages are graded on a different rule — make them visible at a glance. */
+.b-china { background: #ffe0b2; color: #bf360c; }
 .b-RUNNING { background: #bbdefb; color: #0d47a1; }
 .b-PENDING { background: #eceff1; color: #607d8b; }
 .b-FAILED { background: #ffcdd2; color: #c62828; }

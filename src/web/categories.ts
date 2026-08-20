@@ -24,5 +24,11 @@ export function categoryLabel(key: string): string {
   return (CATEGORY_LABELS as Record<string, string>)[key] ?? key;
 }
 
-export const PAGE_KINDS = ["HP", "PLP", "PDP", "OTHER"] as const;
+/** CHINA marks a page served to the Chinese market — scored apart (see PageScoringMode). */
+export const PAGE_KINDS = ["HP", "PLP", "PDP", "CHINA", "OTHER"] as const;
+
+/** Page kinds graded with the China rule (first criterion per topic + topic 12). */
+export function isChinaKind(kind: string): boolean {
+  return kind === "CHINA";
+}
 export type PageKindKey = (typeof PAGE_KINDS)[number];

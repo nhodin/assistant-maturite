@@ -26,7 +26,7 @@ export function cacheControlMaxAge(value: string): number | null {
 // ── controls ──────────────────────────────────────────────────────────────────
 
 /** 35 pts — CDN cache on HTML */
-const cdnCacheControl: Control = {
+export const cdnCacheControl: Control = {
   id: "ttfb.cdncache",
   topicId: 5,
   label: "CDN cache on HTML pages",
@@ -138,7 +138,7 @@ const browserCacheControl: Control = {
 }
 
 /** 15 pts — TTFB < 800ms */
-const ttfb800Control: Control = {
+export const ttfb800Control: Control = {
   id: "ttfb.ttfb800",
   topicId: 5,
   label: "TTFB < 800ms (field + lab)",

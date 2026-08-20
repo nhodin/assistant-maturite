@@ -205,7 +205,7 @@
       <tbody>
         <% project.pages.forEach(function(pp){ %>
           <tr>
-            <td><span class="badge"><%= pp.page.kind %></span></td>
+            <td><span class="badge<%= pp.page.kind === 'CHINA' ? ' b-china' : '' %>" <% if (pp.page.kind === 'CHINA') { %>title="Page China : chaque sujet est réduit à son 1er critère, plus le sujet 12"<% } %>><%= pp.page.kind %></span></td>
             <td><%= pp.page.site.name %></td>
             <td class="url"><%= pp.page.url %></td>
           </tr>
