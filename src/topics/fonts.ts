@@ -19,6 +19,16 @@ const ICON_FONT_RE =
   /font\s*awesome|fontawesome|icomoon|glyphicon|material[\s-]?icons|materialicons|feather|ionicons/i
 
 /**
+ * True when a @font-face embeds its font file as a data: URI (base64 or not).
+ * Such a font is delivered inside the page's own HTML/CSS — no request, no
+ * external domain — so it is self-hosted by construction.
+ */
+function isDataUriSrc(src: string | undefined): boolean {
+  if (!src) return false
+  return /url\s*\(\s*['"]?data:/i.test(src)
+}
+
+/**
  * True when a @font-face declares an icon font (family name or src file name
  * matching a known icon-font signature).
  */
@@ -84,25 +94,40 @@ const selfHostControl: Control = {
   id: "fonts.selfhost",
   topicId: 9,
   label: "Self-hosting fonts",
-  description: "Font files are served from the same registrable domain as the page.",
+  description:
+    "Font files are served from the same registrable domain as the page. A @font-face embedded as a data: URI counts as self-hosted — it issues no request and reaches no external domain.",
   defaultPoints: 30,
   evaluate(e: EvidenceBundle) {
     const fontReqs = requestsOfType(e.requests, "font")
+    // A data:-URI @font-face is embedded in the page's own HTML/CSS: it issues no
+    // request and reaches no external domain, so it IS self-hosted. Count it on the
+    // first-party side rather than letting it look like an unconfirmable font.
+    const dataUriFonts = e.fonts.filter((f) => isDataUriSrc(f.src))
+    const embedded = dataUriFonts.length
+    const embeddedNote = embedded > 0 ? ` + ${embedded} data:-URI @font-face (embedded)` : ""
     if (fontReqs.length === 0 && e.fonts.length === 0) {
       return { passed: true, evidence: "No web fonts loaded" }
     }
     if (fontReqs.length === 0) {
+      if (embedded > 0 && embedded === e.fonts.filter((f) => !isLocalOnlySrc(f.src)).length) {
+        return {
+          passed: true,
+          evidence: `No font request — all ${embedded} downloaded @font-face are embedded as data: URIs (self-hosted by construction)`,
+        }
+      }
       return {
         passed: false,
-        evidence: `No font requests observed but ${e.fonts.length} inline @font-face declared — cannot confirm self-hosting`,
+        evidence: `No font requests observed but ${e.fonts.length} inline @font-face declared — cannot confirm self-hosting${embeddedNote}`,
       }
     }
-    const firstParty = fontReqs.filter((r) => sameSite(r.url, e.finalUrl))
-    const ratio = firstParty.length / fontReqs.length
+    const firstPartyReqs = fontReqs.filter((r) => sameSite(r.url, e.finalUrl))
+    const firstParty = firstPartyReqs.length + embedded
+    const total = fontReqs.length + embedded
+    const ratio = firstParty / total
     const passed = ratio > 0.5
     return {
       passed,
-      evidence: `${firstParty.length}/${fontReqs.length} font requests are first-party (${Math.round(ratio * 100)}%)`,
+      evidence: `${firstPartyReqs.length}/${fontReqs.length} font requests are first-party${embeddedNote} → ${Math.round(ratio * 100)}% self-hosted`,
     }
   },
 }

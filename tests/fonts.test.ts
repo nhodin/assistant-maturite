@@ -54,6 +54,39 @@ describe("fonts.selfhost", () => {
     })
     expect(ctrl("fonts.selfhost").evaluate(e).passed).toBe(false)
   })
+  it("PASS — @font-face embedded as a data: URI (no request) is self-hosted", () => {
+    const e = makeEvidence({
+      finalUrl: "https://example.com/",
+      fonts: [{ family: "A", src: 'url("data:font/woff2;base64,d09GMgAB") format("woff2")' }],
+    })
+    const res = ctrl("fonts.selfhost").evaluate(e)
+    expect(res.passed).toBe(true)
+    expect(res.evidence).toMatch(/data: URIs/)
+  })
+  it("PASS — one data: URI font outweighs one third-party request", () => {
+    const e = makeEvidence({
+      finalUrl: "https://example.com/",
+      fonts: [
+        { family: "A", src: 'url("data:font/woff2;base64,d09GMgAB")' },
+        { family: "B", src: 'url("data:application/font-woff;base64,d09GRg")' },
+      ],
+      requests: [fontReq("https://fonts.gstatic.com/s/b.woff2")],
+    })
+    const res = ctrl("fonts.selfhost").evaluate(e)
+    expect(res.passed).toBe(true)
+    expect(res.evidence).toMatch(/2 data:-URI @font-face/)
+  })
+  it("FAIL — data: URI font alongside a majority of third-party requests", () => {
+    const e = makeEvidence({
+      finalUrl: "https://example.com/",
+      fonts: [{ family: "A", src: 'url("data:font/woff2;base64,d09GMgAB")' }],
+      requests: [
+        fontReq("https://fonts.gstatic.com/s/b.woff2"),
+        fontReq("https://fonts.gstatic.com/s/c.woff2"),
+      ],
+    })
+    expect(ctrl("fonts.selfhost").evaluate(e).passed).toBe(false)
+  })
 })
 
 describe("fonts.woff2", () => {
