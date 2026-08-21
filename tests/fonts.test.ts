@@ -101,6 +101,20 @@ describe("fonts.fontdisplay", () => {
     })
     expect(ctrl("fonts.fontdisplay").evaluate(e).passed).toBe(false)
   })
+  it("FAIL — evidence names the offending family and its font-display value", () => {
+    const e = makeEvidence({
+      fonts: [
+        { family: "Good Sans", fontDisplay: "swap", src: 'url("/good.woff2") format("woff2")' },
+        { family: "LV Serif", src: 'url("/serif.woff2") format("woff2")' },
+        { family: '"LV Icons"', fontDisplay: "auto", src: 'url("/icons.woff2") format("woff2")' },
+      ],
+    })
+    const res = ctrl("fonts.fontdisplay").evaluate(e)
+    expect(res.passed).toBe(false)
+    expect(res.evidence).toContain("LV Serif (font-display: absent)")
+    expect(res.evidence).toContain("LV Icons (font-display: auto)")
+    expect(res.evidence).not.toContain("Good Sans")
+  })
 })
 
 describe("fonts.noiconfonts", () => {

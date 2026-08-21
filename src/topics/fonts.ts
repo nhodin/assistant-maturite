@@ -160,9 +160,22 @@ const fontDisplayControl: Control = {
       return d === "swap" || d === "optional"
     })
     const passed = good.length === downloaded.length
+    // On failure, name the offending families so the report says WHICH font is
+    // missing font-display (and with what value) rather than just a count.
+    let offenders = ""
+    if (!passed) {
+      const seen = new Map<string, string>()
+      for (const f of downloaded) {
+        if (good.includes(f)) continue
+        const name = (f.family ?? "").replace(/['"]/g, "").trim() || fontStem(f.src ?? "") || "unnamed @font-face"
+        const value = (f.fontDisplay ?? "").trim() || "absent"
+        if (!seen.has(name)) seen.set(name, value)
+      }
+      offenders = ` — missing: ${[...seen].map(([n, v]) => `${n} (font-display: ${v})`).join(", ")}`
+    }
     return {
       passed,
-      evidence: `${good.length}/${downloaded.length} downloaded @font-face rule(s) use font-display swap/optional${skipped}`,
+      evidence: `${good.length}/${downloaded.length} downloaded @font-face rule(s) use font-display swap/optional${skipped}${offenders}`,
     }
   },
 }
