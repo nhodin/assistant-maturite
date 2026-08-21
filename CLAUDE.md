@@ -305,6 +305,22 @@ data/WEBSITES.csv      # seed source (website;url_hp;url_plp;url_pdp)
     verdicts intact. Note that a run stored in DB keeps only 2 000 chars of `rawHtml`
     (`slimEvidence`), so these topic-3 changes cannot be replayed by `rescore` on old runs — a
     fresh capture is required.
+- **Manual criterion correction** (2026-08): on a captured page, an operator who re-checked
+  a test can flip ONE criterion's verdict (✓ / ✗ / N/A) from the run's per-site page or the
+  per-page criteria panel — `POST /runs/:id/pages/:runPageId/criteria/:controlId`
+  (`verdict=pass|fail|na|auto`). The route edits the verdict stored in `RunPage.topicsJson`,
+  re-scores the page with `engine.rescorePageFromVerdicts` (same rule as `scorePage`, but each
+  verdict is read from the stored result instead of the bundle) and rebuilds the site aggregate
+  via `web/site-score.ts:rebuildSiteScore` — the helper `runner.settleSite` now also calls, so
+  a correction and a capture converge through the same code. It reuses the run's `configJson`,
+  like a resume, so a corrected page stays graded by the run's rules.
+  **Deliberately not persisted anywhere else**: recapturing the page (or re-running the project)
+  recomputes it from the evidence and the correction is gone — it fixes the reading of ONE
+  capture, it is not a rule (a rule belongs in Settings' `ControlConfig`, which applies to every
+  site of every run). Two guards: the corrected criterion carries `manual: true` plus `auto`
+  (the measured verdict, stashed on the first correction) so the UI flags it ✏️ and offers
+  « ↺ mesuré » to undo, and a `derivedFromTopics` criterion (`china.basics`) is read-only since
+  the engine rewrites it at every re-score. Tests: `tests/manual-verdict.test.ts`.
 - **Detection-logic review** (2026-07, 25 findings — see
   `docs/2026-07-02-criteria-logic-review.md` for the full list, dispositions and rationale):
   20 fixes landed across the topic modules and the collector (e.g. `private, max-age>0` no

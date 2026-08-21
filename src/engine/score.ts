@@ -539,6 +539,97 @@ export function scorePage(
   return { url: page.url, mode, topics: topicResults, overall, geo, china };
 }
 
+/**
+ * Re-score a page from the verdicts ALREADY STORED on it, instead of from its
+ * EvidenceBundle. Same rule as `scorePage` — only the source of each verdict
+ * differs: `applicable` / `passed` / `evidence` are taken verbatim from the
+ * stored ControlResults, everything derived from them (points, topic scores,
+ * overall/GEO/China, the derived "sitespeed basics" component) is recomputed.
+ *
+ * This is what makes a manual correction cheap: flip one stored verdict, call
+ * this, and the page's numbers follow — no browser, no bundle. It is also why a
+ * correction is transient: it lives in the stored result, so recapturing the
+ * page overwrites it.
+ *
+ * A control with no stored result (added to the code after the page was scored)
+ * counts as N/A, exactly as in `scoreSiteFromPages`.
+ */
+export function rescorePageFromVerdicts(
+  page: PageResult,
+  topics: TopicModule[],
+  config: ConfigMap,
+): PageResult {
+  const mode = modeOf(page);
+  const stored = new Map<string, ControlResult>();
+  for (const t of page.topics) for (const c of t.controls) stored.set(c.controlId, c);
+
+  const topicResults = topics.map((topic): TopicResult => {
+    const firstIdx = firstMeasuredIndex(topic, config);
+    const controls: ControlResult[] = topic.controls.map((control, index) => {
+      const cfg = getConfig(config, control.id);
+      const prev = stored.get(control.id);
+      // Carried across untouched: they describe the correction, not the score.
+      const kept = { manual: prev?.manual, auto: prev?.auto };
+      const na = (evidence: string): ControlResult => ({
+        controlId: control.id,
+        label: control.label,
+        applicable: false,
+        passed: false,
+        pointsAwarded: 0,
+        maxPoints: 0,
+        evidence,
+        ...kept,
+      });
+
+      if (!cfg.enabled) return na("disabled");
+      const plan = planControl(topic, control, index, cfg, mode, firstIdx);
+      if (!plan.measured) return na(plan.skipReason);
+      if (!prev) return na("Non évalué");
+      // Derived: the slot is reserved here and filled by applyDerivedControls.
+      if (plan.derived) {
+        return {
+          controlId: control.id,
+          label: control.label,
+          applicable: true,
+          passed: false,
+          pointsAwarded: 0,
+          maxPoints: plan.points,
+          evidence: "",
+          ...kept,
+        };
+      }
+      if (!prev.applicable) return na(prev.evidence);
+
+      return {
+        controlId: control.id,
+        label: control.label,
+        applicable: true,
+        passed: prev.passed,
+        pointsAwarded: prev.passed ? plan.points : 0,
+        maxPoints: plan.points,
+        evidence: prev.evidence,
+        ...kept,
+      };
+    });
+
+    const anyApplicable = controls.some((c) => c.applicable);
+    return {
+      topicId: topic.id,
+      name: topic.name,
+      score: anyApplicable
+        ? Math.min(100, controls.reduce((sum, c) => sum + c.pointsAwarded, 0))
+        : null,
+      controls,
+    };
+  });
+
+  const { overall, geo, china } =
+    mode === "china"
+      ? chinaBlock(topicResults, topics).agg
+      : computeAggregates(topicResults, topics);
+  return { ...page, mode, topics: topicResults, overall, geo, china };
+}
+
 /** Assemble a SiteResult from the two per-mode aggregates. */
 function combineBlocks(
   site: string,

@@ -36,11 +36,38 @@ export function cacheControlMaxAge(headerValue: string): number {
   return match ? parseInt(match[1]!, 10) : -1
 }
 
-/** Returns true if the cache-control value indicates long TTL (≥180 days or immutable). */
-function hasLongTtl(cacheControl: string): boolean {
+/**
+ * Returns true if the response headers show the resource was served from the CDN cache
+ * (`server-timing: cdn-cache; desc=HIT`, `x-cache: HIT`, `cf-cache-status: HIT`…) or has
+ * spent a significant time in it (`age` ≥ 1h).
+ */
+function isCdnHit(headers: Record<string, string>): boolean {
+  const hitHeaders = ["x-cache", "cf-cache-status", "akamai-cache-status", "x-cache-status", "x-cache-remote"]
+  if (hitHeaders.some((h) => /\bhit\b/i.test(headers[h] ?? ""))) return true
+  if (/cdn-cache[^,]*desc\s*=\s*"?hit/i.test(headers["server-timing"] ?? "")) return true
+  const age = parseInt(headers["age"] ?? "", 10)
+  return Number.isFinite(age) && age >= 3600
+}
+
+/**
+ * A `max-age` that is not a multiple of 60 is not an authored TTL: it is a CDN counting
+ * down the remaining freshness of a much longer origin TTL (e.g. `max-age=1543716`).
+ */
+function isCountdownMaxAge(maxAge: number): boolean {
+  return maxAge > 0 && maxAge % 60 !== 0
+}
+
+/**
+ * Returns true if the response indicates a long TTL (≥180 days or immutable).
+ * A short but non-round max-age served from the CDN cache also counts: the CDN is
+ * decrementing a much longer origin TTL. A `private` directive does not invalidate that
+ * when the CDN HIT is proven. A short *round* max-age served on a MISS stays a real short TTL.
+ */
+function hasLongTtl(cacheControl: string, headers: Record<string, string> = {}): boolean {
   if (/\bimmutable\b/i.test(cacheControl)) return true
   const maxAge = cacheControlMaxAge(cacheControl)
-  return maxAge >= 15552000 // 180 days in seconds
+  if (maxAge >= 15552000) return true // 180 days in seconds
+  return isCountdownMaxAge(maxAge) && isCdnHit(headers)
 }
 
 /** Known CDN response header fingerprints. */
@@ -99,7 +126,9 @@ const longTtlControl: Control = {
   id: "cdn.longttl",
   topicId: 10,
   label: "Long TTL for static assets (≥180 days or immutable)",
-  description: "Majority of image/stylesheet/script/font responses have cache-control max-age ≥15552000 or immutable.",
+  description:
+    "Majority of image/stylesheet/script/font responses have cache-control max-age ≥15552000 or immutable — " +
+    "a short but non-round max-age served from the CDN cache (countdown of a longer origin TTL) also counts.",
   defaultPoints: 20,
   evaluate(e) {
     const assets = staticAssets(e)
@@ -108,7 +137,7 @@ const longTtlControl: Control = {
     }
     const longTtlAssets = assets.filter((r) => {
       const cc = r.responseHeaders["cache-control"] ?? ""
-      return hasLongTtl(cc)
+      return hasLongTtl(cc, r.responseHeaders)
     })
     const pct = Math.round((longTtlAssets.length / assets.length) * 100)
     const passed = longTtlAssets.length / assets.length > 0.5

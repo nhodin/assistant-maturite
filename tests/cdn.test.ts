@@ -146,6 +146,42 @@ describe("cdn.longttl", () => {
     expect(result.evidence).toContain("0/3")
   })
 
+  it("passes on a short but non-round max-age served from the CDN cache (countdown of a longer origin TTL)", () => {
+    const e = makeEvidence({
+      requests: [
+        { url: "a.jpg", resourceType: "image", status: 200, fromCache: false, encodedBytes: 50000, decodedBytes: 80000, requestHeaders: {}, responseHeaders: { "cache-control": "private, no-transform, max-age=1543716", "server-timing": 'cdn-cache; desc=HIT' }, mimeType: "image/jpeg" },
+        { url: "b.js", resourceType: "script", status: 200, fromCache: false, encodedBytes: 20000, decodedBytes: 60000, requestHeaders: {}, responseHeaders: { "cache-control": "private, max-age=2419177", "x-cache": "HIT" }, mimeType: "text/javascript" },
+      ],
+    })
+    const result = ctrl("cdn.longttl").evaluate(e)
+    expect(result.passed).toBe(true)
+    expect(result.evidence).toContain("2/2")
+  })
+
+  it("fails on a short non-round max-age with no CDN hit evidence", () => {
+    const e = makeEvidence({
+      requests: [
+        { url: "a.jpg", resourceType: "image", status: 200, fromCache: false, encodedBytes: 50000, decodedBytes: 80000, requestHeaders: {}, responseHeaders: { "cache-control": "private, max-age=1543716" }, mimeType: "image/jpeg" },
+        { url: "b.js", resourceType: "script", status: 200, fromCache: false, encodedBytes: 20000, decodedBytes: 60000, requestHeaders: {}, responseHeaders: { "cache-control": "max-age=1543716", "x-cache": "MISS" }, mimeType: "text/javascript" },
+      ],
+    })
+    const result = ctrl("cdn.longttl").evaluate(e)
+    expect(result.passed).toBe(false)
+    expect(result.evidence).toContain("0/2")
+  })
+
+  it("fails on a short round max-age even when served from the CDN cache", () => {
+    const e = makeEvidence({
+      requests: [
+        { url: "a.jpg", resourceType: "image", status: 200, fromCache: false, encodedBytes: 50000, decodedBytes: 80000, requestHeaders: {}, responseHeaders: { "cache-control": "public, max-age=86400", "x-cache": "HIT" }, mimeType: "image/jpeg" },
+        { url: "b.js", resourceType: "script", status: 200, fromCache: false, encodedBytes: 20000, decodedBytes: 60000, requestHeaders: {}, responseHeaders: { "cache-control": "public, max-age=3600", "server-timing": 'cdn-cache; desc="HIT"' }, mimeType: "text/javascript" },
+      ],
+    })
+    const result = ctrl("cdn.longttl").evaluate(e)
+    expect(result.passed).toBe(false)
+    expect(result.evidence).toContain("0/2")
+  })
+
   it("fails when no static assets observed", () => {
     const e = makeEvidence({ requests: [] })
     const result = ctrl("cdn.longttl").evaluate(e)

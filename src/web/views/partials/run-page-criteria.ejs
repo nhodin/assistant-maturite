@@ -1,5 +1,8 @@
 <%
   var topics = pageTopics || [];
+  // Editable only when the caller gave us the ids the correction route needs.
+  var canEdit = typeof runId !== 'undefined' && typeof runPageId !== 'undefined';
+  var derived = typeof derivedIds !== 'undefined' && derivedIds ? derivedIds : [];
 %>
 <div class="crit-panel">
   <div class="head-row">
@@ -18,12 +21,26 @@
         <span class="score sm <%= scoreClass(t.score) %>"><%= fmtScore(t.score) %></span>
       </div>
       <ul class="crit-list">
-        <% (t.controls || []).forEach(function(c){ %>
+        <% (t.controls || []).forEach(function(c){
+             var cur = !c.applicable ? 'na' : (c.passed ? 'pass' : 'fail');
+             var editable = canEdit && derived.indexOf(c.controlId) === -1;
+        %>
           <li>
-            <% if (!c.applicable) { %><span class="muted">N/A</span>
+            <% if (editable) { %>
+              <select class="verdict <%= cur %><%= c.manual ? ' manual' : '' %>"
+                      data-current="<%= cur %>"
+                      title="Corriger ce verdict à la main"
+                      onchange="critEdit(this, <%= runId %>, <%= runPageId %>, '<%= c.controlId %>', this.value)">
+                <option value="pass" <%= cur === 'pass' ? 'selected' : '' %>>✓</option>
+                <option value="fail" <%= cur === 'fail' ? 'selected' : '' %>>✗</option>
+                <option value="na" <%= cur === 'na' ? 'selected' : '' %>>N/A</option>
+                <% if (c.auto) { %><option value="auto">↺ mesuré</option><% } %>
+              </select>
+            <% } else if (!c.applicable) { %><span class="muted">N/A</span>
             <% } else if (c.passed) { %><span class="ok">✓</span>
             <% } else { %><span class="ko">✗</span><% } %>
             <span class="crit-label"><%= c.label %></span>
+            <% if (c.manual) { %><span class="manual-flag" title="Corrigé manuellement">✏️</span><% } %>
             <% if (c.applicable) { %><span class="muted">(<%= c.pointsAwarded %>/<%= c.maxPoints %>)</span><% } %>
             <div class="ev"><%= c.evidence %></div>
           </li>

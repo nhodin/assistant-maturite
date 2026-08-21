@@ -195,3 +195,22 @@ table.grid .crit-slot > td:empty { display: none; }
 .ff-tab.active { background: var(--accent); color: #fff; border-color: var(--accent-d); font-weight: 600; }
 
 @media (max-width: 800px) { .cards, .two-col { grid-template-columns: 1fr 1fr; } }
+
+/* ── Manual criterion correction (run → site detail, criteria panel) ─────── */
+/* A verdict the operator can override: coloured like the ✓/✗ it replaces, so a
+   glance over the matrix reads the same as before it became editable. */
+select.verdict {
+  font: inherit; font-weight: 700; line-height: 1;
+  padding: .05rem .1rem; border: 1px solid transparent; border-radius: 4px;
+  background: transparent; cursor: pointer;
+}
+select.verdict:hover, select.verdict:focus { border-color: var(--line); }
+select.verdict.pass { color: var(--ok); }
+select.verdict.fail { color: var(--ko); }
+select.verdict.na   { color: #888; font-weight: 400; }
+/* Corrected by hand: dashed outline + the ✏️ next to it. Never mistake a decided
+   verdict for a measured one. */
+select.verdict.manual { border: 1px dashed currentColor; }
+.manual-flag { font-size: .8em; opacity: .8; }
+td.verdict-cell { white-space: nowrap; }
+p.note { margin: .2rem 0 .8rem; font-size: .9em; }

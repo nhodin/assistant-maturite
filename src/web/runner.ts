@@ -22,7 +22,8 @@ import { captureConcurrencyFromEnv, groupByOrigin, runPool } from "../collector/
 import { captureThrottlingFromEnv, describeThrottling } from "../collector/throttling";
 import type { CaptureFailureKind } from "../collector/sanity";
 import { TOPICS } from "../topics";
-import { scoreSiteFromPages, scorePage } from "../engine";
+import { scorePage } from "../engine";
+import { rebuildSiteScore } from "./site-score";
 import { buildConfigMap } from "./config-store";
 import type { ConfigMap } from "../engine";
 import type {
@@ -30,9 +31,7 @@ import type {
   Device,
   BrowserProvider,
   CaptureMode,
-  PageResult,
   PageScoringMode,
-  TopicResult,
 } from "../core";
 import { isChinaKind } from "./categories";
 
@@ -366,55 +365,9 @@ async function executeRun(
     remainingBySite.set(site.id, left);
     if (left > 0) return;
 
-    const scored = await prisma.runPage.findMany({
-      where: { runId, status: "DONE", page: { siteId: site.id } },
-      select: {
-        url: true,
-        mode: true,
-        topicsJson: true,
-        overall: true,
-        geo: true,
-        china: true,
-      },
-      orderBy: { id: "asc" },
-    });
-    const pageResults: PageResult[] = scored
-      .filter((rp) => rp.topicsJson !== null)
-      .map((rp) => ({
-        url: rp.url,
-        // Stored per page: China pages and standard pages are aggregated apart.
-        mode: (rp.mode === "china" ? "china" : "standard") as PageScoringMode,
-        topics: rp.topicsJson as unknown as TopicResult[],
-        overall: rp.overall,
-        geo: rp.geo,
-        china: rp.china,
-      }));
-    if (pageResults.length === 0) return; // every page failed: no score for this site.
-
-    const result = scoreSiteFromPages(site.name, pageResults, TOPICS, config);
-    await prisma.runSiteScore.upsert({
-      where: { runId_siteId: { runId, siteId: site.id } },
-      create: {
-        runId,
-        siteId: site.id,
-        category: site.category,
-        overall: result.overall,
-        geo: result.geo,
-        china: result.china,
-        chinaOverall: result.chinaOverall,
-        topicsJson: result.topics as unknown as object,
-        chinaTopicsJson: (result.chinaTopics ?? undefined) as unknown as object,
-      },
-      update: {
-        category: site.category,
-        overall: result.overall,
-        geo: result.geo,
-        china: result.china,
-        chinaOverall: result.chinaOverall,
-        topicsJson: result.topics as unknown as object,
-        chinaTopicsJson: (result.chinaTopics ?? null) as unknown as object,
-      },
-    });
+    // Same rebuild the UI runs after a manual correction — see web/site-score.ts.
+    // `config` is passed so the site keeps the run's config snapshot.
+    await rebuildSiteScore(runId, site.id, config);
   };
 
   /**

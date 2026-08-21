@@ -3,8 +3,22 @@ import { prisma } from "../db";
 import { activeRun, resumeRun, recaptureSite } from "../runner";
 import { parseClientId, listClients } from "../clients";
 import { renderCsv } from "../../engine/report";
+import { rescorePageFromVerdicts } from "../../engine";
+import type { ConfigMap } from "../../engine";
+import { buildConfigMap } from "../config-store";
+import { rebuildSiteScore } from "../site-score";
+import { TOPICS } from "../../topics";
 import type { SiteResult, TopicResult } from "../../core/types";
 import { isChinaKind } from "../categories";
+
+/**
+ * Criteria whose verdict is computed FROM the other topics (topic 12's
+ * "sitespeed basics"), and so cannot be corrected by hand: the engine rewrites
+ * them on every re-score. The views grey them out.
+ */
+const DERIVED_CONTROL_IDS = TOPICS.flatMap((t) =>
+  t.controls.filter((c) => c.derivedFromTopics === true).map((c) => c.id),
+);
 
 export async function runRoutes(app: FastifyInstance) {
   app.get("/runs", async (req, reply) => {
@@ -157,10 +171,94 @@ export async function runRoutes(app: FastifyInstance) {
     });
     if (!rp) return reply.code(404).send("");
     return reply.view("partials/run-page-criteria", {
+      runId: id,
+      runPageId: rp.id,
       pageLabel: `${rp.page.site.name} — ${rp.page.label || rp.page.kind}`,
       pageUrl: rp.url,
       pageTopics: (rp.topicsJson as any[]) ?? [],
+      derivedIds: DERIVED_CONTROL_IDS,
     });
+  });
+
+  // Manual correction of ONE criterion on ONE captured page: the operator
+  // re-checked the test and disagrees with the measured verdict.
+  //
+  // Deliberately NOT persisted anywhere but in the page's own stored result —
+  // recapturing the page (or re-running the project) recomputes it from the
+  // bundle and the correction is gone. That is the intended lifetime: it fixes
+  // a reading of THIS capture, it is not a rule.
+  app.post("/runs/:id/pages/:runPageId/criteria/:controlId", async (req, reply) => {
+    const id = Number((req.params as any).id);
+    const runPageId = Number((req.params as any).runPageId);
+    const controlId = String((req.params as any).controlId);
+    const verdict = String((req.body as any)?.verdict ?? "");
+    if (!["pass", "fail", "na", "auto"].includes(verdict)) {
+      return reply.code(400).send("verdict must be pass | fail | na | auto");
+    }
+
+    const rp = await prisma.runPage.findFirst({
+      where: { id: runPageId, runId: id },
+      include: { page: { select: { siteId: true } }, run: { select: { configJson: true } } },
+    });
+    if (!rp || rp.topicsJson === null) return reply.code(404).send("Page non scorée");
+
+    const topics = rp.topicsJson as unknown as TopicResult[];
+    const control = topics
+      .flatMap((t) => t.controls ?? [])
+      .find((c) => c.controlId === controlId);
+    if (!control) return reply.code(404).send("Critère absent de cette page");
+
+    if (verdict === "auto") {
+      // Undo: only possible while the measured verdict is still stashed.
+      if (!control.auto) return reply.code(409).send("Aucun verdict mesuré à restaurer");
+      control.applicable = control.auto.applicable;
+      control.passed = control.auto.passed;
+      control.evidence = control.auto.evidence;
+      delete control.manual;
+      delete control.auto;
+    } else {
+      // Stashed on the FIRST correction only, so a second one does not lose the
+      // engine's original verdict.
+      control.auto ??= {
+        applicable: control.applicable,
+        passed: control.passed,
+        evidence: control.evidence,
+      };
+      const was = control.auto.applicable ? (control.auto.passed ? "✓" : "✗") : "N/A";
+      control.applicable = verdict !== "na";
+      control.passed = verdict === "pass";
+      control.manual = true;
+      control.evidence = `Corrigé manuellement (mesuré : ${was} — ${control.auto.evidence})`;
+    }
+
+    // The run's own config, exactly as a resume/recapture does: a corrected page
+    // must stay graded by the same rules as its siblings.
+    const config = (rp.run.configJson as unknown as ConfigMap | null) ?? (await buildConfigMap());
+    const rescored = rescorePageFromVerdicts(
+      {
+        url: rp.url,
+        mode: rp.mode === "china" ? "china" : "standard",
+        topics,
+        overall: rp.overall,
+        geo: rp.geo,
+        china: rp.china,
+      },
+      TOPICS,
+      config,
+    );
+    await prisma.runPage.update({
+      where: { id: rp.id },
+      data: {
+        topicsJson: rescored.topics as unknown as object,
+        overall: rescored.overall,
+        geo: rescored.geo,
+        china: rescored.china,
+      },
+    });
+    // The site aggregate is a pure function of its pages' verdicts — rebuild it.
+    await rebuildSiteScore(id, rp.page.siteId, config);
+
+    return reply.code(204).send();
   });
 
   app.get("/runs/:id/sites/:siteId", async (req, reply) => {
@@ -179,6 +277,8 @@ export async function runRoutes(app: FastifyInstance) {
       orderBy: { id: "asc" },
     });
     const pages = runPages.map((rp) => ({
+      // RunPage id: what a manual correction of one criterion targets.
+      runPageId: rp.id,
       label: rp.page.label || rp.page.kind,
       url: rp.url,
       status: rp.status,
@@ -197,6 +297,7 @@ export async function runRoutes(app: FastifyInstance) {
       topics: score.topicsJson as any[],
       chinaTopics: (score.chinaTopicsJson as any[]) ?? null,
       pages,
+      derivedIds: DERIVED_CONTROL_IDS,
       // A recapture is only offerable when nothing else is executing.
       isLive: activeRun() !== null,
       flash: (req.query as any)?.flash ?? null,

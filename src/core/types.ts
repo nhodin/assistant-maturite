@@ -113,6 +113,19 @@ export interface ControlResult {
   pointsAwarded: number;
   maxPoints: number;
   evidence: string;
+  /**
+   * Set when an operator corrected this criterion BY HAND in the UI, on a stored
+   * run result. Purely informative: it flags the verdict as decided rather than
+   * measured, so a corrected score is never mistaken for a captured one.
+   * A recapture of the page drops it along with the correction itself.
+   */
+  manual?: boolean;
+  /**
+   * The verdict the engine had measured, stashed on the FIRST manual correction
+   * so it can be restored without recapturing the page. Never overwritten by a
+   * later correction.
+   */
+  auto?: { applicable: boolean; passed: boolean; evidence: string };
 }
 
 export interface TopicResult {

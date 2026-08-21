@@ -25,7 +25,17 @@
   function hasScores(list){ return list.some(function(p){ return p.topics && p.topics.length; }); }
   function pTopic(p, id){ return (p.topics || []).find(function(t){ return t.topicId === id; }); }
   function pCtrl(pt, cid){ return pt ? (pt.controls || []).find(function(c){ return c.controlId === cid; }) : undefined; }
+  // A criterion computed from the other topics is rewritten at every re-score:
+  // correcting it by hand would be silently undone, so it stays read-only.
+  var derived = derivedIds || [];
+  function isDerived(cid){ return derived.indexOf(cid) !== -1; }
 %>
+
+<p class="muted note">
+  ✏️ Un verdict par page est modifiable : le score du sujet, du site et le global
+  sont recalculés aussitôt. La correction ne vit que dans ce résultat —
+  recapturer la page la remplace par la mesure.
+</p>
 
 <h2>Synthèse<% if (cnPages.length) { %> — pages hors China<% } %></h2>
 <% if (!stdPages.length) { %>
@@ -140,11 +150,28 @@
           <% (t.controls || []).forEach(function(c){ %>
             <tr>
               <td><%= c.label %></td>
-              <% if (hasCols) { familyPages.forEach(function(p){ var pc = pCtrl(pTopic(p, t.topicId), c.controlId); %>
-                <td>
-                  <% if (!pc || !pc.applicable) { %><span class="muted">N/A</span>
-                  <% } else if (pc.passed) { %><span class="ok" title="<%= pc.evidence %>">✓</span>
-                  <% } else { %><span class="ko" title="<%= pc.evidence %>">✗</span><% } %>
+              <% if (hasCols) { familyPages.forEach(function(p){
+                   var pc = pCtrl(pTopic(p, t.topicId), c.controlId);
+                   var cur = !pc ? '' : (!pc.applicable ? 'na' : (pc.passed ? 'pass' : 'fail'));
+              %>
+                <td class="verdict-cell">
+                  <% if (!pc) { %><span class="muted">—</span>
+                  <% } else if (isDerived(c.controlId)) { %>
+                    <%# Derived from the other topics: displayed, never editable. %>
+                    <% if (!pc.applicable) { %><span class="muted">N/A</span>
+                    <% } else { %><span class="muted" title="<%= pc.evidence %>"><%= pc.pointsAwarded %>/<%= pc.maxPoints %></span><% } %>
+                  <% } else { %>
+                    <select class="verdict <%= cur %><%= pc.manual ? ' manual' : '' %>"
+                            data-current="<%= cur %>"
+                            title="<%= pc.manual ? 'Corrigé manuellement — ' : '' %><%= pc.evidence %>"
+                            onchange="critEdit(this, <%= score.runId %>, <%= p.runPageId %>, '<%= c.controlId %>', this.value)">
+                      <option value="pass" <%= cur === 'pass' ? 'selected' : '' %>>✓</option>
+                      <option value="fail" <%= cur === 'fail' ? 'selected' : '' %>>✗</option>
+                      <option value="na" <%= cur === 'na' ? 'selected' : '' %>>N/A</option>
+                      <% if (pc.auto) { %><option value="auto">↺ mesuré</option><% } %>
+                    </select>
+                    <% if (pc.manual) { %><span class="manual-flag" title="Corrigé manuellement">✏️</span><% } %>
+                  <% } %>
                 </td>
               <% }); } %>
               <td>
