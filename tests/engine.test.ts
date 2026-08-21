@@ -700,4 +700,28 @@ describe("derived control: topic 12's sitespeed-basics component", () => {
     expect(fromStored.china).toBe(fromBundles.china);
     expect(fromStored.chinaTopics).toEqual(fromBundles.chinaTopics);
   });
+  it("survives page results stored BEFORE the derived control existed", () => {
+    // A resume across a scoring change: the page was scored when topic 12 had no
+    // basics component, so no fact for it was ever persisted. The component must
+    // still be computed from the other topics, not silently dropped to N/A.
+    const topics = [topic1, topic10, topic12d];
+    const cfg = defaultConfig(topics);
+    const fresh = scoreSite("site", chinaPage, topics, cfg);
+    const legacyPages = fresh.pages.map((p) => ({
+      ...p,
+      topics: p.topics.map((t) => ({
+        ...t,
+        controls: t.controls.filter((c) => c.controlId !== "t12.basics"),
+      })),
+    }));
+
+    const result = scoreSiteFromPages("site", legacyPages, topics, cfg);
+    const c = result
+      .chinaTopics!.find((t) => t.topicId === 12)!
+      .controls.find((x) => x.controlId === "t12.basics")!;
+    expect(c.applicable).toBe(true);
+    expect(c.pointsAwarded).toBe(50);
+    expect(result.china).toBe(100);
+  });
 });
+

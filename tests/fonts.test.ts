@@ -127,6 +127,30 @@ describe("fonts.max2", () => {
     })
     expect(ctrl("fonts.max2").evaluate(e).passed).toBe(false)
   })
+  it("PASS — local()-only fallback @font-face is not counted", () => {
+    // "Louis Vuitton Web Fallback" with src: local("Arial") is an adjusted
+    // system fallback, not a downloaded family → 2 real families, passes.
+    const e = makeEvidence({
+      fonts: [
+        { family: "Louis Vuitton Web", src: 'url("/f/lvweb.woff2") format("woff2")' },
+        { family: "LV Serif", src: 'url("/f/lvserif.woff2") format("woff2")' },
+        { family: "Louis Vuitton Web Fallback", src: 'local("Arial")' },
+      ],
+    })
+    const res = ctrl("fonts.max2").evaluate(e)
+    expect(res.passed).toBe(true)
+    expect(res.evidence).toMatch(/1 local\(\)-only fallback/)
+  })
+  it("counts a family whose src mixes local() and url()", () => {
+    const e = makeEvidence({
+      fonts: [
+        { family: "A", src: 'local("A"), url("/a.woff2") format("woff2")' },
+        { family: "B", src: 'url("/b.woff2")' },
+        { family: "C", src: 'url("/c.woff2")' },
+      ],
+    })
+    expect(ctrl("fonts.max2").evaluate(e).passed).toBe(false)
+  })
   it("PASS — falls back to URL stems when no @font-face family captured", () => {
     // Multi-token weight/style stems collapse: foo-bold-italic + foo-regular
     // are one family; bar-700 is a second. → 2 families, passes.

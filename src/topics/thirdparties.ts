@@ -89,6 +89,17 @@ function hasDefer(attrs: Record<string, string>): boolean {
   )
 }
 
+/**
+ * True if a stylesheet's media attribute keeps it off the critical path
+ * (anything that doesn't apply to a screen, e.g. media="print").
+ */
+function isNonBlockingMedia(media: string | undefined): boolean {
+  if (!media) return false
+  const m = media.toLowerCase().trim()
+  if (!m || m === "all" || m === "screen") return false
+  return !m.includes("screen") && !m.includes("all")
+}
+
 /** Resolve root-relative src: if it starts with "/" it's first-party. */
 function isRootRelative(src: string): boolean {
   return src.startsWith("/") && !src.startsWith("//")
@@ -172,25 +183,31 @@ const selfhostControl: Control = {
   topicId: 4,
   label: "No third-party scripts/stylesheets on critical path",
   description:
-    "No third-party <script src> or <link rel=stylesheet> in <head> (critical-path resources are first-party).",
+    "No render-blocking third-party resource in <head>: no synchronous <script src> (defer/async/module excluded) and no <link rel=stylesheet> that applies to screen.",
   defaultPoints: 20,
   evaluate(e: EvidenceBundle) {
     const head = headSlice(e.rawHtml)
 
+    // Only *blocking* third-party scripts count: defer/async/type=module are
+    // parsed off the critical path, so they don't hold up rendering.
     const scripts = parseTags(head, "script")
     const tpScripts = scripts.filter((s) => {
       const src = s.attrs["src"]
       if (!src) return false
       if (isRootRelative(src)) return false
+      if (hasDefer(s.attrs)) return false
       return isThirdParty(src, e.finalUrl)
     })
 
+    // Stylesheets block rendering unless they target a non-screen media
+    // (media="print" & co are fetched at low priority, non-blocking).
     const links = parseTags(head, "link")
     const tpStylesheets = links.filter((l) => {
       const rel = (l.attrs["rel"] ?? "").toLowerCase()
       if (rel !== "stylesheet") return false
       const href = l.attrs["href"] ?? ""
       if (!href || isRootRelative(href)) return false
+      if (isNonBlockingMedia(l.attrs["media"])) return false
       return isThirdParty(href, e.finalUrl)
     })
 
@@ -199,8 +216,8 @@ const selfhostControl: Control = {
     return {
       passed,
       evidence: passed
-        ? "no third-party scripts or stylesheets in <head> (critical path is first-party)"
-        : `${total} third-party resource(s) in <head>: ${tpScripts.length} script(s), ${tpStylesheets.length} stylesheet(s)`,
+        ? "no render-blocking third-party script or stylesheet in <head> (critical path is first-party)"
+        : `${total} render-blocking third-party resource(s) in <head>: ${tpScripts.length} sync script(s), ${tpStylesheets.length} stylesheet(s)`,
     }
   },
 }

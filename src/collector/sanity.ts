@@ -97,9 +97,16 @@ export function assessCaptureHealth(bundle: EvidenceBundle): CaptureHealth {
   // A legitimate document response is never 4xx/5xx. Any such request (initial nav
   // or a later reload during the interaction probe) means the browser session was
   // blocked or the URL is broken — never a real render.
-  const blockedDoc = bundle.requests.find(
-    (r) => r.resourceType === "document" && r.status >= 400,
-  );
+  //
+  // Judged on the LAST response per URL, not on any: a challenge interstitial is a
+  // 403 on the very URL the real page is then served from, so a bare "any 4xx"
+  // rule would reject every capture that legitimately waited a challenge out.
+  // Requests are in chronological order, so the last entry wins.
+  const lastDocByUrl = new Map<string, EvidenceBundle["requests"][number]>();
+  for (const r of bundle.requests) {
+    if (r.resourceType === "document") lastDocByUrl.set(r.url, r);
+  }
+  const blockedDoc = [...lastDocByUrl.values()].find((r) => r.status >= 400);
   if (blockedDoc) {
     return {
       ok: false,

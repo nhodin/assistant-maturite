@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { prisma } from "../db";
-import { activeRun, resumeRun } from "../runner";
+import { activeRun, resumeRun, recaptureSite } from "../runner";
 import { parseClientId, listClients } from "../clients";
 import { renderCsv } from "../../engine/report";
 import type { SiteResult, TopicResult } from "../../core/types";
@@ -197,7 +197,34 @@ export async function runRoutes(app: FastifyInstance) {
       topics: score.topicsJson as any[],
       chinaTopics: (score.chinaTopicsJson as any[]) ?? null,
       pages,
+      // A recapture is only offerable when nothing else is executing.
+      isLive: activeRun() !== null,
+      flash: (req.query as any)?.flash ?? null,
     });
+  });
+
+  // Recapture every page of ONE site of this run and rebuild its aggregate.
+  // Unlike « Reprendre », it recaptures the pages already DONE — the point is to
+  // refresh this site's result, the rest of the run is left untouched.
+  app.post("/runs/:id/sites/:siteId/recapture", async (req, reply) => {
+    const id = Number((req.params as any).id);
+    const siteId = Number((req.params as any).siteId);
+    const back = `/runs/${id}/sites/${siteId}`;
+
+    const pages = await prisma.runPage.count({ where: { runId: id, page: { siteId } } });
+    if (pages === 0) {
+      return reply.redirect(
+        `${back}?flash=${encodeURIComponent("Aucune page de ce site dans ce run.")}`,
+      );
+    }
+    const res = recaptureSite(id, siteId);
+    if (!res.started) {
+      return reply.redirect(
+        `${back}?flash=${encodeURIComponent(res.reason ?? "Recapture impossible")}`,
+      );
+    }
+    // The live progress table lives on the run page.
+    return reply.redirect(`/runs/${id}`);
   });
 
   app.post("/runs/:id/delete", async (req, reply) => {

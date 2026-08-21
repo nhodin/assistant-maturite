@@ -19,10 +19,11 @@ import {
   type LcpElement,
 } from "../core";
 import { probeNetwork } from "./network";
-import { fetchCrux } from "./crux";
+import { fetchCruxWithFallback } from "./crux";
 import { parseHead } from "./head";
 import { openBrowser } from "./browser";
 import { applyThrottling, captureThrottlingFromEnv } from "./throttling";
+import { waitForChallengeToSettle, isChallengeHtml } from "./challenge";
 
 export { assessCaptureHealth, type CaptureHealth } from "./sanity";
 
@@ -638,6 +639,7 @@ export const collect: CollectFn = async (
   let sliderDetected = false;
   let sliderHtml: string | undefined;
   let videoDetected = false;
+  let videoInViewport = false;
   let cssUnusedPct: number | null = null;
   const externalCssBodies: string[] = [];
 
@@ -867,6 +869,25 @@ export const collect: CollectFn = async (
       // Ignore timeout
     }
 
+    // ── Bot-challenge interstitial ─────────────────────────────────────────────
+    // A Cloudflare/Akamai interstitial is a tiny page: the networkidle above
+    // settles ON IT within a second, and everything after would then measure the
+    // challenge instead of the site. Give a self-clearing challenge the time it
+    // needs (we only wait — see challenge.ts), then start over: the requests
+    // collected so far are the interstitial's, and the perf init script re-runs on
+    // the document that replaced it, so dropping them leaves a clean capture of
+    // the real page. A challenge that never clears is left as-is and rejected
+    // downstream by assessCaptureHealth.
+    try {
+      const outcome = await waitForChallengeToSettle(page);
+      if (outcome.cleared) {
+        requestMap.clear();
+        phaseMap.clear();
+      }
+    } catch {
+      // Best effort — never abort a capture over the challenge probe itself.
+    }
+
     // ── Accept cookies ─────────────────────────────────────────────────────────
     if (acceptCookies) {
       cookieAccepted = await tryAcceptCookies(page, opts.cookieSelector);
@@ -916,6 +937,35 @@ export const collect: CollectFn = async (
       renderedHtml = await page.content();
     } catch {
       renderedHtml = "";
+    }
+
+    // ── Raw HTML rescue, through the browser session ───────────────────────────
+    // Step 1's raw fetch is a bare Node request with no cookies, so on a protected
+    // origin it gets the challenge interstitial every time — however patient the
+    // browser was. Refetch through the context's request API, which carries the
+    // session cookies the browser earned (cf_clearance & co). Only when Step 1
+    // clearly failed: on a healthy origin this would be a pointless extra hit.
+    const rawLooksBlocked =
+      rawHtml.trim().length < 500 ||
+      Object.keys(mainResponseHeaders).length === 0 ||
+      isChallengeHtml(rawHtml);
+    if (rawLooksBlocked) {
+      try {
+        const rescued = await context.request.get(finalUrl, {
+          headers: { accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" },
+          timeout: 30000,
+        });
+        const body = await rescued.text();
+        if (rescued.ok() && body.trim().length >= 500 && !isChallengeHtml(body)) {
+          rawHtml = body;
+          // Playwright already lowercases header names here.
+          mainResponseHeaders = { ...rescued.headers() };
+          finalUrl = rescued.url();
+          altSvcHeader = mainResponseHeaders["alt-svc"] ?? altSvcHeader;
+        }
+      } catch {
+        // Best effort — keep whatever Step 1 got and let sanity judge it.
+      }
     }
 
     // ── Stop CSS coverage and compute unused % ───────────────────────────────────
@@ -1067,16 +1117,31 @@ export const collect: CollectFn = async (
         );
 
         // Video detection
-        const hasVideo =
-          document.querySelector("video") !== null ||
-          document.querySelector("iframe[src*='youtube']") !== null ||
-          document.querySelector("iframe[src*='vimeo']") !== null;
+        const videoSelector =
+          "video, iframe[src*='youtube'], iframe[src*='vimeo']";
+        const videos = Array.from(document.querySelectorAll(videoSelector));
+        const hasVideo = videos.length > 0;
 
-        return { hasSlider, hasVideo };
+        // Above-the-fold test. The capture scrolled back to the top before this
+        // runs, so getBoundingClientRect() is relative to the initial viewport.
+        // A video is "in viewport" when it is rendered (non-zero box, not
+        // display:none/visibility:hidden) and its box intersects that viewport.
+        const viewportH = window.innerHeight || 0;
+        const viewportW = window.innerWidth || 0;
+        const videoInViewport = videos.some((el) => {
+          const r = el.getBoundingClientRect();
+          if (r.width <= 0 || r.height <= 0) return false;
+          const style = window.getComputedStyle(el);
+          if (style.display === "none" || style.visibility === "hidden") return false;
+          return r.top < viewportH && r.bottom > 0 && r.left < viewportW && r.right > 0;
+        });
+
+        return { hasSlider, hasVideo, videoInViewport };
       });
 
       sliderDetected = pageFeatures.hasSlider;
       videoDetected = pageFeatures.hasVideo;
+      videoInViewport = pageFeatures.videoInViewport;
     } catch {
       // Defaults to false
     }
@@ -1109,9 +1174,13 @@ export const collect: CollectFn = async (
     // two can get different headers, and a real user gets the browser's. Use the
     // first captured document response matching finalUrl (else the first document
     // response); keep the Node-fetch headers as fallback when none was captured.
+    // A challenge interstitial is also a document response, on the same URL, and
+    // it comes first — so only successful ones are eligible, otherwise topics
+    // 5/8/10 would score the WAF's headers instead of the site's.
     const docResponses = requests.filter(
       (r) =>
         r.resourceType === "document" &&
+        r.status < 400 &&
         Object.keys(r.responseHeaders).length > 0,
     );
     const docResponse =
@@ -1143,8 +1212,10 @@ export const collect: CollectFn = async (
       ...parseFontFaces(rawHtml),
       ...extractFontFacesFromCss(externalCss),
     ];
-    cssAuditHasSvgOrFontDataUri =
-      hasInlinedSvgOrFontDataUri(inlineCss) || hasInlinedSvgOrFontDataUri(externalCss);
+    // Criterion 7 "No inlined SVG or fonts in CSS" is scoped to the CSS *files*
+    // only (external stylesheets) — inline <style> blocks live in the page HTML
+    // and are deliberately out of scope here.
+    cssAuditHasSvgOrFontDataUri = hasInlinedSvgOrFontDataUri(externalCss);
     cssAuditHasAtImport = hasAtImportRule(inlineCss) || hasAtImportRule(externalCss);
   } catch {
     fonts = [];
@@ -1164,7 +1235,9 @@ export const collect: CollectFn = async (
   const network = await probeNetwork(finalUrl, altSvcHeader);
 
   // ── Step 6: CrUX field data ──────────────────────────────────────────────────
-  const field = await fetchCrux(url, opts.cruxApiKey);
+  // CrUX indexes the landed-on URL, so `finalUrl` is the key that matches; the
+  // inventory `url` and then the origin are tried as fallbacks.
+  const field = await fetchCruxWithFallback({ finalUrl, url }, opts.cruxApiKey);
 
   // ── Step 7: Assemble and validate ────────────────────────────────────────────
   const bundle = {
@@ -1191,6 +1264,7 @@ export const collect: CollectFn = async (
     features: {
       sliderDetected,
       videoDetected,
+      videoInViewport,
       cookieAccepted,
     },
   };

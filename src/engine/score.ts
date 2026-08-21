@@ -80,6 +80,14 @@ interface ControlPlan {
   points: number;
   /** Evidence string to show for a criterion the mode does not measure. */
   skipReason: string;
+  /**
+   * The control aggregates the OTHER topics instead of reading the bundle
+   * (`Control.derivedFromTopics`). Neither `evaluate` nor any stored per-page fact
+   * decides it: the slot is reserved here and filled by `applyDerivedControls`.
+   * Without this, a page whose stored results predate the control — a resume across
+   * a scoring change — would silently drop the component to N/A.
+   */
+  derived: boolean;
 }
 
 const CHINA_ONLY_TOPIC = 12;
@@ -98,20 +106,22 @@ function planControl(
   firstIdx: number,
 ): ControlPlan {
   const base = resolvePoints(control, cfg);
+  const derived = control.derivedFromTopics === true;
 
   if (mode === "china") {
     // Topic 12 is the point of a China page — scored in full, as declared.
     if (topic.id === CHINA_ONLY_TOPIC) {
-      return { measured: true, points: base, skipReason: "" };
+      return { measured: true, points: base, skipReason: "", derived };
     }
     // Every other topic is reduced to its foundational criterion, which carries
     // the whole topic so the score stays on the 0–100 scale.
     return index === firstIdx
-      ? { measured: true, points: CHINA_TOPIC_POINTS, skipReason: "" }
+      ? { measured: true, points: CHINA_TOPIC_POINTS, skipReason: "", derived }
       : {
           measured: false,
           points: 0,
           skipReason: "N/A — page China : seul le 1er critère du sujet est évalué",
+          derived,
         };
   }
 
@@ -121,9 +131,10 @@ function planControl(
       measured: false,
       points: 0,
       skipReason: "N/A — sujet évalué uniquement sur les pages China",
+      derived,
     };
   }
-  return { measured: true, points: base, skipReason: "" };
+  return { measured: true, points: base, skipReason: "", derived };
 }
 
 /* ── per-page evaluation ──────────────────────────────────────────────────── */
@@ -166,6 +177,19 @@ function evalControlOnPage(
     (control.appliesTo !== undefined && control.appliesTo(page) === false);
 
   if (isNA) return naEval(control.id, "N/A");
+
+  // Derived: reserve the slot, points come from applyDerivedControls. `evaluate`
+  // is deliberately not called — it cannot know the other topics.
+  if (plan.derived) {
+    return {
+      controlId: control.id,
+      applicable: true,
+      passed: false,
+      pointsAwarded: 0,
+      maxPoints: plan.points,
+      evidence: "",
+    };
+  }
 
   const verdict = control.evaluate(page);
   return {
@@ -221,6 +245,18 @@ function aggregateFacts(
       pointsAwarded: 0,
       maxPoints: 0,
       evidence: plan.skipReason,
+    };
+  }
+
+  // Derived: same reservation at site level. Its stored per-page facts are
+  // irrelevant (and absent on pages scored before the control existed).
+  if (plan.derived) {
+    return {
+      applicable: true,
+      passed: false,
+      pointsAwarded: 0,
+      maxPoints: plan.points,
+      evidence: "",
     };
   }
 

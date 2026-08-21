@@ -45,6 +45,17 @@ function fontStem(url: string): string {
   return base.toLowerCase()
 }
 
+/**
+ * True when a @font-face `src` only resolves to a locally installed font
+ * (`src: local("Arial")`) — i.e. no `url(...)` to download. Such rules are
+ * adjusted system fallbacks (size-adjust / ascent-override wrappers), not
+ * downloaded families, so they must not count toward the 2-family limit.
+ */
+function isLocalOnlySrc(src: string | undefined): boolean {
+  if (!src) return false
+  return /local\s*\(/i.test(src) && !/url\s*\(/i.test(src)
+}
+
 const SUBSET_TOKEN_RE =
   /(?:^|[/\-_.])(latin|cyrillic|greek|vietnamese|hebrew|arabic|subset|ext)(?:$|[/\-_.?])/i
 
@@ -174,12 +185,18 @@ const max2Control: Control = {
   topicId: 9,
   label: "Max 2 font families",
   description:
-    "At most 2 distinct font families loaded. Counts @font-face family names when any are captured; falls back to font-file URL stems only when no @font-face family was captured (avoids double-counting the same font as both a family name and a file stem).",
+    "At most 2 distinct font families loaded. Counts @font-face family names when any are captured, ignoring rules whose src is local(...) only (adjusted system fallbacks are not downloaded families); falls back to font-file URL stems only when no downloaded @font-face family was captured (avoids double-counting the same font as both a family name and a file stem).",
   defaultPoints: 10,
   evaluate(e: EvidenceBundle) {
     const families = new Set<string>()
+    let localOnly = 0
     for (const f of e.fonts) {
-      if (f.family) families.add(normFamily(f.family))
+      if (!f.family) continue
+      if (isLocalOnlySrc(f.src)) {
+        localOnly++
+        continue
+      }
+      families.add(normFamily(f.family))
     }
     // Only fall back to URL stems when NO @font-face family was captured;
     // otherwise the same font counts twice ("Foo Web" family + foo-web stem).
@@ -194,9 +211,10 @@ const max2Control: Control = {
     }
     const count = families.size
     const passed = count <= 2
+    const skipped = localOnly > 0 ? ` (${localOnly} local()-only fallback @font-face ignored)` : ""
     return {
       passed,
-      evidence: `${count} distinct font ${source}: ${[...families].slice(0, 6).join(", ") || "none"}`,
+      evidence: `${count} distinct font ${source}: ${[...families].slice(0, 6).join(", ") || "none"}${skipped}`,
     }
   },
 }

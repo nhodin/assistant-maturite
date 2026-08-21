@@ -55,39 +55,95 @@ function p75(metric: CruxMetric | undefined): number | undefined {
 }
 
 /**
- * Fetch CrUX field data for a URL (PHONE form factor).
- * Returns null if no apiKey is provided or on any failure.
+ * Follow redirects for `url` and return the URL actually served, or `url` itself
+ * on any failure. CrUX indexes the landed-on URL, so callers without a browser
+ * capture (the monitor) need this to build the right lookup key.
  */
-export async function fetchCrux(
-  url: string,
+export async function resolveFinalUrl(url: string, timeoutMs = 10000): Promise<string> {
+  try {
+    const res = await fetch(url, {
+      method: "GET",
+      redirect: "follow",
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    // Drain so the socket is released; the body itself is not needed.
+    await res.arrayBuffer().catch(() => undefined);
+    return res.url || url;
+  } catch {
+    return url;
+  }
+}
+
+/** Which CrUX record answered a lookup: a URL-level record or the origin fallback. */
+export type CruxRecordScope = "page" | "origin";
+
+/** True when CrUX returned at least one usable p75 value. */
+function hasAnyMetric(m: CruxMetrics): boolean {
+  return (
+    m.ttfbMs !== undefined ||
+    m.lcpMs !== undefined ||
+    m.cls !== undefined ||
+    m.inpMs !== undefined ||
+    m.fcpMs !== undefined
+  );
+}
+
+function toCruxData(m: CruxMetrics, scope: CruxRecordScope, urlKey: string): CruxData {
+  return {
+    ttfbMs: m.ttfbMs,
+    lcpMs: m.lcpMs,
+    cls: m.cls,
+    inpMs: m.inpMs,
+    source: "crux",
+    scope,
+    urlKey,
+  };
+}
+
+/**
+ * Fetch CrUX field data for a captured page (PHONE form factor), trying the
+ * URL-level record first and falling back to the origin.
+ *
+ * CrUX indexes the URL a user actually landed on, so `finalUrl` (post-redirect)
+ * is the key that matches — an inventory URL like `https://us.louisvuitton.com/`
+ * that redirects to `/eng-us/homepage` has no record of its own and 404s.
+ * `url` is still tried after it, in case the inventory URL is the indexed one.
+ *
+ * The origin fallback is less precise (its p75 is pulled by the homepage), so
+ * the answering scope and key are recorded on the result and surfaced in the
+ * report. Returns null when no key has field data.
+ */
+export async function fetchCruxWithFallback(
+  keys: { finalUrl?: string | null; url?: string | null },
   apiKey?: string,
 ): Promise<CruxData | null> {
   if (!apiKey) return null;
 
-  try {
-    const res = await fetch(`${CRUX_ENDPOINT}?key=${apiKey}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url, formFactor: "PHONE" }),
-    });
-
-    if (!res.ok) return null;
-
-    const data = (await res.json()) as CruxResponse;
-    const metrics = data?.record?.metrics;
-
-    if (!metrics) return null;
-
-    return {
-      lcpMs: p75(metrics.largest_contentful_paint),
-      ttfbMs: p75(metrics.experimental_time_to_first_byte),
-      cls: p75(metrics.cumulative_layout_shift),
-      inpMs: p75(metrics.interaction_to_next_paint),
-      source: "crux",
-    };
-  } catch {
-    return null;
+  const candidates: string[] = [];
+  for (const u of [keys.finalUrl, keys.url]) {
+    if (u && !candidates.includes(u)) candidates.push(u);
   }
+
+  for (const candidate of candidates) {
+    const m = await fetchCruxMetrics({ url: candidate }, apiKey);
+    if (m && hasAnyMetric(m)) return toCruxData(m, "page", candidate);
+  }
+
+  const origins: string[] = [];
+  for (const candidate of candidates) {
+    try {
+      const o = new URL(candidate).origin;
+      if (!origins.includes(o)) origins.push(o);
+    } catch {
+      // Not a parsable URL — no origin to fall back to.
+    }
+  }
+  for (const origin of origins) {
+    const m = await fetchCruxMetrics({ origin }, apiKey);
+    if (m && hasAnyMetric(m)) return toCruxData(m, "origin", origin);
+  }
+
+  return null;
 }
 
 /**

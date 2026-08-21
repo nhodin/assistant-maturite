@@ -92,13 +92,13 @@ const noSvgFontsControl: Control = {
   id: "css.nosvgfonts",
   topicId: 7,
   label: "No inlined SVG or base64 fonts in CSS",
-  description: "Neither inline <style> blocks nor fetched external stylesheets contain data:image/svg or data:font/data:application/font URIs.",
+  description: "The fetched external stylesheets contain no data:image/svg or data:font/data:application/font URIs. Scoped to CSS files only — inline <style> blocks in the page HTML are out of scope.",
   defaultPoints: 20,
   evaluate(e: EvidenceBundle) {
     const scope =
       e.css.externalStylesheetsParsed > 0
-        ? `inline <style> and ${e.css.externalStylesheetsParsed} external stylesheet(s)`
-        : "inline <style> blocks (no external stylesheet captured)"
+        ? `${e.css.externalStylesheetsParsed} external stylesheet(s)`
+        : "external stylesheets (none captured)"
     if (!e.css.hasInlinedSvgOrFontDataUri) {
       return {
         passed: true,

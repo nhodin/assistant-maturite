@@ -14,7 +14,7 @@
 import type { MonitorFrequency } from "@prisma/client";
 import { prisma } from "./db";
 import { startRun, activeRun } from "./runner";
-import { fetchCruxMetrics, type CruxFormFactor } from "../collector/crux";
+import { fetchCruxMetrics, resolveFinalUrl, type CruxFormFactor } from "../collector/crux";
 
 // ── Pure helpers (unit-tested) ──────────────────────────────────────────────
 
@@ -49,12 +49,23 @@ export async function collectCruxForProject(projectId: number): Promise<number> 
   const now = new Date();
   let inserted = 0;
 
-  // Distinct origins (first page id encountered for each origin, for labeling).
+  // CrUX keys on the URL a user landed on, so an inventory URL that redirects
+  // (e.g. https://us.louisvuitton.com/ → /eng-us/homepage) has no record of its
+  // own and 404s. Resolve each page's redirect once, and reuse it for every form
+  // factor. One resolution per distinct URL, whatever the page count.
+  const finalUrls = new Map<string, string>();
+  for (const pp of project.pages) {
+    if (finalUrls.has(pp.page.url)) continue;
+    finalUrls.set(pp.page.url, await resolveFinalUrl(pp.page.url));
+  }
+
+  // Distinct origins, taken from the resolved URLs so a cross-origin redirect
+  // (apex → www) is sampled on the origin that actually serves the page.
   const origins = new Map<string, void>();
   for (const pp of project.pages) {
     let origin: string | null = null;
     try {
-      origin = new URL(pp.page.url).origin;
+      origin = new URL(finalUrls.get(pp.page.url) ?? pp.page.url).origin;
     } catch {
       origin = null;
     }
@@ -86,7 +97,14 @@ export async function collectCruxForProject(projectId: number): Promise<number> 
     }
 
     for (const pp of project.pages) {
-      const m = await fetchCruxMetrics({ url: pp.page.url }, apiKey, formFactor);
+      const finalUrl = finalUrls.get(pp.page.url) ?? pp.page.url;
+      let urlKey = finalUrl;
+      let m = await fetchCruxMetrics({ url: finalUrl }, apiKey, formFactor);
+      // Fall back to the inventory URL when it is the indexed one after all.
+      if (!m && finalUrl !== pp.page.url) {
+        m = await fetchCruxMetrics({ url: pp.page.url }, apiKey, formFactor);
+        if (m) urlKey = pp.page.url;
+      }
       if (!m) continue;
       await prisma.cruxSnapshot.create({
         data: {
@@ -94,7 +112,7 @@ export async function collectCruxForProject(projectId: number): Promise<number> 
           scope: "PAGE",
           formFactor,
           pageId: pp.pageId,
-          urlKey: pp.page.url,
+          urlKey,
           lcpMs: m.lcpMs ?? null,
           ttfbMs: m.ttfbMs ?? null,
           inpMs: m.inpMs ?? null,

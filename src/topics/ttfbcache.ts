@@ -159,9 +159,15 @@ export const ttfb800Control: Control = {
       const fieldOk = field < 800
       const passed = labOk && fieldOk
       const labStr = lab !== null ? `${Math.round(lab)}ms` : "not measured"
+      // An origin-scoped p75 is pulled by the homepage, so say so rather than
+      // letting it read as a measure of this URL.
+      const scope =
+        e.field?.scope === "origin"
+          ? ` (origin-wide${e.field.urlKey ? ` — ${e.field.urlKey}` : ""})`
+          : ""
       return {
         passed,
-        evidence: `Lab TTFB: ${labStr}, Field TTFB: ${Math.round(field)}ms — both must be < 800ms`,
+        evidence: `Lab TTFB: ${labStr}, Field TTFB: ${Math.round(field)}ms${scope} — both must be < 800ms`,
       }
     }
 

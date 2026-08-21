@@ -198,6 +198,27 @@ data/WEBSITES.csv      # seed source (website;url_hp;url_plp;url_pdp)
      échecs » — a WAF block on 3 of 30 pages is retried without paying for the other 27. Note
      that `donePages` counts failures too, so the run list shows a `N KO` badge next to `30/30`
      rather than pretending the run is complete.
+  4. `recaptureSite(runId, siteId)` (`POST /runs/:id/sites/:siteId/recapture`, button on the
+     per-site page) shares the same executor with a **site scope**: it takes every page of that
+     one site, DONE ones included, and rebuilds only its aggregate. Resume *finishes* a run,
+     recapture *refreshes* one site of it — hence the different page selection. Like a resume it
+     reuses the run's stored `configJson`, so the refreshed site stays comparable to its siblings.
+- **Bot-challenge wait**: `collector/challenge.ts` (`waitForChallengeToSettle`) runs right after
+  the post-navigation `networkidle`. An interstitial is a tiny page, so `networkidle` settles ON
+  IT within a second and everything after would measure the challenge; a self-clearing
+  Cloudflare/Akamai interstitial gets `CAPTURE_CHALLENGE_TIMEOUT_MS` (default 30 s) to hand over,
+  and when it does the collected requests are dropped so the capture restarts clean on the real
+  document (the perf init script re-runs on it anyway). **The module only waits** — no checkbox
+  is clicked, no CAPTCHA solved; an interactive challenge times out and is reported blocked, to
+  be cleared by hand with `CLOAK_HEADLESS=0` or allowlisted by the origin. Two consequences
+  elsewhere: `assessCaptureHealth` judges the LAST document response per URL (a challenge is a
+  403 on the very URL the page is then served from), and the main-document headers are taken
+  from a **successful** document response only, never the WAF's 403.
+- **Raw-HTML rescue**: Step 1's raw fetch is a bare Node request with no cookies, so a protected
+  origin serves it the interstitial however patient the browser was. When it comes back empty,
+  header-less, or with a challenge title, `collect` refetches through `context.request` — the
+  browser session's cookies (`cf_clearance` & co) come with it. Skipped on a healthy capture, so
+  a normal origin takes no extra hit.
 - **Capture health check**: `collector/sanity.ts` (`assessCaptureHealth`) rejects a capture
   that landed on an error/bot-block page (document request ≥400 mid-capture, a Cloudflare/Akamai
   challenge title, or real `<img>` markup with zero image/stylesheet requests actually captured)
@@ -219,7 +240,9 @@ data/WEBSITES.csv      # seed source (website;url_hp;url_plp;url_pdp)
     `@font-face` into `EvidenceBundle.fonts` (topic 9 — `fonts.fontdisplay`/`fallback`/
     `subsetting` are no longer blind to fonts declared in an external stylesheet, the common
     case), and (b) computing `EvidenceBundle.css.hasInlinedSvgOrFontDataUri` (topic 7 —
-    `css.nosvgfonts`). Only derived booleans/counts are kept on the bundle, not the raw CSS
+    `css.nosvgfonts`, scoped to the **external stylesheets only**: inline `<style>` blocks
+    belong to the page HTML and are out of scope for that criterion, though they still count
+    for `hasAtImport`). Only derived booleans/counts are kept on the bundle, not the raw CSS
     text, to stay within the slimmed-evidence size budget (see below).
   - **103 Early Hints are now observed.** The raw-HTML fetch (`collector/index.ts`, formerly
     `fetch()`) uses Node's `http`/`https` `request()` directly and listens for the
@@ -246,6 +269,41 @@ data/WEBSITES.csv      # seed source (website;url_hp;url_plp;url_pdp)
     `meta[charset]` starts within the first 1024 bytes of `rawHtml` (UTF-8), per the HTML
     Standard's encoding-sniffing rule — a later charset declaration forces the browser to
     re-parse the whole document from scratch.
+- **Topic 3 (video) — poster resolution + critical-path gate** (2026-08):
+  - **`resolvePosterEvidence(rawHtml)`** (exported from `topics/video.ts`) is the ONE poster
+    resolver, shared by `video.posternojs` and `video.preloadposter` so both judge the same
+    poster and a detection fix lands in both at once. It returns `{ kind, urls, detail }` for
+    three forms, in priority order: `<video poster>` (`"attribute"`), an `<img>`/`<source srcset>`
+    stacked over a `<video>` (`"overlay"`), or a `<noscript><img>` fallback (`"noscript"`).
+    The overlay pattern (louisvuitton.com HP) puts the poster in a SIBLING element hidden once
+    the video loads, so the old `<video poster>`-only check scored 0 on a page whose poster does
+    paint without JS. Three traps it handles, each pinned by a test: a URL living only in
+    `srcset` counts (the parser resolves it — `src` is often a base64 GIF placeholder) while
+    `data-src`/`data-srcset` do not (they need JS); `<source>` is only a candidate when it has
+    `srcset`, because `<source src>` inside a `<video>` is the video file; and the poster-name
+    tokens (`poster|cover|placeholder|fallback|still|preview`) are matched with word boundaries
+    on `class`/`id`/`data-*` only, so "discover" is not "cover". Association with the video is
+    positional — a 4 KB-before / 1 KB-after window around each `<video>` — which is a heuristic:
+    the `evidence` string always names the element retained so a reviewer can audit it.
+  - **`videoGate` now also requires the video to be on the critical path**: `videoDetected` AND
+    (`features.videoInViewport !== false` OR the LCP element is the video/its poster). ALL six
+    controls share it, so the topic is N/A **as a block** (a test asserts the single shared
+    gate). Rationale: none of the criteria describe good practice for a below-the-fold video —
+    preloading its poster would steal bandwidth from the real LCP, and deferring its player is
+    what it should do — so scoring it would penalise a correct decision. Consequence: the topic
+    leaves the topic max AND the Overall average, which can RAISE a site's overall score, so
+    runs before/after this change are not comparable on Overall.
+  - **`features.videoInViewport`** (collector, `PageFeaturesSchema`) is the new fact behind it:
+    `getBoundingClientRect()` on `video, iframe[src*=youtube|vimeo]`, excluding zero-size boxes
+    and `display:none`/`visibility:hidden`. It is measured in the same `page.evaluate` as
+    `videoDetected`, which runs AFTER `autoScroll()` has scrolled back to the top — hence the
+    rect is relative to the initial viewport. Caveat: it is taken at end of capture, so a video
+    injected late above the fold counts as in-viewport even if it was not there at first paint.
+    The field is **optional** — `undefined` means "not measured" (evidence captured before it
+    existed) and controls must treat it as unknown, NOT as `false`, which keeps historical
+    verdicts intact. Note that a run stored in DB keeps only 2 000 chars of `rawHtml`
+    (`slimEvidence`), so these topic-3 changes cannot be replayed by `rescore` on old runs — a
+    fresh capture is required.
 - **Detection-logic review** (2026-07, 25 findings — see
   `docs/2026-07-02-criteria-logic-review.md` for the full list, dispositions and rationale):
   20 fixes landed across the topic modules and the collector (e.g. `private, max-age>0` no

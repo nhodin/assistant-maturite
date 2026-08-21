@@ -138,6 +138,14 @@ export const CruxDataSchema = z.object({
   cls: z.number().optional(),
   inpMs: z.number().optional(),
   source: z.enum(["crux", "psi"]),
+  /**
+   * Which CrUX record answered: "page" for a URL-level record, "origin" for the
+   * origin-wide fallback (less precise — its p75 is pulled by the homepage).
+   * Optional: evidence captured before the fallback existed carries no scope.
+   */
+  scope: z.enum(["page", "origin"]).optional(),
+  /** The URL or origin actually queried, for traceability in the report. */
+  urlKey: z.string().optional(),
 });
 
 export const PageFeaturesSchema = z.object({
@@ -152,6 +160,14 @@ export const PageFeaturesSchema = z.object({
    */
   sliderHtml: z.string().optional(),
   videoDetected: z.boolean(),
+  /**
+   * A video (or youtube/vimeo iframe) is rendered inside the INITIAL viewport,
+   * measured at scroll position 0 after the capture's auto-scroll returned to the
+   * top. Drives whether preloading its poster is worth points at all (topic 3).
+   * Optional/absent for evidence captured before this was measured — controls must
+   * treat `undefined` as "unknown", not as "false".
+   */
+  videoInViewport: z.boolean().optional(),
   cookieAccepted: z.boolean(),
 });
 

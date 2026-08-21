@@ -76,13 +76,13 @@ describe("css.order", () => {
 })
 
 describe("css.nosvgfonts", () => {
-  it("PASS — no data URIs in inline or external CSS", () => {
+  it("PASS — no data URIs in the external stylesheets", () => {
     const e = makeEvidence({
       css: { hasInlinedSvgOrFontDataUri: false, externalStylesheetsParsed: 2 },
     })
     expect(ctrl("css.nosvgfonts").evaluate(e).passed).toBe(true)
   })
-  it("FAIL — data:image/svg detected (inline or external stylesheet)", () => {
+  it("FAIL — data:image/svg detected in an external stylesheet", () => {
     const e = makeEvidence({
       css: { hasInlinedSvgOrFontDataUri: true, externalStylesheetsParsed: 1 },
     })

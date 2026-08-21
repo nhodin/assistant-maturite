@@ -94,6 +94,33 @@ describe("ttfb.ttfb800", () => {
     })
     expect(ctrl("ttfb.ttfb800").evaluate(e).passed).toBe(false)
   })
+  it("flags an origin-scoped field value in the evidence", () => {
+    const e = makeEvidence({
+      perf: { ttfbMs: 100 },
+      field: {
+        ttfbMs: 400,
+        source: "crux",
+        scope: "origin",
+        urlKey: "https://us.louisvuitton.com",
+      },
+    })
+    const res = ctrl("ttfb.ttfb800").evaluate(e)
+    expect(res.passed).toBe(true)
+    expect(res.evidence).toContain("origin-wide")
+    expect(res.evidence).toContain("https://us.louisvuitton.com")
+  })
+  it("does not flag a page-scoped field value", () => {
+    const e = makeEvidence({
+      perf: { ttfbMs: 100 },
+      field: {
+        ttfbMs: 400,
+        source: "crux",
+        scope: "page",
+        urlKey: "https://us.louisvuitton.com/eng-us/homepage",
+      },
+    })
+    expect(ctrl("ttfb.ttfb800").evaluate(e).evidence).not.toContain("origin-wide")
+  })
 })
 
 describe("ttfb.specrules", () => {

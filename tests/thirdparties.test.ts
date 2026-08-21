@@ -151,7 +151,7 @@ describe("tp.selfhost", () => {
     })
     const { passed, evidence } = ctrl["tp.selfhost"]!.evaluate(e)
     expect(passed).toBe(true)
-    expect(evidence).toMatch(/no third-party/)
+    expect(evidence).toMatch(/no render-blocking third-party/)
   })
 
   it("FAIL — third-party stylesheet in <head>", () => {
@@ -164,7 +164,7 @@ describe("tp.selfhost", () => {
     })
     const { passed, evidence } = ctrl["tp.selfhost"]!.evaluate(e)
     expect(passed).toBe(false)
-    expect(evidence).toMatch(/1 third-party resource/)
+    expect(evidence).toMatch(/1 render-blocking third-party resource/)
   })
 
   it("FAIL — third-party script in <head>", () => {
@@ -176,6 +176,43 @@ describe("tp.selfhost", () => {
     })
     const { passed } = ctrl["tp.selfhost"]!.evaluate(e)
     expect(passed).toBe(false)
+  })
+
+  it("PASS — deferred third-party script in <head> is not on the critical path", () => {
+    const e = makeEvidence({
+      finalUrl: "https://www.louisvuitton.com/eng-us/homepage",
+      rawHtml: `<!doctype html><html><head>
+        <script src="//tags.tiqcdn.com/utag/louisvuitton/vuestack/prod/utag.js" defer></script>
+        <script type="module" src="https://cdn.example.net/m.js"></script>
+        <script src="https://cdn.example.net/a.js" async></script>
+      </head><body></body></html>`,
+    })
+    const { passed, evidence } = ctrl["tp.selfhost"]!.evaluate(e)
+    expect(passed).toBe(true)
+    expect(evidence).toMatch(/no render-blocking third-party/)
+  })
+
+  it("FAIL — protocol-relative sync third-party script in <head>", () => {
+    const e = makeEvidence({
+      finalUrl: "https://www.louisvuitton.com/eng-us/homepage",
+      rawHtml: `<!doctype html><html><head>
+        <script src="//tags.tiqcdn.com/utag/louisvuitton/vuestack/prod/utag.js"></script>
+      </head><body></body></html>`,
+    })
+    const { passed, evidence } = ctrl["tp.selfhost"]!.evaluate(e)
+    expect(passed).toBe(false)
+    expect(evidence).toMatch(/1 sync script/)
+  })
+
+  it("PASS — third-party print stylesheet in <head> is not render-blocking", () => {
+    const e = makeEvidence({
+      finalUrl: "https://example.com/",
+      rawHtml: `<!doctype html><html><head>
+        <link rel="stylesheet" href="https://cdn.example.net/print.css" media="print">
+      </head><body></body></html>`,
+    })
+    const { passed } = ctrl["tp.selfhost"]!.evaluate(e)
+    expect(passed).toBe(true)
   })
 })
 

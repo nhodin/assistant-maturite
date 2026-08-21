@@ -26,7 +26,7 @@
     <a class="btn" href="/runs/<%= latestRun.id %>/export.csv">⬇ Export CSV</a>
   </div>
   <table class="grid">
-    <thead><tr><th>#</th><th>Site</th><th>Catégorie</th><th>Score global</th><th>GEO</th><th title="Synthèse des pages China (sujets 1-10, 1er critère)">China*</th><th title="Sujet 12 — pages China uniquement">CN Access</th></tr></thead>
+    <thead><tr><th>#</th><th>Site</th><th>Catégorie</th><th>Score global</th><th>GEO</th><th title="Sujet 12 — China Market Access, le score China final (pages China uniquement)">China</th><th title="Dont fondamentaux sitespeed : sujets 1-10 sur leur 1er critère — vaut 50 pts du score China">dont base</th></tr></thead>
     <tbody>
       <% ranking.forEach(function(s, i){ %>
         <tr>
@@ -35,8 +35,8 @@
           <td><%= categoryLabel(s.category) %></td>
           <td><span class="score <%= scoreClass(s.overall) %>"><%= fmtScore(s.overall) %></span></td>
           <td><span class="score <%= scoreClass(s.geo) %>"><%= fmtScore(s.geo) %></span></td>
-          <td><span class="score <%= scoreClass(s.chinaOverall) %>"><%= fmtScore(s.chinaOverall) %></span></td>
           <td><span class="score <%= scoreClass(s.china) %>"><%= fmtScore(s.china) %></span></td>
+          <td><span class="score sm <%= scoreClass(s.chinaOverall) %>"><%= fmtScore(s.chinaOverall) %></span></td>
         </tr>
       <% }) %>
     </tbody>

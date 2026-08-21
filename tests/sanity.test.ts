@@ -97,6 +97,33 @@ describe("assessCaptureHealth", () => {
     expect(health.reason).toMatch(/https:\/\/example\.com\/product\.html/)
   })
 
+  it("OK — a 403 challenge followed by a 200 on the same URL (challenge waited out)", () => {
+    const e = makeEvidence({
+      rawHtml: html("<title>Real product page</title>"),
+      mainResponseHeaders: HEADERS,
+      requests: [
+        req({ resourceType: "document", status: 403 }),
+        req({ resourceType: "document", status: 200 }),
+        req({ resourceType: "image", status: 200, url: "https://example.com/a.jpg" }),
+      ],
+    })
+    expect(assessCaptureHealth(e).ok).toBe(true)
+  })
+
+  it("rejects — a 200 followed by a 403 on the same URL (blocked after the fact)", () => {
+    const e = makeEvidence({
+      rawHtml: html("<title>Real product page</title>"),
+      mainResponseHeaders: HEADERS,
+      requests: [
+        req({ resourceType: "document", status: 200 }),
+        req({ resourceType: "document", status: 403 }),
+      ],
+    })
+    const health = assessCaptureHealth(e)
+    expect(health.ok).toBe(false)
+    expect(health.kind).toBe("blocked")
+  })
+
   it("rejects — document request returns 404", () => {
     const e = makeEvidence({
       rawHtml: html("<title>Real product page</title>"),

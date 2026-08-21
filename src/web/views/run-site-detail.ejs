@@ -1,8 +1,19 @@
 <%- include('partials/header', { title, active }) %>
 
 <p><a href="/runs/<%= score.runId %>">← Run #<%= score.runId %></a></p>
-<h1><%= score.site.name %></h1>
+<div class="head-row">
+  <h1><%= score.site.name %></h1>
+  <% if (!isLive) { %>
+    <form method="post" action="/runs/<%= score.runId %>/sites/<%= score.siteId %>/recapture"
+          onsubmit="return confirm('Recapturer toutes les pages de ce site et recalculer son score ?');">
+      <button class="btn" type="submit">↻ Relancer la capture de ce site</button>
+    </form>
+  <% } else { %>
+    <span class="muted">Un run est en cours — recapture indisponible.</span>
+  <% } %>
+</div>
 <p class="muted"><%= categoryLabel(score.category) %></p>
+<% if (flash) { %><div class="flash warn"><%= flash %></div><% } %>
 
 <%
   var allPages = pages || [];
@@ -75,29 +86,20 @@
       </tr>
     </thead>
     <tbody>
+      <%# The final China score: topic 12, which folds the fundamentals below into 50 of its points. %>
       <tr>
-        <td><strong>Global China</strong></td>
-        <% if (hasCnScores) { cnPages.forEach(function(p){ %>
-          <td><span class="score sm <%= scoreClass(p.overall) %>"><%= fmtScore(p.overall) %></span></td>
-        <% }); } %>
-        <td><span class="score <%= scoreClass(score.chinaOverall) %>"><%= fmtScore(score.chinaOverall) %></span></td>
-      </tr>
-      <tr>
-        <td>China Market Access</td>
+        <td><strong>China Market Access</strong></td>
         <% if (hasCnScores) { cnPages.forEach(function(p){ %>
           <td><span class="score sm <%= scoreClass(p.china) %>"><%= fmtScore(p.china) %></span></td>
         <% }); } %>
         <td><span class="score <%= scoreClass(score.china) %>"><%= fmtScore(score.china) %></span></td>
       </tr>
       <tr>
-        <td>GEO</td>
+        <td class="muted">dont fondamentaux sitespeed (sujets 1–10, 1er critère) — 50 pts du score ci-dessus</td>
         <% if (hasCnScores) { cnPages.forEach(function(p){ %>
-          <td><span class="score sm <%= scoreClass(p.geo) %>"><%= fmtScore(p.geo) %></span></td>
+          <td><span class="score sm <%= scoreClass(p.overall) %>"><%= fmtScore(p.overall) %></span></td>
         <% }); } %>
-        <td>
-          <% var cnGeo = (cnTopics || []).find(function(t){ return t.topicId === 11; }); %>
-          <span class="score <%= scoreClass(cnGeo ? cnGeo.score : null) %>"><%= fmtScore(cnGeo ? cnGeo.score : null) %></span>
-        </td>
+        <td><span class="score sm <%= scoreClass(score.chinaOverall) %>"><%= fmtScore(score.chinaOverall) %></span></td>
       </tr>
     </tbody>
   </table>

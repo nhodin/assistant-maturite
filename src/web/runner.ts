@@ -215,13 +215,19 @@ function sitesOf(pages: ResumablePage[]): Set<number> {
   return new Set(pages.map((p) => p.page.siteId));
 }
 
-/** Shared launcher for a fresh start and for a resume. Returns immediately. */
-function launch(runId: number, resume: boolean): { started: boolean; reason?: string } {
+/**
+ * Shared launcher for a fresh start, a resume, and a single-site recapture.
+ * Returns immediately.
+ */
+function launch(
+  runId: number,
+  opts: { resume?: boolean; siteId?: number },
+): { started: boolean; reason?: string } {
   if (activeRunId !== null) {
     return { started: false, reason: `A run is already in progress (#${activeRunId})` };
   }
   activeRunId = runId;
-  executeRun(runId, { resume })
+  executeRun(runId, opts)
     .catch(async (err) => {
       console.error(`Run #${runId} crashed:`, err);
       // The executor died outside a page's own error handling. Without this the
@@ -245,7 +251,7 @@ function launch(runId: number, resume: boolean): { started: boolean; reason?: st
 
 /** Kick off a run asynchronously. Returns immediately. */
 export function startRun(runId: number): { started: boolean; reason?: string } {
-  return launch(runId, false);
+  return launch(runId, {});
 }
 
 /**
@@ -254,10 +260,28 @@ export function startRun(runId: number): { started: boolean; reason?: string } {
  * site cannot be salvaged from the DB.
  */
 export function resumeRun(runId: number): { started: boolean; reason?: string } {
-  return launch(runId, true);
+  return launch(runId, { resume: true });
 }
 
-async function executeRun(runId: number, opts: { resume?: boolean } = {}): Promise<void> {
+/**
+ * Recapture ONE site of an existing run: every page of that site is captured
+ * again — the pages already DONE included, since the point is to refresh a
+ * result and not to finish an interrupted run — and the site aggregate is
+ * rebuilt from them (settleSite). The other sites of the run are left strictly
+ * untouched, and the run keeps its stored config (`resume: true` reuses
+ * `configJson`) so a single ranking is never a mix of two scoring rules.
+ */
+export function recaptureSite(
+  runId: number,
+  siteId: number,
+): { started: boolean; reason?: string } {
+  return launch(runId, { resume: true, siteId });
+}
+
+async function executeRun(
+  runId: number,
+  opts: { resume?: boolean; siteId?: number } = {},
+): Promise<void> {
   const run = await prisma.run.findUnique({
     where: { id: runId },
     include: {
@@ -276,10 +300,19 @@ async function executeRun(runId: number, opts: { resume?: boolean } = {}): Promi
 
   type SiteRef = (typeof run.runPages)[number]["page"]["site"];
 
-  const toCapture = opts.resume ? planResume(run.runPages) : [...run.runPages];
+  // A single-site recapture takes EVERY page of that site, DONE ones included:
+  // it exists to refresh a result, where a resume exists to finish one.
+  const toCapture =
+    opts.siteId != null
+      ? run.runPages.filter((rp) => rp.page.siteId === opts.siteId)
+      : opts.resume
+        ? planResume(run.runPages)
+        : [...run.runPages];
   const keptPages = run.runPages.length - toCapture.length;
 
   if (toCapture.length === 0) {
+    // Scoped to a site holding no page: the run's own state says nothing new.
+    if (opts.siteId != null) return;
     await prisma.run.update({
       where: { id: runId },
       data: { status: "DONE", finishedAt: new Date(), error: null },
@@ -493,7 +526,13 @@ async function executeRun(runId: number, opts: { resume?: boolean } = {}): Promi
   if (throttling.warning) console.warn(`Run #${runId}: ${throttling.warning}`);
   console.log(`Run #${runId}: throttling — ${describeThrottling(throttling)}`);
   console.log(
-    `Run #${runId}${opts.resume ? " (resume)" : ""}: ${toCapture.length} page(s) over ` +
+    `Run #${runId}${
+      opts.siteId != null
+        ? ` (recapture site #${opts.siteId})`
+        : opts.resume
+          ? " (resume)"
+          : ""
+    }: ${toCapture.length} page(s) over ` +
       `${buckets.length} origin(s), ${Math.min(slots, buckets.length)} captured in parallel` +
       (opts.resume
         ? ` — ${keptPages} page(s) already captured, kept; ` +

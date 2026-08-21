@@ -3,14 +3,45 @@
  * topicId: 3 | hasNA: true | standalone: false
  * Max points: 30+25+20+10+10+5 = 100
  *
- * Every control declares appliesTo: (e) => e.features.videoDetected === true.
- * When no video is present the engine marks the topic N/A.
+ * Every control declares appliesTo: videoGate. When no video is present — or when
+ * every video sits below the fold and none is the LCP — the engine marks the whole
+ * topic N/A and it is excluded from the Overall average.
  */
 import type { EvidenceBundle } from "../core"
 import type { Control, TopicModule } from "../core"
+import type { ParsedTag } from "./util"
 import { parseTags, headSlice, sameSite, requestsOfType, host } from "./util"
 
-const videoGate = (e: EvidenceBundle): boolean => e.features.videoDetected === true
+/**
+ * The topic gate. A video only deserves to be graded when it is on the critical path:
+ * it sits in the initial viewport, or it (or its poster) IS the LCP element.
+ *
+ * None of these criteria describe good practice for a below-the-fold video — poster
+ * preloading would steal bandwidth from the real LCP, reserving space and eager
+ * poster markup buy nothing, and a deferred player is exactly what such a video
+ * should do. Scoring it would penalise a site for a correct decision, so the whole
+ * topic goes N/A (excluded from the topic max AND from the Overall average) instead
+ * of failing.
+ *
+ * `videoInViewport === undefined` means "not measured" (evidence captured before the
+ * collector reported it) — the topic then applies, preserving historical verdicts.
+ */
+function videoGate(e: EvidenceBundle): boolean {
+  if (e.features.videoDetected !== true) return false
+  if (e.features.videoInViewport !== false) return true
+  return lcpIsVideoOrPoster(e)
+}
+
+/** True if the LCP element is the <video> itself, or the poster painted over it. */
+function lcpIsVideoOrPoster(e: EvidenceBundle): boolean {
+  const lcp = e.perf.lcpElement
+  if (!lcp) return false
+  if (lcp.tagName.toUpperCase() === "VIDEO") return true
+  const poster = resolvePosterEvidence(e.rawHtml)
+  if (!poster) return false
+  const src = lcp.src ?? ""
+  return src.length > 0 && poster.urls.some((u) => looseUrlMatch(src, u))
+}
 
 /** Pathname (lowercased) and last path segment of a URL — tolerant of relative
  *  and protocol-relative URLs commonly seen in markup. */
@@ -61,6 +92,133 @@ const VIDEO_PLAYER_DOMAINS = [
   "players.brightcove.net",
 ]
 
+// ── poster resolution ─────────────────────────────────────────────────────────
+//
+// A poster does not have to be `<video poster>`. The common modern pattern (seen on
+// louisvuitton.com) stacks a <picture> OVER the <video> as a sibling and hides it once
+// the video is ready. That poster still paints without JS — as long as the HTML parser
+// alone can resolve its URL — so it must validate the criterion.
+//
+// The trap: such an <img> often carries a transparent base64 GIF in `src` (a placeholder)
+// and the real URLs only in `srcset`. srcset alone is enough for the parser, so the URL
+// resolution below accepts it; `data-src`/`data-srcset` are NOT accepted (they need JS).
+
+/** Tokens marking an element as the video's poster layer, matched on class/id/data-*
+ *  as whole words — so "discover" never counts as "cover". */
+const POSTER_TOKEN = /(^|[^a-z])(poster|cover|placeholder|fallback|still|preview)([^a-z]|$)/i
+
+/** True for a URL the parser can fetch: non-empty and not a data: placeholder. */
+function realUrl(u: string): boolean {
+  const v = u.trim()
+  return v.length > 0 && !/^data:/i.test(v)
+}
+
+/** URLs an <img>/<source> resolves without JS: a real src, plus every real srcset
+ *  candidate. Empty when the tag only carries a data: placeholder or data-* attrs. */
+function urlsWithoutJs(t: ParsedTag): string[] {
+  const out: string[] = []
+  const src = (t.attrs["src"] ?? "").trim()
+  if (realUrl(src)) out.push(src)
+  for (const entry of (t.attrs["srcset"] ?? "").split(",")) {
+    const url = entry.trim().split(/\s+/)[0] ?? ""
+    if (realUrl(url)) out.push(url)
+  }
+  return out
+}
+
+/** Markup surrounding each <video>: the overlay is a sibling, almost always emitted
+ *  BEFORE the video, hence the asymmetric window. */
+function videoWindows(html: string, before = 4000, after = 1000): string[] {
+  const out: string[] = []
+  const re = /<video\b/gi
+  let m: RegExpExecArray | null
+  while ((m = re.exec(html)) !== null) {
+    out.push(html.slice(Math.max(0, m.index - before), m.index + after))
+  }
+  return out
+}
+
+/** True if some element in this window is named like a poster layer. Checked on
+ *  class/id/data-* attributes only, never on free text. */
+function hasPosterHint(html: string): boolean {
+  const tags = html.match(/<[a-z][^>]*>/gi) ?? []
+  return tags.some((raw) =>
+    (raw.match(/(class|id|data-[-a-z0-9]+)\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi) ?? []).some(
+      (attr) => POSTER_TOKEN.test(attr),
+    ),
+  )
+}
+
+/** Image candidates in a window: every <img>, plus <source srcset> (a <picture>
+ *  source). <source src> is excluded — inside <video> that is the video file itself. */
+function imageCandidates(html: string): { tag: string; t: ParsedTag }[] {
+  return [
+    ...parseTags(html, "img").map((t) => ({ tag: "img", t })),
+    ...parseTags(html, "source")
+      .filter((t) => (t.attrs["srcset"] ?? "").trim().length > 0)
+      .map((t) => ({ tag: "source", t })),
+  ]
+}
+
+export interface PosterEvidence {
+  /** "attribute" = <video poster>, "overlay" = stacked <picture>/<img>, "noscript". */
+  kind: "attribute" | "overlay" | "noscript"
+  /** Every URL resolvable without JS (src + srcset candidates), for preload matching. */
+  urls: string[]
+  /** Human-readable justification, embedded in the control evidence. */
+  detail: string
+}
+
+/**
+ * Poster(s) a browser paints without running any JS, in priority order:
+ *   1. <video poster="…">
+ *   2. an overlay <img>/<picture> next to a <video>, in a poster-named container
+ *   3. a <noscript><img> fallback in the same window
+ * Shared by video.posternojs and video.preloadposter so both judge the same poster.
+ */
+export function resolvePosterEvidence(rawHtml: string): PosterEvidence | null {
+  const attributeUrls = parseTags(rawHtml, "video")
+    .map((v) => (v.attrs["poster"] ?? "").trim())
+    .filter((p) => p.length > 0)
+  if (attributeUrls.length > 0) {
+    return {
+      kind: "attribute",
+      urls: attributeUrls,
+      detail: `${attributeUrls.length} <video> element(s) with a poster attribute found in raw HTML`,
+    }
+  }
+
+  for (const win of videoWindows(rawHtml)) {
+    if (hasPosterHint(win)) {
+      const hit = imageCandidates(win)
+        .map(({ tag, t }) => ({ tag, t, urls: urlsWithoutJs(t) }))
+        .find((c) => c.urls.length > 0)
+      if (hit) {
+        const via = realUrl(hit.t.attrs["src"] ?? "") ? "src" : "srcset"
+        return {
+          kind: "overlay",
+          urls: hit.urls,
+          detail: `poster overlay <${hit.tag}> stacked on a <video>, resolvable via ${via} without JS: ${hit.urls[0]!.substring(0, 80)}`,
+        }
+      }
+    }
+    const noscript = /<noscript\b[^>]*>([\s\S]*?)<\/noscript>/i.exec(win)
+    if (noscript) {
+      const hit = imageCandidates(noscript[1] ?? "")
+        .map(({ t }) => urlsWithoutJs(t))
+        .find((urls) => urls.length > 0)
+      if (hit) {
+        return {
+          kind: "noscript",
+          urls: hit,
+          detail: `<noscript> <img> fallback in the video container: ${hit[0]!.substring(0, 80)}`,
+        }
+      }
+    }
+  }
+  return null
+}
+
 // ── controls ─────────────────────────────────────────────────────────────────
 
 const posterNoJs: Control = {
@@ -68,21 +226,24 @@ const posterNoJs: Control = {
   topicId: 3,
   label: "Poster image loaded without JS",
   description:
-    "A <video> tag with a non-empty poster attribute is present in raw HTML.",
+    "A poster the HTML parser resolves on its own is present in raw HTML: <video poster>, an overlay <picture>/<img> stacked on the video, or a <noscript> fallback.",
   defaultPoints: 30,
   appliesTo: videoGate,
   evaluate(e) {
-    const videos = parseTags(e.rawHtml, "video")
-    const withPoster = videos.filter(
-      (v) => (v.attrs["poster"] ?? "").trim().length > 0,
-    )
-    const count = withPoster.length
-    const passed = count > 0
+    const poster = resolvePosterEvidence(e.rawHtml)
+    if (!poster) {
+      return {
+        passed: false,
+        evidence:
+          "No <video poster>, and no overlay/<noscript> image resolvable without JS near a <video> in raw HTML",
+      }
+    }
     return {
-      passed,
-      evidence: passed
-        ? `${count} <video> element(s) with a poster attribute found in raw HTML`
-        : "No <video> tag with a non-empty poster attribute found in raw HTML",
+      passed: true,
+      evidence:
+        poster.kind === "attribute"
+          ? poster.detail
+          : `No <video poster>, but ${poster.detail} — renders without JS`,
     }
   },
 }
@@ -114,7 +275,7 @@ const preloadPoster: Control = {
   topicId: 3,
   label: "Poster image preloaded with fetchpriority=high",
   description:
-    'A <link rel="preload" as="image" fetchpriority="high"> in <head> preloads a <video poster> image (href loosely matched against poster URLs when present).',
+    'A <link rel="preload" as="image" fetchpriority="high"> in <head> preloads the poster (href loosely matched against the poster URLs resolvable without JS).',
   defaultPoints: 20,
   appliesTo: videoGate,
   evaluate(e) {
@@ -133,31 +294,30 @@ const preloadPoster: Control = {
           'No <link rel="preload" as="image" fetchpriority="high"> found in <head>',
       }
     }
-    // Poster URLs declared on <video poster="..."> anywhere in raw HTML.
-    const posterUrls = parseTags(e.rawHtml, "video")
-      .map((v) => (v.attrs["poster"] ?? "").trim())
-      .filter((p) => p.length > 0)
-    if (posterUrls.length > 0) {
+    // Poster URLs the parser resolves on its own — <video poster>, or the overlay
+    // <picture>/<img> pattern (same resolution as video.posternojs, so a site whose
+    // poster is an overlay is matched here too instead of falling to the weak signal).
+    const poster = resolvePosterEvidence(e.rawHtml)
+    if (poster) {
       const match = imagePreloads.find((link) =>
-        posterUrls.some((p) => looseUrlMatch(link.attrs["href"] ?? "", p)),
+        poster.urls.some((p) => looseUrlMatch(link.attrs["href"] ?? "", p)),
       )
       if (match) {
         return {
           passed: true,
-          evidence: `<link rel=preload as=image fetchpriority=high> preloads a <video poster> (href="${match.attrs["href"] ?? ""}")`,
+          evidence: `<link rel=preload as=image fetchpriority=high> preloads the ${poster.kind === "attribute" ? "<video poster>" : `${poster.kind} poster`} (href="${match.attrs["href"] ?? ""}")`,
         }
       }
       return {
         passed: false,
-        evidence:
-          "image preload present in <head> but none of its href(s) match a <video poster> URL",
+        evidence: `image preload present in <head> but none of its href(s) match a poster URL (${poster.kind})`,
       }
     }
-    // No poster attribute to match against — keep the weaker any-image-preload signal.
+    // No poster to match against — keep the weaker any-image-preload signal.
     return {
       passed: true,
       evidence:
-        '<link rel="preload" as="image" fetchpriority="high"> found in <head> — no <video poster> to match — weak match on any image preload',
+        '<link rel="preload" as="image" fetchpriority="high"> found in <head> — no poster resolvable without JS to match — weak match on any image preload',
     }
   },
 }
