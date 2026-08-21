@@ -149,6 +149,16 @@ describe("geo.weight1mb", () => {
     expect(r.passed).toBe(false)
     expect(r.evidence).toContain("1200000 bytes")
   })
+  it("reads the stamped htmlBytes, not a truncated rawHtml stub", () => {
+    // What a bundle looks like once persisted: rawHtml sliced to 2 KB, the real
+    // size carried by htmlBytes. Measuring the stub would wrongly PASS.
+    const e = makeEvidence({ rawHtml: "x".repeat(2000), htmlBytes: 2_000_000 })
+    expect(ctrl("geo.weight1mb").evaluate(e).passed).toBe(false)
+  })
+  it("falls back to rawHtml when htmlBytes is absent (older bundles)", () => {
+    const e = makeEvidence({ rawHtml: "x".repeat(2_000_000) })
+    expect(ctrl("geo.weight1mb").evaluate(e).passed).toBe(false)
+  })
   it("FAIL — HTML payload not measured (raw fetch returned nothing)", () => {
     const r = ctrl("geo.weight1mb").evaluate(makeEvidence({ rawHtml: "" }))
     expect(r.passed).toBe(false)

@@ -181,6 +181,16 @@ export const EvidenceBundleSchema = z.object({
   capturedAt: z.string(),
   /** Raw view-source HTML (fetched separately, BEFORE JS execution). */
   rawHtml: z.string(),
+  /**
+   * UTF-8 byte size of `rawHtml` as captured, stamped at collection time.
+   *
+   * `rawHtml` itself is truncated before a bundle is persisted to the database
+   * (see slimEvidence), so measuring the document from it after the fact reads a
+   * 2 KB stub instead of the real page. This field survives that truncation and
+   * is what geo.weight1mb reads. Optional: bundles captured before it existed
+   * fall back to measuring `rawHtml` directly.
+   */
+  htmlBytes: z.number().optional(),
   /** Serialized DOM AFTER JS execution. */
   renderedHtml: z.string(),
   /** Response headers of the main HTML document (lowercased keys). */

@@ -105,10 +105,14 @@ const compressionCdnControl: Control = {
  * Measured on the HTML DOCUMENT alone, decompressed — not on the total weight of
  * the page's requests. What a generative crawler pays for is parsing and
  * tokenizing the markup it is served; images, fonts and JS it never executes are
- * beside the point. `rawHtml` is the pre-JS document as fetched, and its UTF-8
- * byte length is the honest figure (`.length` would count UTF-16 code units, and
- * the document request's decodedBytes is really the compressed size — the
- * collector fills both from content-length).
+ * beside the point. `htmlBytes` is the UTF-8 size of the pre-JS document, stamped
+ * at capture time — the only figure that survives a bundle being persisted, since
+ * `rawHtml` is truncated to 2 KB on its way into the database. Bundles captured
+ * before that field existed fall back to measuring `rawHtml` here.
+ *
+ * Neither `rawHtml.length` (UTF-16 code units, blind to accents and CJK) nor the
+ * document request's decodedBytes (really the compressed size — the collector
+ * fills it from content-length) is usable for this.
  */
 const weight1mbControl: Control = {
   id: "geo.weight1mb",
@@ -118,7 +122,7 @@ const weight1mbControl: Control = {
     "HTML document, decompressed, below 1 MB. Total page weight (images, JS, fonts) is out of scope.",
   defaultPoints: 10,
   evaluate(e) {
-    const bytes = Buffer.byteLength(e.rawHtml ?? "", "utf-8")
+    const bytes = e.htmlBytes ?? Buffer.byteLength(e.rawHtml ?? "", "utf-8")
     if (bytes <= 0) {
       return {
         passed: false,

@@ -128,6 +128,9 @@ async function tryCapture(
 function slimEvidence(b: EvidenceBundle): object {
   return {
     ...b,
+    // Truncating the document here is what makes `htmlBytes` (stamped at capture)
+    // necessary: any control that needs the real HTML size must read that field,
+    // never measure the stub below.
     rawHtml: b.rawHtml.slice(0, 2000),
     renderedHtml: "",
     requests: b.requests.map((r) => ({

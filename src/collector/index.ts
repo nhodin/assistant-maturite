@@ -1262,6 +1262,7 @@ export const collect: CollectFn = async (
     capturedAt,
     rawHtml,
     renderedHtml,
+    htmlBytes: Buffer.byteLength(rawHtml, "utf-8"),
     mainResponseHeaders,
     head,
     requests,
