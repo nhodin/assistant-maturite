@@ -360,6 +360,28 @@ describe("images.responsive", () => {
     const result = ctrl("images.responsive").evaluate(e)
     expect(result.passed).toBe(false)
   })
+
+  // Art-direction via <picture>: the responsive candidates live on <source>, the
+  // <img> carries only the mobile fallback src. The parser resolves it without JS.
+  it("passes on a <picture> whose art-direction lives on <source srcset>", () => {
+    const e = makeEvidence({
+      rawHtml: `<picture>
+        <source srcset="/styles/hero_d/public/media/image/717a17.png?itok=i3pOZOe4 1x" media="(min-width: 1024px)" type="image/png" width="2477" height="1400">
+        <img loading="eager" fetchpriority="high" width="700" height="1260" src="/styles/hero_m/public/media/image/717a17.png?itok=qkhEDj4t" alt="">
+      </picture>`,
+    })
+    const result = ctrl("images.responsive").evaluate(e)
+    expect(result.passed).toBe(true)
+    expect(result.evidence).toContain("<picture><source>")
+  })
+
+  it("does not count a <video><source src> as responsive", () => {
+    const e = makeEvidence({
+      rawHtml: '<video poster="p.jpg"><source src="clip.mp4" type="video/mp4"></video><img src="a.jpg">',
+    })
+    const result = ctrl("images.responsive").evaluate(e)
+    expect(result.passed).toBe(false)
+  })
 })
 
 // ── images.compressed ────────────────────────────────────────────────────────

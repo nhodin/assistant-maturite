@@ -136,7 +136,8 @@ const fontDisplayControl: Control = {
   id: "fonts.fontdisplay",
   topicId: 9,
   label: "font-display swap/optional",
-  description: "All captured @font-face use font-display: swap or optional.",
+  description:
+    "All downloaded @font-face use font-display: swap or optional. @font-face rules whose src is local(...) only are adjusted system fallbacks — nothing is downloaded, so font-display does not apply and they are excluded.",
   defaultPoints: 10,
   evaluate(e: EvidenceBundle) {
     if (e.fonts.length === 0) {
@@ -145,14 +146,23 @@ const fontDisplayControl: Control = {
         evidence: "No @font-face rule captured (inline or external stylesheet)",
       }
     }
-    const good = e.fonts.filter((f) => {
+    const downloaded = e.fonts.filter((f) => !isLocalOnlySrc(f.src))
+    const localOnly = e.fonts.length - downloaded.length
+    const skipped = localOnly > 0 ? ` (${localOnly} local()-only fallback @font-face ignored)` : ""
+    if (downloaded.length === 0) {
+      return {
+        passed: true,
+        evidence: `No downloaded @font-face — font-display not applicable${skipped}`,
+      }
+    }
+    const good = downloaded.filter((f) => {
       const d = (f.fontDisplay ?? "").toLowerCase()
       return d === "swap" || d === "optional"
     })
-    const passed = good.length === e.fonts.length
+    const passed = good.length === downloaded.length
     return {
       passed,
-      evidence: `${good.length}/${e.fonts.length} @font-face rule(s) use font-display swap/optional`,
+      evidence: `${good.length}/${downloaded.length} downloaded @font-face rule(s) use font-display swap/optional${skipped}`,
     }
   },
 }

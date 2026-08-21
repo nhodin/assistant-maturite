@@ -254,18 +254,27 @@ const responsiveControl: Control = {
   id: "images.responsive",
   topicId: 1,
   label: "Responsive images (srcset / sizes)",
-  description: "At least one <img> uses srcset or sizes in raw HTML.",
+  description:
+    "At least one <img> uses srcset or sizes in raw HTML, or a <picture> serves viewport-adapted candidates through <source srcset/sizes>.",
   defaultPoints: 5,
   evaluate(e) {
+    const hasResponsiveAttr = (tag: string): boolean =>
+      /\bsrcset\s*=/i.test(tag) || /\bsizes\s*=/i.test(tag)
     const imgTags = e.rawHtml.match(/<img\b[^>]*>/gi) ?? []
-    const withSrcset = imgTags.filter((tag) => /\bsrcset\s*=/i.test(tag) || /\bsizes\s*=/i.test(tag)).length
-    const passed = withSrcset > 0
-    return {
-      passed,
-      evidence: passed
-        ? `${withSrcset} <img> element(s) use srcset or sizes`
-        : "No <img> with srcset or sizes found",
+    // <source> inside <picture> — art-direction / format switching. Same intent as
+    // srcset on the <img>, and the parser resolves it without JS. srcset/sizes only
+    // exist on a <picture> child, so a media <source src=...> cannot false-positive.
+    const sourceTags = e.rawHtml.match(/<source\b[^>]*>/gi) ?? []
+    const imgCount = imgTags.filter(hasResponsiveAttr).length
+    const sourceCount = sourceTags.filter(hasResponsiveAttr).length
+    const passed = imgCount + sourceCount > 0
+    if (!passed) {
+      return { passed: false, evidence: "No <img> or <picture><source> with srcset or sizes found" }
     }
+    const parts: string[] = []
+    if (imgCount > 0) parts.push(`${imgCount} <img> element(s) use srcset or sizes`)
+    if (sourceCount > 0) parts.push(`${sourceCount} <picture><source> with srcset or sizes`)
+    return { passed: true, evidence: parts.join("; ") }
   },
 }
 

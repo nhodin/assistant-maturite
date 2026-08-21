@@ -3,7 +3,8 @@
  *
  * GEO reuses controls from other topics rather than defining its own thresholds:
  *   geo.nojscontent(40)   ← js.nojsview
- *   geo.ttfbcache(30)     ← ttfb.ttfb800 AND ttfb.cdncache
+ *   geo.ttfb(15)          ← ttfb.ttfb800
+ *   geo.htmlcache(15)     ← ttfb.cdncache
  *   geo.compressioncdn(20) ← cdn.brotli AND cdn.region
  *   geo.weight1mb(10)     — GEO's own
  *
@@ -41,10 +42,11 @@ describe("geoTopic metadata", () => {
     expect(geoTopic.controls.reduce((s, c) => s + c.defaultPoints, 0)).toBe(100)
   })
 
-  it("exposes exactly the four regrouped criteria, in weight order", () => {
+  it("exposes exactly the five regrouped criteria, in weight order", () => {
     expect(geoTopic.controls.map((c) => [c.id, c.defaultPoints])).toEqual([
       ["geo.nojscontent", 40],
-      ["geo.ttfbcache", 30],
+      ["geo.ttfb", 15],
+      ["geo.htmlcache", 15],
       ["geo.compressioncdn", 20],
       ["geo.weight1mb", 10],
     ])
@@ -73,30 +75,36 @@ describe("geo.nojscontent — reuses js.nojsview", () => {
   })
 })
 
-describe("geo.ttfbcache — TTFB < 800ms AND CDN cache on HTML", () => {
+describe("geo.ttfb / geo.htmlcache — the two halves of the old 30-pt composite", () => {
   const fast = { perf: { ttfbMs: 200 } }
   const slow = { perf: { ttfbMs: 2000 } }
   const cached = { mainResponseHeaders: { "cf-cache-status": "HIT" } }
 
-  it("PASS — both halves validated", () => {
+  it("PASS — both halves validated, 15 + 15", () => {
     const e = makeEvidence({ ...fast, ...cached })
-    expect(ctrl("geo.ttfbcache").evaluate(e).passed).toBe(true)
+    expect(ctrl("geo.ttfb").evaluate(e).passed).toBe(true)
+    expect(ctrl("geo.htmlcache").evaluate(e).passed).toBe(true)
     // Both borrowed controls agree.
     expect(foreign(ttfbCacheTopic, "ttfb.ttfb800").evaluate(e).passed).toBe(true)
     expect(foreign(ttfbCacheTopic, "ttfb.cdncache").evaluate(e).passed).toBe(true)
   })
 
-  it("FAIL — fast but not cached at the edge", () => {
-    const v = ctrl("geo.ttfbcache").evaluate(makeEvidence(fast))
-    expect(v.passed).toBe(false)
-    // The evidence still names both halves, so the failing one is identifiable.
-    expect(v.evidence).toContain("TTFB")
-    expect(v.evidence).toContain("CDN cache")
+  it("fast but not cached — keeps the TTFB half, loses the cache half", () => {
+    const e = makeEvidence(fast)
+    expect(ctrl("geo.ttfb").evaluate(e).passed).toBe(true)
+    expect(ctrl("geo.htmlcache").evaluate(e).passed).toBe(false)
   })
 
-  it("FAIL — cached but slow", () => {
+  it("cached but slow — keeps the cache half, loses the TTFB half", () => {
     const e = makeEvidence({ ...slow, ...cached })
-    expect(ctrl("geo.ttfbcache").evaluate(e).passed).toBe(false)
+    expect(ctrl("geo.ttfb").evaluate(e).passed).toBe(false)
+    expect(ctrl("geo.htmlcache").evaluate(e).passed).toBe(true)
+  })
+
+  it("each evidence string names the borrowed criterion it stands for", () => {
+    const e = makeEvidence(fast)
+    expect(ctrl("geo.ttfb").evaluate(e).evidence).toContain("TTFB")
+    expect(ctrl("geo.htmlcache").evaluate(e).evidence).toContain("CDN cache")
   })
 })
 
@@ -160,5 +168,19 @@ describe("GEO scores from the reused criteria", () => {
       0,
     )
     expect(total).toBe(60)
+  })
+
+  it("a fast page with no HTML cache keeps half of the TTFB/cache weight", () => {
+    const e = makeEvidence({
+      rawHtml: LONG,
+      perf: { ttfbMs: 200, totalBytes: 500_000 },
+      mainResponseHeaders: { "content-encoding": "br", "cf-cache-status": "MISS" },
+    })
+    // 40 (no-JS) + 15 (TTFB) + 0 (no HTML cache) + 20 (brotli + CDN region) + 10 (weight)
+    const total = geoTopic.controls.reduce(
+      (s, c) => s + (c.evaluate(e).passed ? c.defaultPoints : 0),
+      0,
+    )
+    expect(total).toBe(85)
   })
 })

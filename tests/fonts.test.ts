@@ -81,6 +81,26 @@ describe("fonts.fontdisplay", () => {
     const e = makeEvidence({ fonts: [{ family: "A", fontDisplay: "optional" }] })
     expect(ctrl("fonts.fontdisplay").evaluate(e).passed).toBe(true)
   })
+  it("PASS — local()-only fallback without font-display is ignored", () => {
+    const e = makeEvidence({
+      fonts: [
+        { family: "A", fontDisplay: "swap", src: 'url("/a.woff2") format("woff2")' },
+        { family: "A Fallback", src: 'local("Arial")' },
+      ],
+    })
+    const res = ctrl("fonts.fontdisplay").evaluate(e)
+    expect(res.passed).toBe(true)
+    expect(res.evidence).toMatch(/1 local\(\)-only fallback/)
+  })
+  it("FAIL — downloaded @font-face without font-display, alongside a fallback", () => {
+    const e = makeEvidence({
+      fonts: [
+        { family: "A", src: 'url("/a.woff2") format("woff2")' },
+        { family: "A Fallback", src: 'local("Arial")' },
+      ],
+    })
+    expect(ctrl("fonts.fontdisplay").evaluate(e).passed).toBe(false)
+  })
 })
 
 describe("fonts.noiconfonts", () => {

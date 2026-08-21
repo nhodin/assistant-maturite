@@ -1,7 +1,7 @@
 /**
  * Topic 11 — Technical GEO
  * topicId: 11 | hasNA: false | standalone: true
- * Max points: 40+30+20+10 = 100
+ * Max points: 40+15+15+20+10 = 100
  *
  * GEO no longer defines performance thresholds of its own. What a generative
  * engine actually needs is a page it can fetch, read without executing JS, and
@@ -10,13 +10,16 @@
  * only regroups them under GEO's own weighting:
  *
  *   40 — Accès au contenu sans JS     ← js.nojsview           (topic 6)
- *   30 — TTFB & Cache HTML            ← ttfb.ttfb800 AND ttfb.cdncache (topic 5)
+ *   15 — TTFB                         ← ttfb.ttfb800                  (topic 5)
+ *   15 — Cache HTML                   ← ttfb.cdncache                 (topic 5)
  *   20 — Compression & CDN global     ← cdn.brotli   AND cdn.region    (topic 10)
  *   10 — Allègement du payload HTML   ← page weight < 1 MB (GEO's own, kept)
  *
- * A composite criterion is ALL-OR-NOTHING: both underlying controls must pass,
- * since a criterion is binary in this engine. The evidence string carries both
- * verdicts so the report still shows which half failed.
+ * A composite criterion (one that ANDs two borrowed controls) is ALL-OR-NOTHING:
+ * both must pass, since a criterion is binary in this engine. The evidence string
+ * carries both verdicts so the report still shows which half failed. TTFB and HTML
+ * cache used to be one such composite worth 30; they are now two independent
+ * criteria of 15, so a site that only answers fast still banks half the weight.
  *
  * Reusing the controls (rather than re-implementing the checks) means a fix to
  * the TTFB or Brotli detection lands in GEO at the same time, and a site can
@@ -63,15 +66,26 @@ const noJsContentControl: Control = {
   evaluate: (e) => delegate(noJsViewControl, e),
 }
 
-/** 30 pts — the document answers fast and is cached at the edge. */
-const ttfbCacheControl: Control = {
-  id: "geo.ttfbcache",
+/** 15 pts — the document answers fast. */
+const ttfbControl: Control = {
+  id: "geo.ttfb",
   topicId: 11,
-  label: "TTFB & Cache HTML",
+  label: "TTFB",
   description:
-    "Reprend « TTFB < 800ms » ET « CDN cache on HTML pages » (sujet 5 — TTFB/Cache). Les deux doivent être validés.",
-  defaultPoints: 30,
-  evaluate: (e) => both(ttfb800Control, cdnCacheControl, e),
+    "Reprend « TTFB < 800ms » (sujet 5 — TTFB/Cache). Moitié des 30 pts historiques « TTFB & Cache HTML ».",
+  defaultPoints: 15,
+  evaluate: (e) => delegate(ttfb800Control, e),
+}
+
+/** 15 pts — the document is cached at the edge. */
+const htmlCacheControl: Control = {
+  id: "geo.htmlcache",
+  topicId: 11,
+  label: "Cache HTML",
+  description:
+    "Reprend « CDN cache on HTML pages » (sujet 5 — TTFB/Cache). Moitié des 30 pts historiques « TTFB & Cache HTML ».",
+  defaultPoints: 15,
+  evaluate: (e) => delegate(cdnCacheControl, e),
 }
 
 /** 20 pts — the document is compressed and served from a distributed edge. */
@@ -118,7 +132,8 @@ export const geoTopic: TopicModule = {
   standalone: true,
   controls: [
     noJsContentControl,    // 40
-    ttfbCacheControl,      // 30
+    ttfbControl,           // 15
+    htmlCacheControl,      // 15
     compressionCdnControl, // 20
     weight1mbControl,      // 10
   ],

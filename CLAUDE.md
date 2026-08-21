@@ -51,14 +51,15 @@ data/WEBSITES.csv      # seed source (website;url_hp;url_plp;url_pdp)
   **1–10** (excluding fully-N/A); topics **11 (GEO)** and **12 (China)** are standalone.
 - **Topic 11 (GEO) reuses other topics' controls** (2026-08). GEO defines no thresholds
   of its own any more: `topics/geo.ts` imports the borrowed controls and delegates to
-  their `evaluate` — `geo.nojscontent` (40) ← `js.nojsview`, `geo.ttfbcache` (30) ←
-  `ttfb.ttfb800` AND `ttfb.cdncache`, `geo.compressioncdn` (20) ← `cdn.brotli` AND
+  their `evaluate` — `geo.nojscontent` (40) ← `js.nojsview`, `geo.ttfb` (15) ←
+  `ttfb.ttfb800`, `geo.htmlcache` (15) ← `ttfb.cdncache` (one composite of 30 split into
+  two independent halves, 2026-08), `geo.compressioncdn` (20) ← `cdn.brotli` AND
   `cdn.region`, plus its own `geo.weight1mb` (10). A composite is ALL-OR-NOTHING (a
   control is binary here) and its evidence string reports both halves, so the failing
   one is still nameable. Reusing the controls means a detection fix lands in GEO at the
   same time, and no site is judged differently on the same fact by two topics. The
   borrowed controls are `export`ed from `js.ts`/`ttfbcache.ts`/`cdn.ts` for this — those
-  modules must never import `geo.ts` back. The removed ids (`geo.ttfb200`, `geo.lcp25`,
+  modules must never import `geo.ts` back. The removed ids (`geo.ttfbcache`, `geo.ttfb200`, `geo.lcp25`,
   `geo.cls01`, `geo.ssrcontent`, `geo.ssrratio`, `geo.display2s`) may linger as orphan
   `ControlConfig` rows; `config-store` iterates `ALL_CONTROLS`, so they are ignored.
 - **Topic 12 is 50/30/20 and its 50-pt component is DERIVED** (2026-08). `china.basics`
