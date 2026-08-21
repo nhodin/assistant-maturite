@@ -34,6 +34,18 @@ const MOBILE_UA =
   "AppleWebKit/605.1.15 (KHTML, like Gecko) " +
   "Version/16.0 Mobile/15E148 Safari/604.1";
 
+// Fetch metadata headers that mark the request as a real top-level navigation.
+// Several CDNs only emit 103 Early Hints for document navigations (krug.com's
+// does): without these, the probes below silently see no 103 and css.preload /
+// cp.earlyhints / images.earlyhint all score a false negative.
+const NAVIGATION_HEADERS: Record<string, string> = {
+  "sec-fetch-dest": "document",
+  "sec-fetch-mode": "navigate",
+  "sec-fetch-site": "none",
+  "sec-fetch-user": "?1",
+  "upgrade-insecure-requests": "1",
+};
+
 const COOKIE_SELECTORS = [
   "#onetrust-accept-btn-handler",
   "button#didomi-notice-agree-button",
@@ -256,6 +268,7 @@ function fetchRawHtmlWithEarlyHints(
           "accept-encoding": rawFetchAcceptEncoding(),
           accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
           "accept-language": "fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7",
+          ...NAVIGATION_HEADERS,
         },
       });
 
@@ -370,6 +383,8 @@ function probeEarlyHintsHttp2(
         ":path": parsed.pathname + parsed.search,
         "user-agent": MOBILE_UA,
         accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "accept-language": "fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7",
+        ...NAVIGATION_HEADERS,
       });
       // 1xx interim (incl. 103) arrives as a 'headers' event; the final response
       // as 'response'. If we reach the final response without a 103, there is none.
