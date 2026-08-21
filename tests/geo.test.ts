@@ -130,16 +130,29 @@ describe("geo.compressioncdn — Brotli AND CDN by region", () => {
 })
 
 describe("geo.weight1mb", () => {
-  it("PASS — under 1 MB", () => {
-    const e = makeEvidence({ perf: { totalBytes: 500_000 } })
+  it("PASS — HTML document under 1 MB", () => {
+    const e = makeEvidence({ rawHtml: "x".repeat(500_000) })
     expect(ctrl("geo.weight1mb").evaluate(e).passed).toBe(true)
   })
-  it("FAIL — over 1 MB", () => {
-    const e = makeEvidence({ perf: { totalBytes: 2_000_000 } })
+  it("FAIL — HTML document over 1 MB", () => {
+    const e = makeEvidence({ rawHtml: "x".repeat(2_000_000) })
     expect(ctrl("geo.weight1mb").evaluate(e).passed).toBe(false)
   })
-  it("FAIL — page weight not measured", () => {
-    expect(ctrl("geo.weight1mb").evaluate(makeEvidence()).passed).toBe(false)
+  it("PASS — a heavy page with a light document: only the HTML counts", () => {
+    const e = makeEvidence({ rawHtml: LONG, perf: { totalBytes: 8_000_000 } })
+    expect(ctrl("geo.weight1mb").evaluate(e).passed).toBe(true)
+  })
+  it("counts UTF-8 bytes, not UTF-16 code units", () => {
+    // 600k 3-byte characters = 1.8 MB of UTF-8, but a string .length of 600k.
+    const e = makeEvidence({ rawHtml: "é".repeat(600_000) })
+    const r = ctrl("geo.weight1mb").evaluate(e)
+    expect(r.passed).toBe(false)
+    expect(r.evidence).toContain("1200000 bytes")
+  })
+  it("FAIL — HTML payload not measured (raw fetch returned nothing)", () => {
+    const r = ctrl("geo.weight1mb").evaluate(makeEvidence({ rawHtml: "" }))
+    expect(r.passed).toBe(false)
+    expect(r.evidence).toContain("unavailable")
   })
 })
 

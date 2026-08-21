@@ -99,26 +99,37 @@ const compressionCdnControl: Control = {
   evaluate: (e) => both(brotliControl, regionControl, e),
 }
 
-/** 10 pts — GEO's own criterion: a light page is a cheap page to ingest. */
+/**
+ * 10 pts — GEO's own criterion: a light HTML document is cheap to ingest.
+ *
+ * Measured on the HTML DOCUMENT alone, decompressed — not on the total weight of
+ * the page's requests. What a generative crawler pays for is parsing and
+ * tokenizing the markup it is served; images, fonts and JS it never executes are
+ * beside the point. `rawHtml` is the pre-JS document as fetched, and its UTF-8
+ * byte length is the honest figure (`.length` would count UTF-16 code units, and
+ * the document request's decodedBytes is really the compressed size — the
+ * collector fills both from content-length).
+ */
 const weight1mbControl: Control = {
   id: "geo.weight1mb",
   topicId: 11,
   label: "Allègement du payload HTML (< 1 MB)",
-  description: "Total transferred bytes across all requests below 1 MB (lab data).",
+  description:
+    "HTML document, decompressed, below 1 MB. Total page weight (images, JS, fonts) is out of scope.",
   defaultPoints: 10,
   evaluate(e) {
-    const bytes = e.perf.totalBytes
+    const bytes = Buffer.byteLength(e.rawHtml ?? "", "utf-8")
     if (bytes <= 0) {
       return {
         passed: false,
-        evidence: "Page weight unavailable (totalBytes = 0)",
+        evidence: "HTML payload unavailable (raw HTML fetch returned nothing)",
       }
     }
-    const mb = (bytes / 1_048_576).toFixed(2)
+    const kb = (bytes / 1024).toFixed(1)
     const passed = bytes < 1_048_576
     return {
       passed,
-      evidence: `Page weight ${mb} MB (${bytes} bytes) — threshold 1 MB`,
+      evidence: `HTML payload ${kb} KB decompressed (${bytes} bytes) — threshold 1 MB`,
     }
   },
 }
