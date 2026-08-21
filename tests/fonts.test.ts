@@ -106,14 +106,36 @@ describe("fonts.fontdisplay", () => {
       fonts: [
         { family: "Good Sans", fontDisplay: "swap", src: 'url("/good.woff2") format("woff2")' },
         { family: "LV Serif", src: 'url("/serif.woff2") format("woff2")' },
-        { family: '"LV Icons"', fontDisplay: "auto", src: 'url("/icons.woff2") format("woff2")' },
+        { family: '"LV Sans"', fontDisplay: "auto", src: 'url("/lvsans.woff2") format("woff2")' },
       ],
     })
     const res = ctrl("fonts.fontdisplay").evaluate(e)
     expect(res.passed).toBe(false)
     expect(res.evidence).toContain("LV Serif (font-display: absent)")
-    expect(res.evidence).toContain("LV Icons (font-display: auto)")
+    expect(res.evidence).toContain("LV Sans (font-display: auto)")
     expect(res.evidence).not.toContain("Good Sans")
+  })
+  it("PASS — an icon font without swap/optional is out of scope", () => {
+    // font-display: swap on an icon font would flash a fallback letter in place
+    // of the glyph — not the recommended value, so icon fonts are excluded here
+    // (they are penalized by fonts.noiconfonts instead).
+    const e = makeEvidence({
+      fonts: [
+        { family: "Good Sans", fontDisplay: "swap", src: 'url("/good.woff2") format("woff2")' },
+        { family: "FontAwesome", fontDisplay: "block", src: 'url("/fa.woff2") format("woff2")' },
+        { family: "Glyphs", src: 'url("/icomoon.woff2") format("woff2")' },
+      ],
+    })
+    const res = ctrl("fonts.fontdisplay").evaluate(e)
+    expect(res.passed).toBe(true)
+    expect(res.evidence).toMatch(/2 icon font @font-face ignored/)
+    expect(res.evidence).not.toContain("FontAwesome")
+  })
+  it("PASS — only icon fonts on the page → criterion not applicable", () => {
+    const e = makeEvidence({
+      fonts: [{ family: "FontAwesome", src: 'url("/fa.woff2") format("woff2")' }],
+    })
+    expect(ctrl("fonts.fontdisplay").evaluate(e).passed).toBe(true)
   })
 })
 

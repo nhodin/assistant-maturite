@@ -18,6 +18,14 @@ import { sameSite, requestsOfType } from "./util"
 const ICON_FONT_RE =
   /font\s*awesome|fontawesome|icomoon|glyphicon|material[\s-]?icons|materialicons|feather|ionicons/i
 
+/**
+ * True when a @font-face declares an icon font (family name or src file name
+ * matching a known icon-font signature).
+ */
+function isIconFont(f: { family?: string; src?: string }): boolean {
+  return ICON_FONT_RE.test(f.family ?? "") || ICON_FONT_RE.test(f.src ?? "")
+}
+
 /** Normalize a font-family value for distinct-family counting. */
 function normFamily(family: string): string {
   return family.replace(/['"]/g, "").trim().toLowerCase()
@@ -137,7 +145,7 @@ const fontDisplayControl: Control = {
   topicId: 9,
   label: "font-display swap/optional",
   description:
-    "All downloaded @font-face use font-display: swap or optional. @font-face rules whose src is local(...) only are adjusted system fallbacks — nothing is downloaded, so font-display does not apply and they are excluded.",
+    "All downloaded @font-face use font-display: swap or optional. @font-face rules whose src is local(...) only are adjusted system fallbacks — nothing is downloaded, so font-display does not apply and they are excluded. Icon fonts are excluded too: swap/optional would flash a fallback letter in place of the glyph, so it is not the recommended value for them (icon fonts are penalized by their own criterion).",
   defaultPoints: 10,
   evaluate(e: EvidenceBundle) {
     if (e.fonts.length === 0) {
@@ -146,9 +154,16 @@ const fontDisplayControl: Control = {
         evidence: "No @font-face rule captured (inline or external stylesheet)",
       }
     }
-    const downloaded = e.fonts.filter((f) => !isLocalOnlySrc(f.src))
-    const localOnly = e.fonts.length - downloaded.length
-    const skipped = localOnly > 0 ? ` (${localOnly} local()-only fallback @font-face ignored)` : ""
+    const realFonts = e.fonts.filter((f) => !isLocalOnlySrc(f.src))
+    const localOnly = e.fonts.length - realFonts.length
+    // Icon fonts are out of scope: swap/optional makes the browser paint a
+    // fallback *letter* where a glyph belongs, so it is not the recommended
+    // value for them. They are already penalized by fonts.noiconfonts.
+    const downloaded = realFonts.filter((f) => !isIconFont(f))
+    const iconCount = realFonts.length - downloaded.length
+    const skipped =
+      (localOnly > 0 ? ` (${localOnly} local()-only fallback @font-face ignored)` : "") +
+      (iconCount > 0 ? ` (${iconCount} icon font @font-face ignored)` : "")
     if (downloaded.length === 0) {
       return {
         passed: true,
