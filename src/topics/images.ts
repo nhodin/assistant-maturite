@@ -186,11 +186,15 @@ const lcpPreloadControl: Control = {
         evidence: `${imagePreloads.length} image preload link(s) present but none match the LCP image (${lcpSrc})`,
       }
     }
-    // LCP URL unknown — fall back to the weaker any-image-preload signal.
+    // LCP URL unknown: image preloads exist but nothing says they target the LCP.
+    // Not measurable → "à confirmer" (a failure until an operator arbitrates it),
+    // never a free pass on a weak match.
     return {
-      passed: true,
+      passed: false,
+      unknown: true,
       evidence:
-        "Found <link rel=preload as=image fetchpriority=high> in raw HTML — LCP URL unknown — weak match on any image preload",
+        `À confirmer : ${imagePreloads.length} <link rel=preload as=image fetchpriority=high> présent(s) ` +
+        "mais l'élément LCP n'a pas été identifié — impossible de vérifier qu'ils préchargent le LCP (not measurable)",
     }
   },
 }
@@ -234,7 +238,12 @@ const lcpNotLazyControl: Control = {
   evaluate(e) {
     const lcp = e.perf.lcpElement
     if (!lcp) {
-      return { passed: false, evidence: "LCP element not identified" }
+      // Nothing to judge: the capture did not identify an LCP element.
+      return {
+        passed: false,
+        unknown: true,
+        evidence: "À confirmer : élément LCP non identifié sur cette capture (not measurable)",
+      }
     }
     const isImage = lcp.tagName.toUpperCase() === "IMG" || Boolean(lcp.src)
     if (!isImage) {
@@ -294,9 +303,14 @@ const compressedControl: Control = {
     // transfer weight, so exclude them rather than silently pass on a 0 "size".
     const withBytes = imgs.filter((r) => r.encodedBytes > 0)
     if (withBytes.length === 0) {
+      // Every response was cached/unknown: no transfer weight was observed at all.
+      // Blind data earns no points — "à confirmer" instead of a low-confidence pass.
       return {
-        passed: true,
-        evidence: "no image transfer sizes observed (all cached/unknown) — low confidence",
+        passed: false,
+        unknown: true,
+        evidence:
+          `À confirmer : ${imgs.length} requête(s) image mais aucune taille de transfert observée ` +
+          "(toutes en cache/inconnues) — poids non mesurable (not measurable)",
       }
     }
     const heaviest = withBytes.reduce((max, r) => (r.encodedBytes > max.encodedBytes ? r : max), withBytes[0]!)

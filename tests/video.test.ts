@@ -104,9 +104,16 @@ describe("video.reservedspace", () => {
     const e = makeEvidence({ perf: { cls: 0.2 } })
     expect(ctrl("video.reservedspace").evaluate(e).passed).toBe(false)
   })
-  it("FAIL — CLS not measured", () => {
+  it("À CONFIRMER — CLS not measured → unknown, still not passed", () => {
     const e = makeEvidence({ perf: { cls: null } })
-    expect(ctrl("video.reservedspace").evaluate(e).passed).toBe(false)
+    const r = ctrl("video.reservedspace").evaluate(e)
+    expect(r.passed).toBe(false)
+    expect(r.unknown).toBe(true)
+    expect(r.evidence).toMatch(/À confirmer/i)
+  })
+  it("no unknown flag when CLS is measured", () => {
+    expect(ctrl("video.reservedspace").evaluate(makeEvidence({ perf: { cls: 0.2 } })).unknown)
+      .toBeUndefined()
   })
 })
 
@@ -175,9 +182,9 @@ describe("topic 3 applicability — the whole topic is N/A off the critical path
 })
 
 describe("video.preloadposter", () => {
-  it("PASS — preload as=image fetchpriority=high in head", () => {
+  it("PASS — preload as=image fetchpriority=high matching the <video poster>", () => {
     const e = makeEvidence({
-      rawHtml: `<head><link rel="preload" as="image" fetchpriority="high" href="p.jpg"></head>`,
+      rawHtml: `<head><link rel="preload" as="image" fetchpriority="high" href="p.jpg"></head><body><video poster="p.jpg"></video></body>`,
     })
     expect(ctrl("video.preloadposter").evaluate(e).passed).toBe(true)
   })
@@ -213,13 +220,16 @@ describe("video.preloadposter", () => {
     expect(result.evidence).toMatch(/overlay poster/i)
   })
 
-  it("PASS (weak) — image preload with no <video poster> to match", () => {
+  // video.posternojs (30 pts) fails when no poster is resolvable without JS; this
+  // 20-pt criterion presupposes it, so an unrelated image preload cannot rescue it.
+  it("FAIL — image preload in <head> but no poster resolvable without JS", () => {
     const e = makeEvidence({
       rawHtml: `<head><link rel="preload" as="image" fetchpriority="high" href="p.jpg"></head><body><video src="v.mp4"></video></body>`,
     })
     const result = ctrl("video.preloadposter").evaluate(e)
-    expect(result.passed).toBe(true)
-    expect(result.evidence).toMatch(/weak match/i)
+    expect(result.passed).toBe(false)
+    expect(result.evidence).toMatch(/no poster resolvable without JS/i)
+    expect(ctrl("video.posternojs").evaluate(e).passed).toBe(false)
   })
 })
 
@@ -230,6 +240,35 @@ describe("video.selfhosted", () => {
       rawHtml: `<video src="https://example.com/v.mp4"></video>`,
     })
     expect(ctrl("video.selfhosted").evaluate(e).passed).toBe(true)
+  })
+  it("PASS — root-relative <video src> with no media request captured", () => {
+    // preload="none": nothing is fetched during the capture, so the markup is the only
+    // evidence. A relative src resolves against the page origin → first-party.
+    const e = makeEvidence({
+      finalUrl: "https://example.com/fr/home",
+      rawHtml: `<video src="/videos/hero.mp4" preload="none"></video>`,
+      requests: [],
+    })
+    const result = ctrl("video.selfhosted").evaluate(e)
+    expect(result.passed).toBe(true)
+    expect(result.evidence).toMatch(/first-party/i)
+    expect(result.evidence).toContain("/videos/hero.mp4")
+  })
+  it("FAIL — data: URI src is not evidence of self-hosting", () => {
+    const e = makeEvidence({
+      finalUrl: "https://example.com/",
+      rawHtml: `<video src="data:video/mp4;base64,AAAA"></video>`,
+      requests: [],
+    })
+    expect(ctrl("video.selfhosted").evaluate(e).passed).toBe(false)
+  })
+  it("FAIL — empty src attributes are ignored", () => {
+    const e = makeEvidence({
+      finalUrl: "https://example.com/",
+      rawHtml: `<video src=""><source src=""></video>`,
+      requests: [],
+    })
+    expect(ctrl("video.selfhosted").evaluate(e).passed).toBe(false)
   })
   it("FAIL — only third-party YouTube iframe", () => {
     const e = makeEvidence({
@@ -278,26 +317,56 @@ describe("video.playerjs", () => {
     expect(ctrl("video.playerjs").evaluate(e).passed).toBe(false)
   })
 
-  it("FAIL — no video player request after interaction", () => {
+  // The ideal case: nothing third-party to fine-tune. Failing it would penalise the
+  // best possible behaviour (same rule as tp.deferasync with no third-party script).
+  it("PASS — self-hosted video, no player request, no player iframe/script", () => {
     const e = makeEvidence({
       finalUrl: "https://example.com/",
+      rawHtml: `<html><body><video src="/videos/hero.mp4" poster="/p.jpg"></video><script src="/app.js"></script></body></html>`,
       requests: [mkReq("https://example.com/app.js", "script", "interaction")],
     })
+    const result = ctrl("video.playerjs").evaluate(e)
+    expect(result.passed).toBe(true)
+    expect(result.evidence).toMatch(/no third-party video player/i)
+  })
+
+  it("FAIL — youtube.com request during the load phase", () => {
+    const e = makeEvidence({
+      finalUrl: "https://example.com/",
+      requests: [mkReq("https://www.youtube.com/iframe_api", "script", "load")],
+    })
     expect(ctrl("video.playerjs").evaluate(e).passed).toBe(false)
+  })
+
+  it("PASS — player request only in the interaction phase", () => {
+    const e = makeEvidence({
+      finalUrl: "https://example.com/",
+      requests: [mkReq("https://player.vimeo.com/video/123", "document", "interaction")],
+    })
+    expect(ctrl("video.playerjs").evaluate(e).passed).toBe(true)
   })
 })
 
 describe("video.preconnect", () => {
-  it("PASS — preconnect to a video domain", () => {
+  it("PASS — no third-party player at all, nothing to preconnect", () => {
     const e = makeEvidence({
-      rawHtml: `<head><link rel="preconnect" href="https://www.youtube.com"></head>`,
+      finalUrl: "https://example.com/",
+      rawHtml: `<html><head></head><body><video src="/v.mp4"></video></body></html>`,
     })
-    expect(ctrl("video.preconnect").evaluate(e).passed).toBe(true)
+    const result = ctrl("video.preconnect").evaluate(e)
+    expect(result.passed).toBe(true)
+    expect(result.evidence).toMatch(/nothing to preconnect/i)
   })
-  it("FAIL — preconnect to a non-video domain only", () => {
+  it("FAIL — youtube iframe present but no preconnect", () => {
     const e = makeEvidence({
-      rawHtml: `<head><link rel="preconnect" href="https://fonts.example.net"></head>`,
+      rawHtml: `<html><head><link rel="preconnect" href="https://fonts.example.net"></head><body><iframe src="https://www.youtube.com/embed/abc"></iframe></body></html>`,
     })
     expect(ctrl("video.preconnect").evaluate(e).passed).toBe(false)
+  })
+  it("PASS — youtube iframe + preconnect to the video domain", () => {
+    const e = makeEvidence({
+      rawHtml: `<html><head><link rel="preconnect" href="https://www.youtube.com"></head><body><iframe src="https://www.youtube.com/embed/abc"></iframe></body></html>`,
+    })
+    expect(ctrl("video.preconnect").evaluate(e).passed).toBe(true)
   })
 })

@@ -10,7 +10,7 @@
 import type { EvidenceBundle } from "../core"
 import type { Control, TopicModule } from "../core"
 import type { ParsedTag } from "./util"
-import { parseTags, headSlice, sameSite, requestsOfType, host } from "./util"
+import { parseTags, headSlice, isFirstParty, requestsOfType, host } from "./util"
 
 /**
  * The topic gate. A video only deserves to be graded when it is on the critical path:
@@ -258,7 +258,11 @@ const reservedSpace: Control = {
   evaluate(e) {
     const cls = e.perf.cls
     if (cls === null) {
-      return { passed: false, evidence: "CLS not measured" }
+      return {
+        passed: false,
+        unknown: true,
+        evidence: "À confirmer : CLS non mesuré sur cette capture (CLS not measured)",
+      }
     }
     const passed = cls < 0.05
     return {
@@ -275,7 +279,7 @@ const preloadPoster: Control = {
   topicId: 3,
   label: "Poster image preloaded with fetchpriority=high",
   description:
-    'A <link rel="preload" as="image" fetchpriority="high"> in <head> preloads the poster (href loosely matched against the poster URLs resolvable without JS).',
+    'A <link rel="preload" as="image" fetchpriority="high"> in <head> preloads the poster (href loosely matched against the poster URLs resolvable without JS). Without a poster resolvable without JS there is nothing to preload — the criterion fails.',
   defaultPoints: 20,
   appliesTo: videoGate,
   evaluate(e) {
@@ -294,30 +298,33 @@ const preloadPoster: Control = {
           'No <link rel="preload" as="image" fetchpriority="high"> found in <head>',
       }
     }
-    // Poster URLs the parser resolves on its own — <video poster>, or the overlay
-    // <picture>/<img> pattern (same resolution as video.posternojs, so a site whose
-    // poster is an overlay is matched here too instead of falling to the weak signal).
+    // Poster URLs the parser resolves on its own — <video poster>, the overlay
+    // <picture>/<img> pattern, or a <noscript> fallback (same resolution as
+    // video.posternojs, so both controls judge the same poster).
     const poster = resolvePosterEvidence(e.rawHtml)
-    if (poster) {
-      const match = imagePreloads.find((link) =>
-        poster.urls.some((p) => looseUrlMatch(link.attrs["href"] ?? "", p)),
-      )
-      if (match) {
-        return {
-          passed: true,
-          evidence: `<link rel=preload as=image fetchpriority=high> preloads the ${poster.kind === "attribute" ? "<video poster>" : `${poster.kind} poster`} (href="${match.attrs["href"] ?? ""}")`,
-        }
-      }
+    if (!poster) {
+      // No poster the parser can resolve → video.posternojs (30 pts) fails too, and
+      // this 20-pt criterion presupposes it. Since the resolver covers the attribute,
+      // overlay and <noscript> forms, "no poster resolvable" means "no poster without
+      // JS" — not "the tool could not find it" — so crediting any image preload here
+      // would reward a preload that has nothing to do with a poster.
       return {
         passed: false,
-        evidence: `image preload present in <head> but none of its href(s) match a poster URL (${poster.kind})`,
+        evidence: `${imagePreloads.length} image preload(s) present in <head> but no poster resolvable without JS to match — a poster preload cannot be credited without a poster`,
       }
     }
-    // No poster to match against — keep the weaker any-image-preload signal.
+    const match = imagePreloads.find((link) =>
+      poster.urls.some((p) => looseUrlMatch(link.attrs["href"] ?? "", p)),
+    )
+    if (match) {
+      return {
+        passed: true,
+        evidence: `<link rel=preload as=image fetchpriority=high> preloads the ${poster.kind === "attribute" ? "<video poster>" : `${poster.kind} poster`} (href="${match.attrs["href"] ?? ""}")`,
+      }
+    }
     return {
-      passed: true,
-      evidence:
-        '<link rel="preload" as="image" fetchpriority="high"> found in <head> — no poster resolvable without JS to match — weak match on any image preload',
+      passed: false,
+      evidence: `image preload present in <head> but none of its href(s) match a poster URL (${poster.kind})`,
     }
   },
 }
@@ -327,30 +334,40 @@ const selfHosted: Control = {
   topicId: 3,
   label: "Self-hosting video",
   description:
-    "A <video>/<source> src is same-site, OR a first-party media network request is present.",
+    "A <video>/<source> src is first-party, OR a first-party media network request is present.",
   defaultPoints: 10,
   appliesTo: videoGate,
   evaluate(e) {
-    // Check <video src="..."> and <source src="..."> in raw HTML
+    // Check <video src="..."> and <source src="..."> in raw HTML.
+    // A relative src ("/videos/hero.mp4") has no host of its own — it resolves against
+    // the page origin and is first-party by construction — hence isFirstParty, not
+    // sameSite (which needs a host on both sides). This matters for a <video
+    // preload="none"> that is never fetched during the capture: there is no media
+    // request to fall back on, only the markup.
     const videoTags = parseTags(e.rawHtml, "video")
     const sourceTags = parseTags(e.rawHtml, "source")
     const allSrcs = [
       ...videoTags.map((v) => v.attrs["src"] ?? ""),
       ...sourceTags.map((s) => s.attrs["src"] ?? ""),
-    ].filter((src) => src.length > 0)
+    ]
+      .map((src) => src.trim())
+      // data:/blob: URIs reach no host, so isFirstParty would read them as first-party.
+      // They are not evidence of a self-hosted video file (a blob: is typically fed by
+      // MSE from wherever the player wants), so they are out of scope here.
+      .filter((src) => src.length > 0 && !/^(data|blob|about):/i.test(src))
 
     for (const src of allSrcs) {
-      if (sameSite(src, e.finalUrl)) {
+      if (isFirstParty(src, e.finalUrl)) {
         return {
           passed: true,
-          evidence: `<video>/<source> src is same-site: ${src.substring(0, 80)}`,
+          evidence: `<video>/<source> src is first-party: ${src.substring(0, 80)}`,
         }
       }
     }
 
     // Check first-party media requests
     const mediaRequests = requestsOfType(e.requests, "media")
-    const firstPartyMedia = mediaRequests.filter((r) => sameSite(r.url, e.finalUrl))
+    const firstPartyMedia = mediaRequests.filter((r) => isFirstParty(r.url, e.finalUrl))
     if (firstPartyMedia.length > 0) {
       return {
         passed: true,
@@ -374,7 +391,7 @@ const selfHosted: Control = {
     return {
       passed: false,
       evidence:
-        "No same-site <video>/<source> src or first-party media requests found",
+        "No first-party <video>/<source> src or first-party media requests found",
     }
   },
 }
@@ -388,15 +405,41 @@ function isVideoPlayerHost(url: string): boolean {
   return VIDEO_HOST_HINTS.some((d) => h === d || h.endsWith("." + d))
 }
 
+/**
+ * True when the page uses a third-party video player AT ALL — a request to a known
+ * player/embed host (any phase), a third-party video <iframe src>, or a player
+ * <script src> in the server HTML.
+ *
+ * Shared by video.playerjs and video.preconnect: both criteria describe how to tame a
+ * third-party player, so a page with none of them (native, self-hosted playback) is the
+ * ideal case and must pass, not fail — same reasoning as tp.deferasync with no
+ * third-party script.
+ */
+function usesThirdPartyPlayer(e: EvidenceBundle): boolean {
+  if (e.requests.some((req) => isVideoPlayerHost(req.url))) return true
+  const iframeSrc = parseTags(e.rawHtml, "iframe").map((t) => t.attrs["src"] ?? "")
+  if (iframeSrc.some((src) => THIRD_PARTY_VIDEO_DOMAINS.some((d) => src.includes(d))))
+    return true
+  const scriptSrc = parseTags(e.rawHtml, "script").map((t) => t.attrs["src"] ?? "")
+  return scriptSrc.some((src) => VIDEO_PLAYER_DOMAINS.some((d) => src.includes(d)))
+}
+
 const playerJs: Control = {
   id: "video.playerjs",
   topicId: 3,
   label: "Fine-tune video player JS loading",
   description:
-    "Video player scripts/iframes load ONLY after a synthetic user/browser interaction (phase=interaction) — facade/deferred pattern — instead of eagerly during initial load.",
+    "Either the page uses no third-party video player at all (native/self-hosted playback — nothing to fine-tune), or its player scripts/iframes load ONLY after a synthetic user/browser interaction (phase=interaction) — facade/deferred pattern — instead of eagerly during initial load.",
   defaultPoints: 10,
   appliesTo: videoGate,
   evaluate(e) {
+    if (!usesThirdPartyPlayer(e)) {
+      return {
+        passed: true,
+        evidence:
+          "no third-party video player used at all (native/self-hosted playback) — nothing to fine-tune, criterion satisfied",
+      }
+    }
     // Video-player hosts already fetched eagerly during the quiet initial load.
     const loadedEarly = new Set<string>()
     for (const req of e.requests) {
@@ -428,10 +471,17 @@ const preconnect: Control = {
   topicId: 3,
   label: "preconnect to video player domains",
   description:
-    "A <link rel=\"preconnect\"> or <link rel=\"dns-prefetch\"> to a known video domain exists in <head>.",
+    "Either the page uses no third-party video player domain (nothing to preconnect), or a <link rel=\"preconnect\"> / <link rel=\"dns-prefetch\"> to a known video domain exists in <head>.",
   defaultPoints: 5,
   appliesTo: videoGate,
   evaluate(e) {
+    if (!usesThirdPartyPlayer(e)) {
+      return {
+        passed: true,
+        evidence:
+          "no third-party video player domain used — nothing to preconnect, criterion satisfied",
+      }
+    }
     const head = headSlice(e.rawHtml)
     const links = parseTags(head, "link")
     const match = links.find((link) => {

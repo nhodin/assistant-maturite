@@ -41,11 +41,41 @@ describe("china.nogfwcritical", () => {
     const e = makeEvidence({ rawHtml: `<head><script src="/app.js"></script></head>` })
     expect(ctrl("china.nogfwcritical").evaluate(e).passed).toBe(true)
   })
-  it("FAIL — GTM script in head", () => {
+  it("FAIL — synchronous GTM script in head (render-blocking)", () => {
     const e = makeEvidence({
       rawHtml: `<head><script src="https://www.googletagmanager.com/gtm.js"></script></head>`,
     })
-    expect(ctrl("china.nogfwcritical").evaluate(e).passed).toBe(false)
+    const r = ctrl("china.nogfwcritical").evaluate(e)
+    expect(r.passed).toBe(false)
+    expect(r.evidence).toContain("www.googletagmanager.com")
+  })
+  it("PASS — async GTM script in head (not render-blocking) but mentioned in evidence", () => {
+    const e = makeEvidence({
+      rawHtml: `<head><script async src="https://www.googletagmanager.com/gtm.js"></script></head>`,
+    })
+    const r = ctrl("china.nogfwcritical").evaluate(e)
+    expect(r.passed).toBe(true)
+    expect(r.evidence).toContain("non-blocking")
+    expect(r.evidence).toContain("www.googletagmanager.com")
+  })
+  it("PASS — defer / type=module GFW scripts in head", () => {
+    const deferred = makeEvidence({
+      rawHtml: `<head><script defer src="https://www.google-analytics.com/analytics.js"></script></head>`,
+    })
+    expect(ctrl("china.nogfwcritical").evaluate(deferred).passed).toBe(true)
+    const mod = makeEvidence({
+      rawHtml: `<head><script type="module" src="https://www.googletagmanager.com/gtm.js"></script></head>`,
+    })
+    expect(ctrl("china.nogfwcritical").evaluate(mod).passed).toBe(true)
+  })
+  it("FAIL — a sync GFW script still fails even alongside an async one", () => {
+    const e = makeEvidence({
+      rawHtml: `<head><script async src="https://www.googletagmanager.com/gtm.js"></script><script src="https://ajax.googleapis.com/lib.js"></script></head>`,
+    })
+    const r = ctrl("china.nogfwcritical").evaluate(e)
+    expect(r.passed).toBe(false)
+    expect(r.evidence).toContain("ajax.googleapis.com")
+    expect(r.evidence).toContain("non-blocking")
   })
   it("FAIL — @import of fonts.googleapis.com in inline <style>", () => {
     const e = makeEvidence({

@@ -67,7 +67,9 @@
           <% TCOLS.forEach(function(c){ var v=tScore(s.topicsJson, c.id); %>
             <td><span class="score sm <%= scoreClass(v) %>"><%= fmtScore(v) %></span></td>
           <% }) %>
-          <td><span class="score <%= scoreClass(s.overall) %>"><%= fmtScore(s.overall) %></span></td>
+          <%# A score with unmeasured criteria is provisional: they count as failures for now. %>
+          <% var sPending = (typeof pendingBySite !== 'undefined' && pendingBySite) ? (pendingBySite[s.siteId] || 0) : 0; %>
+          <td><span class="score <%= scoreClass(s.overall) %>"><%= fmtScore(s.overall) %></span><% if (sPending) { %><span class="provisional-mark" title="Score provisoire — <%= sPending %> critère(s) à confirmer">?</span><% } %></td>
           <td><span class="score <%= scoreClass(s.geo) %>"><%= fmtScore(s.geo) %></span></td>
           <td><span class="score <%= scoreClass(s.china) %>"><%= fmtScore(s.china) %></span></td>
           <td><span class="score sm <%= scoreClass(s.chinaOverall) %>"><%= fmtScore(s.chinaOverall) %></span></td>

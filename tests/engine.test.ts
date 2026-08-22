@@ -8,6 +8,8 @@ import type { TopicModule, Control } from "../src/core/types";
 import type { EvidenceBundle } from "../src/core/schema";
 import {
   defaultConfig,
+  countPendingConfirmations,
+  scorePage,
   scoreSite,
   scoreSiteFromPages,
   renderCsv,
@@ -725,3 +727,86 @@ describe("derived control: topic 12's sitespeed-basics component", () => {
   });
 });
 
+
+/* ══════════════════════════════════════════════════════════════════════════ */
+
+describe("« à confirmer » (unknown) criteria", () => {
+  /** A control that cannot measure: unknown + passed:false, per the contract. */
+  const unmeasurable = (id: string, topicId: number, points: number): Control => ({
+    id,
+    topicId,
+    label: id,
+    description: id,
+    defaultPoints: points,
+    evaluate: () => ({ passed: false, unknown: true, evidence: "À confirmer : not measurable" }),
+  });
+
+  const topicU: TopicModule = {
+    id: 1,
+    name: "Images",
+    hasNA: false,
+    standalone: false,
+    controls: [
+      makeControl("tu.c1", 1, 30, alwaysPass),
+      unmeasurable("tu.c2", 1, 20),
+      // N/A on this page: applicable=false, so it never counts as pending.
+      { ...unmeasurable("tu.c3", 1, 10), appliesTo: () => false },
+    ],
+  };
+
+  it("propagates unknown into the page result without changing the points", () => {
+    const cfg = defaultConfig([topicU]);
+    const page = scorePage(makeEvidence(), [topicU], cfg);
+    const controls = page.topics[0]!.controls;
+    const c2 = controls.find((c) => c.controlId === "tu.c2")!;
+    expect(c2.unknown).toBe(true);
+    expect(c2.passed).toBe(false);
+    expect(c2.pointsAwarded).toBe(0);
+    // A measured criterion carries no flag at all (back-compat: absent = false).
+    expect(controls.find((c) => c.controlId === "tu.c1")!.unknown).toBeUndefined();
+    expect(page.topics[0]!.score).toBe(30);
+  });
+
+  it("countPendingConfirmations counts applicable, unarbitrated criteria only", () => {
+    const cfg = defaultConfig([topicU]);
+    const page = scorePage(makeEvidence(), [topicU], cfg);
+    expect(countPendingConfirmations(page.topics)).toBe(1); // tu.c3 is N/A
+
+    // A manual arbitration takes it out of the queue, unknown flag or not.
+    const arbitrated = page.topics.map((t) => ({
+      ...t,
+      controls: t.controls.map((c) =>
+        c.controlId === "tu.c2" ? { ...c, manual: true } : c,
+      ),
+    }));
+    expect(countPendingConfirmations(arbitrated)).toBe(0);
+  });
+
+  it("counts 0 on a stored result predating the field, and on empty input", () => {
+    const cfg = defaultConfig([topic1]);
+    expect(countPendingConfirmations(scorePage(makeEvidence(), [topic1], cfg).topics)).toBe(0);
+    expect(countPendingConfirmations(null)).toBe(0);
+    expect(countPendingConfirmations([])).toBe(0);
+  });
+
+  it("surfaces at site level while a page is still unarbitrated", () => {
+    const cfg = defaultConfig([topicU]);
+    const site = scoreSite("site", [makeEvidence()], [topicU], cfg);
+    const c2 = site.topics[0]!.controls.find((c) => c.controlId === "tu.c2")!;
+    expect(c2.unknown).toBe(true);
+    expect(countPendingConfirmations(site.topics)).toBe(1);
+
+    // …and disappears once every page's verdict has been decided by hand.
+    const pages = scoreSite("site", [makeEvidence()], [topicU], cfg).pages.map((p) => ({
+      ...p,
+      topics: p.topics.map((t) => ({
+        ...t,
+        controls: t.controls.map((c) =>
+          c.controlId === "tu.c2" ? { ...c, manual: true, passed: true } : c,
+        ),
+      })),
+    }));
+    const rebuilt = scoreSiteFromPages("site", pages, [topicU], cfg);
+    expect(countPendingConfirmations(rebuilt.topics)).toBe(0);
+  });
+});

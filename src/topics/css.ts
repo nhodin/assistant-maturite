@@ -194,7 +194,9 @@ const unusedControl: Control = {
     if (pct === null) {
       return {
         passed: false,
-        evidence: "Unused CSS not measured (CSS coverage tracking unavailable for this capture)",
+        unknown: true,
+        evidence:
+          "À confirmer : CSS inutilisé non mesuré (couverture CSS indisponible sur cette capture) — not measurable",
       }
     }
     const passed = pct < 30

@@ -189,14 +189,35 @@ describe("images.lcppreload", () => {
     expect(result.evidence).toMatch(/none match/i)
   })
 
-  it("weak-matches any image preload when LCP src is unknown", () => {
+  it("is « à confirmer » (unknown, not passed) when preloads exist but the LCP src is unknown", () => {
     const e = makeEvidence({
       rawHtml: '<html><head><link rel="preload" as="image" href="hero.jpg" fetchpriority="high"></head></html>',
       perf: { lcpElement: { tagName: "IMG" } }, // no src
     })
     const result = ctrl("images.lcppreload").evaluate(e)
+    expect(result.passed).toBe(false)
+    expect(result.unknown).toBe(true)
+    expect(result.evidence).toMatch(/À confirmer/i)
+  })
+
+  it("does NOT flag unknown when the LCP is known (measurable case)", () => {
+    const e = makeEvidence({
+      rawHtml: '<html><head><link rel="preload" as="image" href="hero.jpg" fetchpriority="high"></head></html>',
+      perf: { lcpElement: { tagName: "IMG", src: "hero.jpg" } },
+    })
+    const result = ctrl("images.lcppreload").evaluate(e)
     expect(result.passed).toBe(true)
-    expect(result.evidence).toMatch(/LCP URL unknown — weak match/i)
+    expect(result.unknown).toBeUndefined()
+  })
+
+  it("stays a plain failure (no unknown) when there is no image preload at all", () => {
+    const e = makeEvidence({
+      rawHtml: "<html><head></head><body></body></html>",
+      perf: { lcpElement: { tagName: "IMG" } }, // no src either
+    })
+    const result = ctrl("images.lcppreload").evaluate(e)
+    expect(result.passed).toBe(false)
+    expect(result.unknown).toBeUndefined()
   })
 })
 
@@ -326,11 +347,19 @@ describe("images.lcpnotlazy", () => {
     expect(result.evidence).toContain("lazy")
   })
 
-  it("fails when no LCP element identified", () => {
+  it("is « à confirmer » (unknown) when no LCP element is identified", () => {
     const e = makeEvidence({ perf: { lcpElement: null } })
     const result = ctrl("images.lcpnotlazy").evaluate(e)
     expect(result.passed).toBe(false)
-    expect(result.evidence).toContain("not identified")
+    expect(result.unknown).toBe(true)
+    expect(result.evidence).toMatch(/À confirmer/i)
+  })
+
+  it("does NOT flag unknown when the LCP is identified (measurable case)", () => {
+    const e = makeEvidence({
+      perf: { lcpElement: { tagName: "IMG", src: "hero.jpg", loadingAttr: "lazy" } },
+    })
+    expect(ctrl("images.lcpnotlazy").evaluate(e).unknown).toBeUndefined()
   })
 })
 
@@ -416,7 +445,7 @@ describe("images.compressed", () => {
     expect(result.evidence).toMatch(/no image/i)
   })
 
-  it("passes with low confidence when all image responses are cached (0 bytes)", () => {
+  it("is « à confirmer » (unknown) when all image responses are cached (0 bytes)", () => {
     const e = makeEvidence({
       requests: [
         { url: "a.webp", resourceType: "image", status: 200, fromCache: true, encodedBytes: 0, decodedBytes: 80000, requestHeaders: {}, responseHeaders: {}, mimeType: "image/webp" },
@@ -424,8 +453,18 @@ describe("images.compressed", () => {
       ],
     })
     const result = ctrl("images.compressed").evaluate(e)
-    expect(result.passed).toBe(true)
-    expect(result.evidence).toMatch(/low confidence/i)
+    expect(result.passed).toBe(false)
+    expect(result.unknown).toBe(true)
+    expect(result.evidence).toMatch(/À confirmer/i)
+  })
+
+  it("does NOT flag unknown when at least one transfer size is observed", () => {
+    const e = makeEvidence({
+      requests: [
+        { url: "a.webp", resourceType: "image", status: 200, fromCache: false, encodedBytes: 50000, decodedBytes: 80000, requestHeaders: {}, responseHeaders: {}, mimeType: "image/webp" },
+      ],
+    })
+    expect(ctrl("images.compressed").evaluate(e).unknown).toBeUndefined()
   })
 
   it("ignores cached 0-byte images and still fails on a heavy transferred image", () => {

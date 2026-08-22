@@ -20,6 +20,7 @@ import { makeEvidence } from "../src/core/fixture";
 import type { Control, PageResult, TopicModule } from "../src/core/types";
 import type { EvidenceBundle } from "../src/core/schema";
 import {
+  countPendingConfirmations,
   defaultConfig,
   scorePage,
   scoreSiteFromPages,
@@ -208,5 +209,139 @@ describe("rescorePageFromVerdicts", () => {
     const after = scoreSiteFromPages("Example", [fixed, other], topics, cfg);
     // t1.c2 now passes on 1 page of 2 → proportional average: round(25 × 1/2).
     expect(after.topics.find((t) => t.topicId === 1)!.score).toBe(43);
+  });
+});
+
+/* ── « à confirmer » (unknown) criteria ───────────────────────────────────── */
+
+/**
+ * Same topics, but t1.c2 is a control that CANNOT measure on this bundle: it
+ * returns `unknown` with `passed:false`, so it costs its points until an
+ * operator arbitrates it.
+ */
+const unknownTopics: TopicModule[] = [
+  {
+    id: 1,
+    name: "Images",
+    hasNA: false,
+    standalone: false,
+    controls: [
+      makeControl("t1.c1", 1, 30, () => true),
+      {
+        ...makeControl("t1.c2", 1, 25, () => false),
+        evaluate: () => ({
+          passed: false,
+          unknown: true,
+          evidence: "À confirmer : not measurable",
+        }),
+      },
+    ],
+  },
+];
+const unknownCfg = defaultConfig(unknownTopics);
+
+/**
+ * The mutation the correction route performs on the stored result, before
+ * handing it to `rescorePageFromVerdicts`. Mirrors
+ * `POST /runs/:id/pages/:runPageId/criteria/:controlId`.
+ */
+function applyRouteVerdict(
+  page: PageResult,
+  controlId: string,
+  verdict: "pass" | "fail" | "na" | "auto",
+): PageResult {
+  const copy = structuredClone(page);
+  const c = controlOf(copy, controlId);
+  if (verdict === "auto") {
+    if (!c.auto) throw new Error("nothing to restore");
+    c.applicable = c.auto.applicable;
+    c.passed = c.auto.passed;
+    c.evidence = c.auto.evidence;
+    if (c.auto.unknown === true) c.unknown = true;
+    else delete c.unknown;
+    delete c.manual;
+    delete c.auto;
+  } else {
+    c.auto ??= {
+      applicable: c.applicable,
+      passed: c.passed,
+      evidence: c.evidence,
+      ...(c.unknown === true ? { unknown: true } : {}),
+    };
+    c.applicable = verdict !== "na";
+    c.passed = verdict === "pass";
+    c.manual = true;
+    c.evidence = "Corrigé manuellement";
+  }
+  return copy;
+}
+
+/** Criteria still waiting for a human verdict on this page. */
+const pending = (page: PageResult) => countPendingConfirmations(page.topics);
+
+describe("manual arbitration of an « à confirmer » criterion", () => {
+  it("scores it as a failure and queues it for confirmation", () => {
+    const measured = scorePage(bundle, unknownTopics, unknownCfg);
+    const c2 = controlOf(measured, "t1.c2");
+    expect(c2.unknown).toBe(true);
+    expect(c2.passed).toBe(false);
+    expect(c2.pointsAwarded).toBe(0);
+    expect(topicOf(measured, 1).score).toBe(30);
+    expect(pending(measured)).toBe(1);
+  });
+
+  it("a manual verdict wins and takes it out of the queue", () => {
+    const measured = scorePage(bundle, unknownTopics, unknownCfg);
+    const fixed = rescorePageFromVerdicts(
+      applyRouteVerdict(measured, "t1.c2", "pass"),
+      unknownTopics,
+      unknownCfg,
+    );
+    const c2 = controlOf(fixed, "t1.c2");
+    expect(c2.passed).toBe(true);
+    expect(c2.pointsAwarded).toBe(25);
+    expect(c2.manual).toBe(true);
+    // The flag stays on the record (it says HOW the engine had judged it), but
+    // an arbitrated criterion is no longer pending.
+    expect(c2.unknown).toBe(true);
+    expect(pending(fixed)).toBe(0);
+    expect(topicOf(fixed, 1).score).toBe(55);
+  });
+
+  it("« ↺ mesuré » puts it back to « à confirmer »", () => {
+    const measured = scorePage(bundle, unknownTopics, unknownCfg);
+    const fixed = rescorePageFromVerdicts(
+      applyRouteVerdict(measured, "t1.c2", "pass"),
+      unknownTopics,
+      unknownCfg,
+    );
+    const restored = rescorePageFromVerdicts(
+      applyRouteVerdict(fixed, "t1.c2", "auto"),
+      unknownTopics,
+      unknownCfg,
+    );
+    const c2 = controlOf(restored, "t1.c2");
+    expect(c2.manual).toBeUndefined();
+    expect(c2.unknown).toBe(true);
+    expect(c2.passed).toBe(false);
+    expect(pending(restored)).toBe(1);
+    expect(topicOf(restored, 1).score).toBe(30);
+  });
+
+  it("propagates to the site aggregate, which is provisional too", () => {
+    const measured = scorePage(bundle, unknownTopics, unknownCfg);
+    const site = scoreSiteFromPages("Example", [measured], unknownTopics, unknownCfg);
+    expect(countPendingConfirmations(site.topics)).toBe(1);
+
+    const fixed = rescorePageFromVerdicts(
+      applyRouteVerdict(measured, "t1.c2", "fail"),
+      unknownTopics,
+      unknownCfg,
+    );
+    const after = scoreSiteFromPages("Example", [fixed], unknownTopics, unknownCfg);
+    // Same score as before (it was already counted as a failure) but no longer
+    // provisional: a human decided it.
+    expect(after.topics.find((t) => t.topicId === 1)!.score).toBe(30);
+    expect(countPendingConfirmations(after.topics)).toBe(0);
   });
 });

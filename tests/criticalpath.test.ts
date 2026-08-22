@@ -76,42 +76,119 @@ describe("cp.headorder", () => {
 })
 
 describe("cp.limitresources", () => {
-  it("PASS — under 600 KB", () => {
+  const html = (head: string) => `<!doctype html><html><head>${head}</head><body></body></html>`
+
+  it("FAIL — one sync script matched to a 400 KB request", () => {
     const e = makeEvidence({
-      requests: [req({ resourceType: "script", encodedBytes: 100_000 })],
-    })
-    expect(ctrl("cp.limitresources").evaluate(e).passed).toBe(true)
-  })
-  it("FAIL — over 600 KB", () => {
-    const e = makeEvidence({
+      rawHtml: html(`<script src="https://example.com/app.js"></script>`),
       requests: [
-        req({ resourceType: "script", encodedBytes: 400_000 }),
-        req({ resourceType: "stylesheet", encodedBytes: 300_000 }),
+        req({
+          url: "https://example.com/app.js",
+          resourceType: "script",
+          encodedBytes: 400_000,
+        }),
       ],
     })
-    expect(ctrl("cp.limitresources").evaluate(e).passed).toBe(false)
+    const result = ctrl("cp.limitresources").evaluate(e)
+    expect(result.passed).toBe(false)
+    expect(result.evidence).toContain("1 sync script(s)")
   })
-  it("PASS — heavy interaction-phase scripts excluded from the total", () => {
+
+  it("PASS — same 400 KB script but deferred (0 KB blocking)", () => {
     const e = makeEvidence({
+      rawHtml: html(`<script defer src="https://example.com/app.js"></script>`),
       requests: [
-        req({ resourceType: "script", encodedBytes: 100_000, phase: "load" }),
+        req({
+          url: "https://example.com/app.js",
+          resourceType: "script",
+          encodedBytes: 400_000,
+        }),
+      ],
+    })
+    const result = ctrl("cp.limitresources").evaluate(e)
+    expect(result.passed).toBe(true)
+    expect(result.evidence).toContain("No render-blocking script or stylesheet")
+    expect(result.evidence).toContain("for reference: total CSS+JS transferred")
+  })
+
+  it("PASS — 100 KB blocking stylesheet + 100 KB sync script (200 KB < 300 KB)", () => {
+    const e = makeEvidence({
+      rawHtml: html(
+        `<link rel="stylesheet" media="screen" href="https://example.com/main.css">` +
+          `<script src="https://example.com/app.js"></script>`,
+      ),
+      requests: [
+        req({
+          url: "https://example.com/main.css",
+          resourceType: "stylesheet",
+          encodedBytes: 102_400,
+        }),
+        req({
+          url: "https://example.com/app.js",
+          resourceType: "script",
+          encodedBytes: 102_400,
+        }),
+      ],
+    })
+    const result = ctrl("cp.limitresources").evaluate(e)
+    expect(result.passed).toBe(true)
+    expect(result.evidence).toContain("200 KB")
+    expect(result.evidence).toContain("1 sync script(s)")
+    expect(result.evidence).toContain("1 blocking stylesheet(s)")
+  })
+
+  it("media=print stylesheet is not counted as blocking", () => {
+    const e = makeEvidence({
+      rawHtml: html(`<link rel="stylesheet" media="print" href="https://example.com/print.css">`),
+      requests: [
+        req({
+          url: "https://example.com/print.css",
+          resourceType: "stylesheet",
+          encodedBytes: 500_000,
+        }),
+      ],
+    })
+    const result = ctrl("cp.limitresources").evaluate(e)
+    expect(result.passed).toBe(true)
+    expect(result.evidence).toContain("No render-blocking script or stylesheet")
+  })
+
+  it("blocking tag with no matching request is reported, not failed", () => {
+    const e = makeEvidence({
+      rawHtml: html(`<script src="https://example.com/ghost.js"></script>`),
+      requests: [],
+    })
+    const result = ctrl("cp.limitresources").evaluate(e)
+    expect(result.passed).toBe(true)
+    expect(result.evidence).toContain("1 blocking tag(s) not matched to a network request")
+  })
+
+  it("loose match — request URL carries a cache-busting query", () => {
+    const e = makeEvidence({
+      rawHtml: html(`<script src="/assets/app.js"></script>`),
+      requests: [
+        req({
+          url: "https://example.com/assets/app.js?v=42",
+          resourceType: "script",
+          encodedBytes: 400_000,
+        }),
+      ],
+    })
+    const result = ctrl("cp.limitresources").evaluate(e)
+    expect(result.passed).toBe(false)
+  })
+
+  it("heavy interaction-phase scripts do not block (not in <head> markup)", () => {
+    const e = makeEvidence({
+      rawHtml: html(""),
+      requests: [
         req({ resourceType: "script", encodedBytes: 500_000, phase: "interaction" }),
         req({ resourceType: "script", encodedBytes: 300_000, phase: "interaction" }),
       ],
     })
     const result = ctrl("cp.limitresources").evaluate(e)
     expect(result.passed).toBe(true)
-    expect(result.evidence).toContain("2 interaction-phase resource(s) excluded")
-  })
-  it("FAIL — same bytes as load-phase (not excluded)", () => {
-    const e = makeEvidence({
-      requests: [
-        req({ resourceType: "script", encodedBytes: 100_000, phase: "load" }),
-        req({ resourceType: "script", encodedBytes: 500_000, phase: "load" }),
-        req({ resourceType: "script", encodedBytes: 300_000 }), // missing phase → "load"
-      ],
-    })
-    expect(ctrl("cp.limitresources").evaluate(e).passed).toBe(false)
+    expect(result.evidence).toContain("for reference: total CSS+JS transferred (non-interaction): 0 KB")
   })
 })
 

@@ -11,18 +11,10 @@ import {
   bodySlice,
   wordCount,
   sameSite,
+  isNonBlockingScript,
 } from "./util"
 
 // ── helpers ───────────────────────────────────────────────────────────────────
-
-/** True if a script tag has defer, async, or type="module". */
-function hasDeferOrModule(attrs: Record<string, string>): boolean {
-  return (
-    "defer" in attrs ||
-    "async" in attrs ||
-    (attrs["type"] ?? "").toLowerCase() === "module"
-  )
-}
 
 /** True if a script src is first-party (same-site or root-relative). */
 function isFirstParty(src: string, pageUrl: string): boolean {
@@ -59,7 +51,7 @@ const deferControl: Control = {
       }
     }
 
-    const withDefer = fpScripts.filter((s) => hasDeferOrModule(s.attrs))
+    const withDefer = fpScripts.filter((s) => isNonBlockingScript(s.attrs))
     const pct = Math.round((withDefer.length / fpScripts.length) * 100)
     const passed = withDefer.length / fpScripts.length > 0.5
     return {
@@ -101,7 +93,7 @@ const endOfBodyControl: Control = {
     // Blocking = has a src but no defer/async/type=module
     const blockingScripts = scripts.filter((s) => {
       if (!s.attrs["src"]) return false // inline script — not counted here
-      return !hasDeferOrModule(s.attrs)
+      return !isNonBlockingScript(s.attrs)
     })
     const passed = blockingScripts.length === 0
     return {

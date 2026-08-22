@@ -146,6 +146,8 @@ interface PageControlEval {
   pointsAwarded: number;
   maxPoints: number;
   evidence: string;
+  /** The control could not measure — see `ControlVerdict.unknown`. */
+  unknown?: boolean;
 }
 
 function naEval(controlId: string, evidence: string): PageControlEval {
@@ -199,6 +201,9 @@ function evalControlOnPage(
     pointsAwarded: verdict.passed ? plan.points : 0,
     maxPoints: plan.points,
     evidence: verdict.evidence,
+    // "À confirmer" travels with the verdict; it changes no points (an unknown
+    // verdict is a failure until an operator arbitrates it), only how it reads.
+    ...(verdict.unknown === true ? { unknown: true } : {}),
   };
 }
 
@@ -210,6 +215,8 @@ interface SiteControlAgg {
   pointsAwarded: number;
   maxPoints: number;
   evidence: string;
+  /** At least one page still carries an UNARBITRATED « à confirmer » verdict. */
+  unknown?: boolean;
 }
 
 /**
@@ -222,6 +229,10 @@ export interface PageControlFacts {
   applicable: boolean;
   passed: boolean;
   evidence: string;
+  /** The page's verdict could not be measured (see `ControlVerdict.unknown`). */
+  unknown?: boolean;
+  /** The page's verdict was decided by hand — an unknown there is arbitrated. */
+  manual?: boolean;
 }
 
 function aggregateFacts(
@@ -278,6 +289,11 @@ function aggregateFacts(
   const passedCount = applicableEvals.filter((e) => e.passed).length;
   const total = applicableEvals.length;
   const pointsAwarded = Math.round((plan.points * passedCount) / total);
+  // The site aggregate is « à confirmer » as long as ONE of its pages carries an
+  // unknown verdict nobody has arbitrated yet.
+  const pending = applicableEvals.filter(
+    (e) => e.unknown === true && e.manual !== true,
+  ).length;
 
   return {
     applicable: true,
@@ -285,8 +301,35 @@ function aggregateFacts(
     passed: passedCount === total,
     pointsAwarded,
     maxPoints: plan.points,
-    evidence: `Validé sur ${passedCount}/${total} page(s)`,
+    evidence:
+      `Validé sur ${passedCount}/${total} page(s)` +
+      (pending > 0 ? ` — ${pending} à confirmer` : ""),
+    ...(pending > 0 ? { unknown: true } : {}),
   };
+}
+
+/* ── "à confirmer" bookkeeping ────────────────────────────────────────────── */
+
+/**
+ * How many criteria of a stored result still need a human verdict: applicable,
+ * flagged `unknown` by the engine (it could not measure) and NOT yet arbitrated
+ * through a manual correction.
+ *
+ * Pure and shape-agnostic on purpose — it reads a `TopicResult[]`, which is what
+ * `PageResult.topics`, `SiteResult.topics`/`chinaTopics` and `RunPage.topicsJson`
+ * all are — so the UI can flag a score as provisional wherever it displays one.
+ * A stored result captured before this field existed simply counts 0.
+ */
+export function countPendingConfirmations(
+  topics: readonly TopicResult[] | null | undefined,
+): number {
+  let n = 0;
+  for (const t of topics ?? []) {
+    for (const c of t.controls ?? []) {
+      if (c.applicable && c.unknown === true && c.manual !== true) n += 1;
+    }
+  }
+  return n;
 }
 
 /* ── shared overall/geo/china computation ─────────────────────────────────── */
@@ -446,6 +489,7 @@ function scoreTopicWith(
       pointsAwarded: agg.pointsAwarded,
       maxPoints: agg.maxPoints,
       evidence: agg.evidence,
+      ...(agg.unknown === true ? { unknown: true } : {}),
     });
   });
 
@@ -502,6 +546,7 @@ function scoreTopicOnPage(
       pointsAwarded: ev.pointsAwarded,
       maxPoints: ev.maxPoints,
       evidence: ev.evidence,
+      ...(ev.unknown === true ? { unknown: true } : {}),
     };
   });
 
@@ -568,8 +613,9 @@ export function rescorePageFromVerdicts(
     const controls: ControlResult[] = topic.controls.map((control, index) => {
       const cfg = getConfig(config, control.id);
       const prev = stored.get(control.id);
-      // Carried across untouched: they describe the correction, not the score.
-      const kept = { manual: prev?.manual, auto: prev?.auto };
+      // Carried across untouched: they describe the correction (or the fact the
+      // engine could not measure), not the score.
+      const kept = { manual: prev?.manual, auto: prev?.auto, unknown: prev?.unknown };
       const na = (evidence: string): ControlResult => ({
         controlId: control.id,
         label: control.label,
@@ -706,7 +752,13 @@ export function scoreSiteFromPages(
       for (const topic of page.topics) {
         for (const c of topic.controls) {
           const list = byControl.get(c.controlId) ?? [];
-          list.push({ applicable: c.applicable, passed: c.passed, evidence: c.evidence });
+          list.push({
+            applicable: c.applicable,
+            passed: c.passed,
+            evidence: c.evidence,
+            unknown: c.unknown,
+            manual: c.manual,
+          });
           byControl.set(c.controlId, list);
         }
       }

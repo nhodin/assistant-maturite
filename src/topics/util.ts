@@ -61,6 +61,59 @@ export function header(map: HeaderMap, name: string): string | undefined {
   return map[name.toLowerCase()];
 }
 
+/** Response headers that can carry an OBSERVED edge-cache verdict. */
+const EDGE_HIT_HEADERS = [
+  "cf-cache-status",
+  "x-cache",
+  "x-vercel-cache",
+  "akamai-cache-status",
+  "x-cache-status",
+  "x-cache-remote",
+];
+
+/**
+ * Header-based observed edge hit, shared by ttfb.cdncache and cdn.ts:isCdnHit so a
+ * hit signature added once lands in both. Returns `"name: value"` of the first hit
+ * header — one of EDGE_HIT_HEADERS containing "hit" as a word, or a server-timing
+ * `cdn-cache; desc=HIT` entry (Akamai's usual signal) — or null when no hit is
+ * observed. The `age` policy deliberately stays with each caller: thresholds differ
+ * by criterion (ttfb.cdncache accepts age > 0 as edge evidence, cdn.longttl wants
+ * age ≥ 3600 to back its countdown-TTL heuristic).
+ */
+export function edgeHitHeader(map: HeaderMap): string | null {
+  for (const name of EDGE_HIT_HEADERS) {
+    const v = header(map, name);
+    if (v !== undefined && /\bhit\b/i.test(v)) return `${name}: ${v}`;
+  }
+  const st = header(map, "server-timing") ?? "";
+  if (/cdn-cache[^,]*desc\s*=\s*"?hit/i.test(st)) return `server-timing: ${st}`;
+  return null;
+}
+
+/**
+ * `max-age` (and ONLY `max-age`) from a Cache-Control header value, in seconds.
+ * Returns null when the directive is absent. **Browser-cache semantics**: a private
+ * cache reads `max-age` and ignores `s-maxage`, so this is the helper for anything
+ * reasoning about what the browser (or a plain freshness lifetime) will do.
+ * For shared/CDN caches use `cacheControlSharedTtl` instead.
+ */
+export function cacheControlMaxAge(value: string): number | null {
+  const m = /\bmax-age\s*=\s*(\d+)/i.exec(value);
+  return m ? parseInt(m[1]!, 10) : null;
+}
+
+/**
+ * Freshness lifetime a **shared (CDN/proxy) cache** will apply, in seconds:
+ * `s-maxage` when present (it overrides `max-age` for shared caches), else `max-age`.
+ * Returns null when neither directive is present.
+ * For browser-cache reasoning use `cacheControlMaxAge` instead.
+ */
+export function cacheControlSharedTtl(value: string): number | null {
+  const smax = /\bs-maxage\s*=\s*(\d+)/i.exec(value);
+  if (smax) return parseInt(smax[1]!, 10);
+  return cacheControlMaxAge(value);
+}
+
 export interface ParsedTag {
   /** Attribute map, names lowercased; valueless attrs map to "". */
   attrs: Record<string, string>;
@@ -95,6 +148,15 @@ export function parseTags(html: string, tag: string): ParsedTag[] {
     out.push({ attrs: parseAttrs(m[1]), raw: m[0] });
   }
   return out;
+}
+
+/** True if a script tag's attrs mark it non-parser-blocking (defer, async, or type="module"). */
+export function isNonBlockingScript(attrs: Record<string, string>): boolean {
+  return (
+    "defer" in attrs ||
+    "async" in attrs ||
+    (attrs["type"] ?? "").toLowerCase() === "module"
+  );
 }
 
 /** The raw <head>…</head> inner HTML, or "" if not found. */

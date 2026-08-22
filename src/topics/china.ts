@@ -5,7 +5,7 @@
  */
 import type { EvidenceBundle } from "../core"
 import type { Control, TopicModule } from "../core"
-import { host, parseTags, headSlice, header } from "./util"
+import { host, parseTags, headSlice, header, isNonBlockingScript } from "./util"
 
 // ── GFW-blocked domains ────────────────────────────────────────────────────────
 // Clearly blocked-in-mainland-China domains. A host matches if it equals or ends
@@ -115,16 +115,23 @@ const noGfwCriticalControl: Control = {
   topicId: 12,
   label: "No GFW domains on critical path",
   description:
-    "No render-blocking GFW-blocked domain on the critical path: <head> <script src>, " +
+    "No render-blocking GFW-blocked domain on the critical path: <head> synchronous " +
+    "<script src> (defer/async/type=module are NOT render-blocking and are out of scope " +
+    "for the verdict — they are only mentioned in the evidence as a latency warning), " +
     "<head> <link rel=stylesheet|preload> href, GFW URLs referenced via @import/url(...) " +
     "inside inline <style> in <head>, and preload targets in the main response Link header.",
   defaultPoints: 30,
   evaluate(e: EvidenceBundle) {
     const headHtml = headSlice(e.rawHtml)
     const blocked = new Set<string>()
+    // GFW scripts that are deferred/async/module: not render-blocking, so they do not
+    // fail the criterion — but they are still a latency risk in China, so name them.
+    const nonBlocking = new Set<string>()
     for (const s of parseTags(headHtml, "script")) {
       const src = s.attrs["src"]
-      if (src && isGfw(src)) blocked.add(host(src))
+      if (!src || !isGfw(src)) continue
+      if (isNonBlockingScript(s.attrs)) nonBlocking.add(host(src))
+      else blocked.add(host(src))
     }
     for (const l of parseTags(headHtml, "link")) {
       const rel = (l.attrs["rel"] ?? "").toLowerCase()
@@ -146,12 +153,19 @@ const noGfwCriticalControl: Control = {
         if (isGfw(url)) blocked.add(host(url))
       }
     }
+    const warning =
+      nonBlocking.size > 0
+        ? ` (also present but non-blocking: ${[...nonBlocking].join(", ")} — latency risk in China, not render-blocking)`
+        : ""
     if (blocked.size === 0) {
-      return { passed: true, evidence: "No GFW-blocked domains on the critical path" }
+      return {
+        passed: true,
+        evidence: "No GFW-blocked domains on the critical path" + warning,
+      }
     }
     return {
       passed: false,
-      evidence: `Critical-path GFW-blocked domain(s): ${[...blocked].join(", ")}`,
+      evidence: `Critical-path GFW-blocked domain(s): ${[...blocked].join(", ")}${warning}`,
     }
   },
 }

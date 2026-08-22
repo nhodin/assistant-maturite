@@ -14,6 +14,7 @@ import {
   isThirdParty,
   host,
   registrableDomain,
+  isNonBlockingScript,
 } from "./util"
 
 // ── third-party category map ──────────────────────────────────────────────────
@@ -80,15 +81,6 @@ function providerFor(registrable: string): string {
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
-/** True if a script tag has defer, async, or type="module". */
-function hasDefer(attrs: Record<string, string>): boolean {
-  return (
-    "defer" in attrs ||
-    "async" in attrs ||
-    (attrs["type"] ?? "").toLowerCase() === "module"
-  )
-}
-
 /**
  * True if a stylesheet's media attribute keeps it off the critical path
  * (anything that doesn't apply to a screen, e.g. media="print").
@@ -136,7 +128,7 @@ const deferAsyncControl: Control = {
       }
     }
 
-    const withDefer = tpScripts.filter((s) => hasDefer(s.attrs))
+    const withDefer = tpScripts.filter((s) => isNonBlockingScript(s.attrs))
     const passed = withDefer.length === tpScripts.length
     return {
       passed,
@@ -195,7 +187,7 @@ const selfhostControl: Control = {
       const src = s.attrs["src"]
       if (!src) return false
       if (isRootRelative(src)) return false
-      if (hasDefer(s.attrs)) return false
+      if (isNonBlockingScript(s.attrs)) return false
       return isThirdParty(src, e.finalUrl)
     })
 

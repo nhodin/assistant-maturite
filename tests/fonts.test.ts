@@ -61,9 +61,11 @@ describe("fonts.selfhost", () => {
     })
     const res = ctrl("fonts.selfhost").evaluate(e)
     expect(res.passed).toBe(true)
-    expect(res.evidence).toMatch(/data: URIs/)
+    expect(res.evidence).toMatch(/data:-URI @font-face/)
   })
-  it("PASS — one data: URI font outweighs one third-party request", () => {
+  it("FAIL — a single external font fails, data: URI fonts notwithstanding", () => {
+    // The criterion fails as soon as ONE font comes from an external domain —
+    // embedded data: URI fonts never compensate, they reach no domain at all.
     const e = makeEvidence({
       finalUrl: "https://example.com/",
       fonts: [
@@ -73,19 +75,36 @@ describe("fonts.selfhost", () => {
       requests: [fontReq("https://fonts.gstatic.com/s/b.woff2")],
     })
     const res = ctrl("fonts.selfhost").evaluate(e)
-    expect(res.passed).toBe(true)
-    expect(res.evidence).toMatch(/2 data:-URI @font-face/)
+    expect(res.passed).toBe(false)
+    expect(res.evidence).toContain("fonts.gstatic.com")
   })
-  it("FAIL — data: URI font alongside a majority of third-party requests", () => {
+  it("FAIL — one external font among several first-party ones", () => {
     const e = makeEvidence({
       finalUrl: "https://example.com/",
-      fonts: [{ family: "A", src: 'url("data:font/woff2;base64,d09GMgAB")' }],
       requests: [
-        fontReq("https://fonts.gstatic.com/s/b.woff2"),
-        fontReq("https://fonts.gstatic.com/s/c.woff2"),
+        fontReq("https://example.com/fonts/a.woff2"),
+        fontReq("https://example.com/fonts/b.woff2"),
+        fontReq("https://use.typekit.net/c.woff2"),
       ],
     })
+    const res = ctrl("fonts.selfhost").evaluate(e)
+    expect(res.passed).toBe(false)
+    expect(res.evidence).toContain("use.typekit.net")
+  })
+  it("FAIL — external @font-face src even when the font was never requested", () => {
+    const e = makeEvidence({
+      finalUrl: "https://example.com/",
+      fonts: [{ family: "A", src: 'url("https://fonts.gstatic.com/s/a.woff2")' }],
+    })
     expect(ctrl("fonts.selfhost").evaluate(e).passed).toBe(false)
+  })
+  it("PASS — relative @font-face src with no font request observed", () => {
+    // A relative URL resolves against the page origin → no external domain → pass.
+    const e = makeEvidence({
+      finalUrl: "https://example.com/",
+      fonts: [{ family: "A", src: 'url("/fonts/a.woff2") format("woff2")' }],
+    })
+    expect(ctrl("fonts.selfhost").evaluate(e).passed).toBe(true)
   })
 })
 
@@ -98,6 +117,53 @@ describe("fonts.woff2", () => {
     const e = makeEvidence({ requests: [fontReq("https://example.com/a.woff")] })
     expect(ctrl("fonts.woff2").evaluate(e).passed).toBe(false)
   })
+  it("PASS — @font-face fallback: local()-only rule excluded from the ratio", () => {
+    const e = makeEvidence({
+      fonts: [
+        { family: "A", src: 'url("/a.woff2") format("woff2")' },
+        { family: "B", src: 'url("/b.woff2") format("woff2")' },
+        { family: "A Fallback", src: 'local("Arial")' },
+      ],
+    })
+    const res = ctrl("fonts.woff2").evaluate(e)
+    expect(res.passed).toBe(true)
+    expect(res.evidence).toMatch(/2\/2/)
+    expect(res.evidence).toMatch(/1 local\(\)-only fallback/)
+  })
+  it("PASS — @font-face fallback: a majority of woff2 is enough (2/3)", () => {
+    const e = makeEvidence({
+      fonts: [
+        { family: "A", src: 'url("/a.woff2") format("woff2")' },
+        { family: "B", src: 'url("/b.woff2") format("woff2")' },
+        { family: "C", src: 'url("/c.ttf") format("truetype")' },
+      ],
+    })
+    const res = ctrl("fonts.woff2").evaluate(e)
+    expect(res.passed).toBe(true)
+    expect(res.evidence).toMatch(/2\/3/)
+  })
+  it("FAIL — @font-face fallback: minority of woff2 (1/3)", () => {
+    const e = makeEvidence({
+      fonts: [
+        { family: "A", src: 'url("/a.woff2") format("woff2")' },
+        { family: "B", src: 'url("/b.ttf") format("truetype")' },
+        { family: "C", src: 'url("/c.ttf") format("truetype")' },
+      ],
+    })
+    expect(ctrl("fonts.woff2").evaluate(e).passed).toBe(false)
+  })
+  it("PASS — @font-face without format() but a .woff2 URL counts as woff2", () => {
+    const e = makeEvidence({ fonts: [{ family: "A", src: 'url("/fonts/a.woff2")' }] })
+    const res = ctrl("fonts.woff2").evaluate(e)
+    expect(res.passed).toBe(true)
+    expect(res.evidence).toMatch(/1\/1/)
+  })
+  it("PASS — only local()-only @font-face → WOFF2 not applicable", () => {
+    const e = makeEvidence({ fonts: [{ family: "A Fallback", src: 'local("Arial")' }] })
+    const res = ctrl("fonts.woff2").evaluate(e)
+    expect(res.passed).toBe(true)
+    expect(res.evidence).toMatch(/not applicable/)
+  })
 })
 
 describe("fonts.fontdisplay", () => {
@@ -105,14 +171,29 @@ describe("fonts.fontdisplay", () => {
     const e = makeEvidence({ fonts: [{ family: "A", fontDisplay: "swap" }] })
     expect(ctrl("fonts.fontdisplay").evaluate(e).passed).toBe(true)
   })
-  it("FAIL — no @font-face captured (inline or external)", () => {
-    expect(ctrl("fonts.fontdisplay").evaluate(makeEvidence()).passed).toBe(false)
+  it("PASS — no web font at all (no @font-face, no font request)", () => {
+    const res = ctrl("fonts.fontdisplay").evaluate(makeEvidence())
+    expect(res.passed).toBe(true)
+    expect(res.evidence).toMatch(/No web font loaded/)
+  })
+  it("FAIL — fonts downloaded but no @font-face captured → not measurable", () => {
+    const e = makeEvidence({
+      finalUrl: "https://example.com/",
+      requests: [fontReq("https://example.com/fonts/a.woff2")],
+    })
+    const res = ctrl("fonts.fontdisplay").evaluate(e)
+    expect(res.passed).toBe(false)
+    // Not measurable → « à confirmer », arbitrated by hand rather than guessed.
+    expect(res.unknown).toBe(true)
+    expect(res.evidence).toMatch(/not measurable/)
   })
   it("PASS — @font-face sourced from an external stylesheet", () => {
     // e.fonts combines inline <style> and fetched external stylesheet @font-face
     // rules — the fixture doesn't distinguish the source, only the parsed result.
     const e = makeEvidence({ fonts: [{ family: "A", fontDisplay: "optional" }] })
-    expect(ctrl("fonts.fontdisplay").evaluate(e).passed).toBe(true)
+    const res = ctrl("fonts.fontdisplay").evaluate(e)
+    expect(res.passed).toBe(true)
+    expect(res.unknown).toBeUndefined()
   })
   it("PASS — local()-only fallback without font-display is ignored", () => {
     const e = makeEvidence({
@@ -178,6 +259,35 @@ describe("fonts.noiconfonts", () => {
   })
   it("FAIL — FontAwesome referenced", () => {
     const e = makeEvidence({ rawHtml: `<link href="/fontawesome.css">` })
+    expect(ctrl("fonts.noiconfonts").evaluate(e).passed).toBe(false)
+  })
+  it("PASS — 'feather' in editorial copy is not an icon font", () => {
+    // Fashion/luxury wording ("feather-light", "ostrich feather") must not be
+    // read as an icon-font signature in free text.
+    const e = makeEvidence({
+      rawHtml: `<h1>Feather-light down jacket</h1><p>Trimmed with ostrich feather.</p>`,
+    })
+    expect(ctrl("fonts.noiconfonts").evaluate(e).passed).toBe(true)
+  })
+  it("FAIL — feather-icons font request", () => {
+    const e = makeEvidence({
+      finalUrl: "https://example.com/",
+      requests: [fontReq("https://example.com/fonts/feather-icons.woff2")],
+    })
+    const res = ctrl("fonts.noiconfonts").evaluate(e)
+    expect(res.passed).toBe(false)
+    expect(res.evidence).toContain("feather-icons.woff2")
+  })
+  it("PASS — ambiguous feather.woff2 font request is no longer flagged", () => {
+    // A font file simply named "feather" may well be a real decorative typeface.
+    const e = makeEvidence({
+      finalUrl: "https://example.com/",
+      requests: [fontReq("https://example.com/fonts/feather.woff2")],
+    })
+    expect(ctrl("fonts.noiconfonts").evaluate(e).passed).toBe(true)
+  })
+  it("FAIL — material-icons class in raw HTML", () => {
+    const e = makeEvidence({ rawHtml: `<i class="material-icons">search</i>` })
     expect(ctrl("fonts.noiconfonts").evaluate(e).passed).toBe(false)
   })
 })
@@ -265,13 +375,24 @@ describe("fonts.fallback", () => {
     const e = makeEvidence({ fonts: [{ family: "A", ascentOverride: "90%" }] })
     expect(ctrl("fonts.fallback").evaluate(e).passed).toBe(true)
   })
-  it("PASS — local() fallback source only, no size settings", () => {
+  it("PASS — dedicated local()-only fallback @font-face, no size settings", () => {
     const e = makeEvidence({
-      fonts: [{ family: "A", src: 'local("Arial"), url(/a.woff2) format("woff2")' }],
+      fonts: [
+        { family: "A", src: 'url("/a.woff2") format("woff2")' },
+        { family: "A Fallback", src: 'local("Arial")' },
+      ],
     })
     const res = ctrl("fonts.fallback").evaluate(e)
     expect(res.passed).toBe(true)
-    expect(res.evidence).toMatch(/local/)
+    expect(res.evidence).toMatch(/dedicated local\(\)-only fallback/)
+  })
+  it("FAIL — idiomatic local() + url() src is not a fallback strategy", () => {
+    // `src: local("Foo"), url(foo.woff2)` only means "use the installed copy if
+    // present" — no adjusted system fallback is declared.
+    const e = makeEvidence({
+      fonts: [{ family: "Foo", src: 'local("Foo"), url(/foo.woff2) format("woff2")' }],
+    })
+    expect(ctrl("fonts.fallback").evaluate(e).passed).toBe(false)
   })
   it("FAIL — no fallback metrics", () => {
     expect(ctrl("fonts.fallback").evaluate(makeEvidence()).passed).toBe(false)

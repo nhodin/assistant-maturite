@@ -4,7 +4,7 @@
  */
 import { describe, it, expect } from "vitest"
 import { makeEvidence } from "../src/core/fixture"
-import { cdnTopic, cacheControlMaxAge } from "../src/topics/cdn"
+import { cdnTopic } from "../src/topics/cdn"
 
 function ctrl(id: string) {
   const c = cdnTopic.controls.find((c) => c.id === id)
@@ -12,24 +12,7 @@ function ctrl(id: string) {
   return c
 }
 
-// ── cacheControlMaxAge helper ────────────────────────────────────────────────
-describe("cacheControlMaxAge helper", () => {
-  it("parses max-age from a cache-control header", () => {
-    expect(cacheControlMaxAge("public, max-age=31536000, immutable")).toBe(31536000)
-  })
-
-  it("returns -1 when no max-age present", () => {
-    expect(cacheControlMaxAge("no-cache, no-store")).toBe(-1)
-  })
-
-  it("handles case-insensitive max-age", () => {
-    expect(cacheControlMaxAge("Max-Age=86400")).toBe(86400)
-  })
-
-  it("handles max-age=0", () => {
-    expect(cacheControlMaxAge("max-age=0")).toBe(0)
-  })
-})
+// cache-control parsing lives in src/topics/util.ts — see tests/util.test.ts.
 
 // ── cdn.brotli ────────────────────────────────────────────────────────────────
 describe("cdn.brotli", () => {
@@ -217,6 +200,32 @@ describe("cdn.region", () => {
     })
     const result = ctrl("cdn.region").evaluate(e)
     expect(result.passed).toBe(true)
+  })
+
+  it("passes when server: cloudflare (infrastructure header names the CDN)", () => {
+    const e = makeEvidence({ mainResponseHeaders: { server: "cloudflare" } })
+    const result = ctrl("cdn.region").evaluate(e)
+    expect(result.passed).toBe(true)
+    expect(result.evidence).toContain("server")
+  })
+
+  it("passes when via: 1.1 akamai.net", () => {
+    const e = makeEvidence({ mainResponseHeaders: { via: "1.1 akamai.net(ghost) (AkamaiGHost)" } })
+    const result = ctrl("cdn.region").evaluate(e)
+    expect(result.passed).toBe(true)
+    expect(result.evidence).toContain("via")
+  })
+
+  it("fails when a CDN name only appears in a policy header (CSP listing cdnjs.cloudflare.com)", () => {
+    const e = makeEvidence({
+      mainResponseHeaders: {
+        "content-security-policy": "script-src 'self' https://cdnjs.cloudflare.com; report-uri https://report.fastly.example/csp",
+        server: "nginx",
+      },
+    })
+    const result = ctrl("cdn.region").evaluate(e)
+    expect(result.passed).toBe(false)
+    expect(result.evidence).toMatch(/no known cdn/i)
   })
 
   it("fails when no CDN fingerprint headers found", () => {

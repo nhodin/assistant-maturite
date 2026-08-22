@@ -29,6 +29,19 @@ export interface ControlVerdict {
   passed: boolean;
   /** Short justification with the concrete data point, mirrors the MD reports. */
   evidence: string;
+  /**
+   * "À confirmer": the control COULD NOT MEASURE — the fact it needs is absent
+   * from the capture (LCP not identified, CLS not collected, CSS coverage
+   * unavailable, no @font-face captured…). It is NOT a nuance of `passed`:
+   * `passed` MUST be false, so an unmeasurable criterion scores 0 and never
+   * inflates a score on blind data.
+   *
+   * The UI presents such a criterion as « à confirmer » (distinct from a plain
+   * ✗) and the score it belongs to is flagged provisional until an operator
+   * arbitrates it through the manual-correction route. Optional: a control that
+   * never sets it keeps exactly today's behaviour.
+   */
+  unknown?: boolean;
 }
 
 /** A single scored criterion within a topic. */
@@ -121,11 +134,18 @@ export interface ControlResult {
    */
   manual?: boolean;
   /**
+   * The control could not measure this criterion — see `ControlVerdict.unknown`.
+   * Kept across re-scores and across a manual correction, so the UI can tell an
+   * UNARBITRATED « à confirmer » (`unknown && !manual`) from one an operator has
+   * already decided (`manual` set). `countPendingConfirmations` counts the former.
+   */
+  unknown?: boolean;
+  /**
    * The verdict the engine had measured, stashed on the FIRST manual correction
    * so it can be restored without recapturing the page. Never overwritten by a
    * later correction.
    */
-  auto?: { applicable: boolean; passed: boolean; evidence: string };
+  auto?: { applicable: boolean; passed: boolean; evidence: string; unknown?: boolean };
 }
 
 export interface TopicResult {

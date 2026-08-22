@@ -4,24 +4,7 @@
  * Max points: 35+30+15+10+10 = 100
  */
 import type { Control, TopicModule } from "../core"
-import { header } from "./util"
-
-// ── local helper ──────────────────────────────────────────────────────────────
-
-/**
- * Parse Cache-Control header to extract max-age or s-maxage in seconds.
- * Returns the numeric seconds, or null if neither directive is present.
- * s-maxage takes precedence over max-age (CDN semantics).
- */
-export function cacheControlMaxAge(value: string): number | null {
-  // Try s-maxage first (CDN-facing)
-  const smax = /\bs-maxage\s*=\s*(\d+)/i.exec(value)
-  if (smax) return parseInt(smax[1]!, 10)
-  // Fall back to max-age
-  const max = /\bmax-age\s*=\s*(\d+)/i.exec(value)
-  if (max) return parseInt(max[1]!, 10)
-  return null
-}
+import { edgeHitHeader, header } from "./util"
 
 // ── controls ──────────────────────────────────────────────────────────────────
 
@@ -31,50 +14,50 @@ export const cdnCacheControl: Control = {
   topicId: 5,
   label: "CDN cache on HTML pages",
   description:
-    "Main response indicates edge caching: cf-cache-status/x-cache/x-vercel-cache HIT, age > 0, or s-maxage > 0. Weakest fallback: cache-control max-age > 0 without private/no-store/no-cache (a CDN may cache it — no direct edge-hit evidence).",
+    "Main response indicates edge caching: an OBSERVED edge hit (cf-cache-status/x-cache/x-vercel-cache/akamai-cache-status HIT, server-timing cdn-cache;desc=HIT, or age > 0) always passes, whatever cache-control says — some CDNs (Akamai typically) cache by their own config while returning `private` to the client. Absent an observed hit, a declarative signal is accepted only if shared caching is not forbidden: s-maxage > 0, or as weakest fallback max-age > 0 — both void when cache-control carries private/no-store/no-cache.",
   defaultPoints: 35,
   evaluate(e) {
     const h = e.mainResponseHeaders
 
-    // 1. cf-cache-status contains "HIT"
-    const cfStatus = header(h, "cf-cache-status") ?? ""
-    if (cfStatus.toUpperCase().includes("HIT")) {
-      return { passed: true, evidence: `cf-cache-status: ${cfStatus}` }
+    // Steps 1–2 are OBSERVED edge hits and are deliberately evaluated FIRST, before any
+    // cache-control check: an edge hit is proof the CDN cached the object, whatever the
+    // header says. Several CDNs (Akamai typically) cache according to their own
+    // configuration while still returning `private` to the client — so `private` must never
+    // veto a hit we actually measured. Only the DECLARATIVE signals below, which infer
+    // caching from cache-control alone, are subject to the shared-cache directives.
+
+    // 1. Hit headers — shared detector with cdn.ts:isCdnHit (cf-cache-status, x-cache,
+    //    x-vercel-cache, akamai-cache-status, x-cache-status, x-cache-remote, and
+    //    server-timing cdn-cache;desc=HIT). A signature added there lands here too.
+    const hit = edgeHitHeader(h)
+    if (hit) {
+      return { passed: true, evidence: hit }
     }
 
-    // 2. x-cache contains "Hit"
-    const xCache = header(h, "x-cache") ?? ""
-    if (/hit/i.test(xCache)) {
-      return { passed: true, evidence: `x-cache: ${xCache}` }
-    }
-
-    // 3. x-vercel-cache = "HIT"
-    const vercelCache = header(h, "x-vercel-cache") ?? ""
-    if (vercelCache.toUpperCase() === "HIT") {
-      return { passed: true, evidence: `x-vercel-cache: ${vercelCache}` }
-    }
-
-    // 4. age header > 0
+    // 2. age header > 0
     const ageRaw = header(h, "age") ?? ""
     const age = parseInt(ageRaw, 10)
     if (!isNaN(age) && age > 0) {
       return { passed: true, evidence: `age: ${age} (object served from edge cache)` }
     }
 
-    // 5. cache-control s-maxage > 0
+    // No observed edge hit from here on — only declarative signals, which are void as soon as
+    // cache-control forbids shared (CDN) caching. `private` wins over `s-maxage`: a response
+    // marked private may not be stored by a shared cache at all, so its s-maxage is inoperative.
     const cc = header(h, "cache-control") ?? ""
+    const sharedCacheBlocked = /\b(private|no-store|no-cache)\b/i.test(cc)
+
+    // 3. cache-control s-maxage > 0 (and shared caching not forbidden)
     const smax = /\bs-maxage\s*=\s*(\d+)/i.exec(cc)
-    if (smax) {
-      const smaxVal = parseInt(smax[1]!, 10)
-      if (smaxVal > 0) {
-        return { passed: true, evidence: `cache-control: ${cc} (s-maxage=${smaxVal})` }
-      }
+    const smaxVal = smax ? parseInt(smax[1]!, 10) : null
+    if (smaxVal !== null && smaxVal > 0 && !sharedCacheBlocked) {
+      return { passed: true, evidence: `cache-control: ${cc} (s-maxage=${smaxVal})` }
     }
 
-    // 6. Weakest fallback — cache-control max-age > 0 without private/no-store/no-cache.
+    // 4. Weakest fallback — cache-control max-age > 0 without private/no-store/no-cache.
     //    The written criterion accepts "Cache-Control with max-age/s-max-age > 0"; a public
     //    max-age lets a shared cache (CDN) store the response, but we have no direct edge-hit.
-    if (!/\bprivate\b/i.test(cc) && !/\bno-store\b/i.test(cc) && !/\bno-cache\b/i.test(cc)) {
+    if (!sharedCacheBlocked) {
       const maxMatch = /\bmax-age\s*=\s*(\d+)/i.exec(cc)
       if (maxMatch) {
         const maxVal = parseInt(maxMatch[1]!, 10)
@@ -84,6 +67,13 @@ export const cdnCacheControl: Control = {
             evidence: `cache-control: ${cc} (max-age=${maxVal}>0 without private — a CDN may cache this; no direct edge-hit evidence, weak signal)`,
           }
         }
+      }
+    }
+
+    if (smaxVal !== null && smaxVal > 0 && sharedCacheBlocked) {
+      return {
+        passed: false,
+        evidence: `cache-control: ${cc} — s-maxage present but private/no-store/no-cache forbids shared caching and no edge-hit header observed`,
       }
     }
 

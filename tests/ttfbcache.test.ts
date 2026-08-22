@@ -4,7 +4,7 @@
  *           ttfb.specrules(10), ttfb.bfcache(10)
  */
 import { describe, it, expect } from "vitest"
-import { ttfbCacheTopic, cacheControlMaxAge } from "../src/topics/ttfbcache"
+import { ttfbCacheTopic } from "../src/topics/ttfbcache"
 import { makeEvidence } from "../src/core/fixture"
 
 function ctrl(id: string) {
@@ -20,17 +20,8 @@ describe("ttfbCacheTopic metadata", () => {
   })
 })
 
-describe("cacheControlMaxAge", () => {
-  it("prefers s-maxage over max-age", () => {
-    expect(cacheControlMaxAge("public, max-age=60, s-maxage=3600")).toBe(3600)
-  })
-  it("falls back to max-age", () => {
-    expect(cacheControlMaxAge("public, max-age=600")).toBe(600)
-  })
-  it("returns null when neither present", () => {
-    expect(cacheControlMaxAge("no-store")).toBeNull()
-  })
-})
+// cache-control parsing lives in src/topics/util.ts — see tests/util.test.ts
+// (cacheControlMaxAge = browser semantics, cacheControlSharedTtl = shared/CDN semantics).
 
 describe("ttfb.cdncache", () => {
   it("PASS — cf-cache-status HIT", () => {
@@ -46,6 +37,51 @@ describe("ttfb.cdncache", () => {
     const r = ctrl("ttfb.cdncache").evaluate(e)
     expect(r.passed).toBe(true)
     expect(r.evidence).toMatch(/weak signal/i)
+  })
+  it("FAIL — private + s-maxage without any observed edge hit", () => {
+    const e = makeEvidence({ mainResponseHeaders: { "cache-control": "private, s-maxage=600" } })
+    const r = ctrl("ttfb.cdncache").evaluate(e)
+    expect(r.passed).toBe(false)
+    expect(r.evidence).toMatch(/forbids shared caching/i)
+  })
+  it("PASS — private + s-maxage but x-cache Hit observed (hit wins over private)", () => {
+    const e = makeEvidence({
+      mainResponseHeaders: {
+        "cache-control": "private, s-maxage=600",
+        "x-cache": "Hit from cloudfront",
+      },
+    })
+    const r = ctrl("ttfb.cdncache").evaluate(e)
+    expect(r.passed).toBe(true)
+    expect(r.evidence).toMatch(/x-cache/i)
+  })
+  it("PASS — private + server-timing cdn-cache HIT (Akamai signal wins over private)", () => {
+    const e = makeEvidence({
+      mainResponseHeaders: {
+        "cache-control": "private, max-age=0",
+        "server-timing": 'cdn-cache; desc="HIT", edge; dur=1',
+      },
+    })
+    const r = ctrl("ttfb.cdncache").evaluate(e)
+    expect(r.passed).toBe(true)
+    expect(r.evidence).toMatch(/server-timing/i)
+  })
+  it("PASS — akamai-cache-status Hit", () => {
+    const e = makeEvidence({
+      mainResponseHeaders: { "akamai-cache-status": "Hit from child" },
+    })
+    const r = ctrl("ttfb.cdncache").evaluate(e)
+    expect(r.passed).toBe(true)
+    expect(r.evidence).toMatch(/akamai-cache-status/i)
+  })
+  it("FAIL — server-timing cdn-cache MISS is not a hit", () => {
+    const e = makeEvidence({
+      mainResponseHeaders: {
+        "cache-control": "private",
+        "server-timing": 'cdn-cache; desc="MISS"',
+      },
+    })
+    expect(ctrl("ttfb.cdncache").evaluate(e).passed).toBe(false)
   })
   it("FAIL — private + max-age (weak fallback must not apply)", () => {
     const e = makeEvidence({ mainResponseHeaders: { "cache-control": "private, max-age=3600" } })

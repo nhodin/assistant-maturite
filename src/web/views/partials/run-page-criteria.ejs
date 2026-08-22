@@ -3,10 +3,18 @@
   // Editable only when the caller gave us the ids the correction route needs.
   var canEdit = typeof runId !== 'undefined' && typeof runPageId !== 'undefined';
   var derived = typeof derivedIds !== 'undefined' && derivedIds ? derivedIds : [];
+  // Criteria the engine could not measure and nobody has arbitrated yet.
+  var pending = typeof pendingCount !== 'undefined' ? (pendingCount || 0) : 0;
+  function isPending(c){ return c.unknown && !c.manual; }
 %>
 <div class="crit-panel">
   <div class="head-row">
     <strong><%= pageLabel %></strong>
+    <% if (pending) { %>
+      <span class="provisional" title="Ces critères comptent comme échec tant qu'ils ne sont pas arbitrés">
+        provisoire — <%= pending %> critère<%= pending > 1 ? 's' : '' %> à confirmer
+      </span>
+    <% } %>
     <span class="muted url"><%= pageUrl %></span>
     <button class="btn sm" type="button" title="Fermer"
             onclick="this.closest('.crit-panel').parentNode.innerHTML=''">✕</button>
@@ -24,10 +32,12 @@
         <% (t.controls || []).forEach(function(c){
              var cur = !c.applicable ? 'na' : (c.passed ? 'pass' : 'fail');
              var editable = canEdit && derived.indexOf(c.controlId) === -1;
+             var todo = isPending(c);
         %>
           <li>
+            <% if (todo) { %><span class="unknown-flag" title="À confirmer — le contrôle n'a pas pu mesurer ; compté comme échec en attendant">?</span><% } %>
             <% if (editable) { %>
-              <select class="verdict <%= cur %><%= c.manual ? ' manual' : '' %>"
+              <select class="verdict <%= cur %><%= c.manual ? ' manual' : '' %><%= todo ? ' unknown' : '' %>"
                       data-current="<%= cur %>"
                       title="Corriger ce verdict à la main"
                       onchange="critEdit(this, <%= runId %>, <%= runPageId %>, '<%= c.controlId %>', this.value)">

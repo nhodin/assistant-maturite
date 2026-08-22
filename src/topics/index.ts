@@ -30,7 +30,7 @@ export {
   geoTopic,
   chinaTopic,
 }
-export { cacheControlMaxAge } from "./cdn"
+export { cacheControlMaxAge, cacheControlSharedTtl } from "./util"
 
 export const TOPICS: TopicModule[] = [
   imagesTopic, // 1

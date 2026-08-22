@@ -325,14 +325,102 @@ data/WEBSITES.csv      # seed source (website;url_hp;url_plp;url_pdp)
   `docs/2026-07-02-criteria-logic-review.md` for the full list, dispositions and rationale):
   20 fixes landed across the topic modules and the collector (e.g. `private, max-age>0` no
   longer fails browser-cache; provider counting by registrable domain with GTM+GA grouped;
-  @font-face families no longer double-counted with URL stems; slider controls scoped to the
-  detected slider markup (`features.sliderHtml`) instead of the whole page; preload controls
-  match the preloaded URL to the LCP/poster/slide target; empty-rawHtml captures rejected by
+  @font-face families no longer double-counted with URL stems; preload controls
+  match the preloaded URL to the LCP/poster target; empty-rawHtml captures rejected by
   the sanity gate; CPU throttling ×4 on mobile capture (since 2026-08 off by default and
   env-driven, see **Capture throttling**); HTTP/2 fallback probe for 103s; CDP
   document headers preferred over the Node fetch). 2 findings are deferred pending a scoring
   policy decision — notably "unmeasured ≠ failed" (a third control outcome), which would
   change score semantics for historical runs.
+- **Second detection-logic review** (2026-08 — see `docs/2026-08-21-criteria-logic-review.md`
+  for the full list; the 5 major findings are fixed, the moderate/minor ones are open):
+  - **Topic 2 (slider) rebuilt around `sliderWindows(rawHtml)`** (`topics/slider.ts`): the
+    markup controls (`firstimgnojs`/`lazyloadrest`/`delaynext`/`preloadnext`) are scoped to
+    slices of server HTML around each slider container (class/id/data-* tokens mirroring the
+    collector's selectors, matched on attribute VALUES so prose about a "carousel" is
+    ignored) — never to the whole page. `preloadnext`/`delaynext` additionally require the
+    preloaded/deferred image URL to belong to the slider (loose match: exact / same pathname /
+    same filename). NEW GATE: the topic applies only when the slider is the page's main
+    display — `sliderDetected` AND (no server-side slider markup → applies and the markup
+    criteria fail (JS-built slider) ; LCP unknown → applies ; `lcpIsSliderImage(e)` false →
+    **N/A** (secondary slider: grading it would penalise correct decisions) ; true → applies).
+    Same reasoning as `videoGate`. `features.sliderHtml` in the schema is legacy — never
+    populated, never read; the scoping is computed from `rawHtml` so old bundles re-score.
+    Overall averages move (topic 2 can newly be N/A) → runs before/after are not comparable.
+  - **`china.nogfwcritical` only fails on render-blocking GFW scripts**: defer/async/module
+    scripts no longer fail the criterion, they are named in the evidence as a latency warning.
+    The shared helper is `util.ts:isNonBlockingScript` (also replaced the local copies in
+    `thirdparties.ts`/`js.ts`).
+  - **`video.selfhosted` judges markup src with `isFirstParty`** (root-relative
+    `/videos/x.mp4` is first-party by construction; `sameSite` needed a host on both sides),
+    with data:/blob:/about: excluded (a blob: proves nothing about self-hosting).
+  - **Icon-font detection split in two regexes** (`fonts.ts`): full signature list only in
+    technical contexts (font request URL, @font-face family/src, where `feather` requires the
+    explicit `-icons` suffix); free-text rawHtml only matches prose-impossible signatures
+    (`fontawesome|icomoon|glyphicon|material-icons|ionicons`) — "feather-light down jacket"
+    no longer fails « No icons fonts ».
+  - **`ttfb.cdncache`: observed edge hits beat cache-control; declarative signals don't**:
+    steps 1–4 (cf-cache-status/x-cache/x-vercel-cache HIT, age>0) still pass whatever
+    cache-control says (Akamai-style CDNs cache by config while returning `private`), but
+    absent an observed hit, `s-maxage`/`max-age` are both void under
+    private/no-store/no-cache — `private, s-maxage=600` alone no longer passes. Hit-header
+    detection is factored into `util.ts:edgeHitHeader`, shared by `ttfb.cdncache` and
+    `cdn.ts:isCdnHit`, so `ttfb.cdncache` now also recognizes `akamai-cache-status`,
+    `x-cache-status`, `x-cache-remote` and `server-timing: cdn-cache; desc=HIT` (the
+    Akamai signals — the portfolio's main CDN). Only the `age` threshold stays local to
+    each caller (>0 for cdncache, ≥3600 for the longttl countdown heuristic).
+- **Moderate-findings wave** (2026-08-22 — O1, O3–O8 of the same review; O2 is the
+  separate "à confirmer" state below):
+  - `cdn.region`: the CDN-name substring scan is restricted to infrastructure headers
+    (`CDN_NAME_SCAN_HEADERS` = server/via/x-served-by/server-timing/x-powered-by) — a CSP
+    or report-uri listing `cdnjs.cloudflare.com` no longer infers a CDN.
+  - `video.preloadposter`: the weak-match branch is gone — no poster resolvable without JS
+    → fail (the 20-pt criterion presupposes the 30-pt one).
+  - `video.playerjs` / `video.preconnect`: a page using **no third-party player at all**
+    (shared helper `usesThirdPartyPlayer`: requests to player hosts, player iframes, or
+    player `<script src>` in rawHtml) now PASSES both — native self-hosted playback is the
+    ideal case, same reasoning as tp.deferasync with zero third-party scripts.
+  - `fonts.woff2`: both paths use the same majority (>50%) threshold; the @font-face
+    fallback path excludes `local()`-only rules and accepts a `.woff2` src without
+    `format()`.
+  - `fonts.fallback`: only a DEDICATED `local()`-only @font-face (or an adjust metric)
+    counts — the idiomatic `src: local("Foo"), url(foo.woff2)` no longer validates.
+  - `cacheControlMaxAge` dedup: ONE pair of helpers in `util.ts` — `cacheControlMaxAge`
+    (max-age only, browser semantics, null when absent) and `cacheControlSharedTtl`
+    (s-maxage first, shared-cache semantics); `cdn.ts` consumes the former (the old `-1`
+    sentinel became `null`), `ttfbcache.ts`'s duplicate was dead code and is deleted,
+    `topics/index.ts` re-exports both from util.
+  - `cp.limitresources` measures RENDER-BLOCKING resources: `<head>` sync scripts +
+    screen stylesheets matched (exact then loose) to network requests; threshold
+    `BLOCKING_BYTE_BUDGET` = 300 KB encoded (the old 600 KB applied to ALL CSS+JS; the
+    evidence still reports that global total for reference, plus any blocking tag not
+    matched to a request). Zero blocking resources = ideal case = pass. Scores on topic 8
+    move → runs before/after are not comparable on this criterion.
+- **« À confirmer » (unknown) criterion state** (2026-08-22 — O2 of the review, rule
+  validated by the user: unknown = fail by default until manually arbitrated, score shown
+  as provisional):
+  - Contract: `ControlVerdict.unknown?: boolean` (`core/types.ts`) — set ONLY when the
+    control could not measure; `passed` must be false (0 points, no score inflation).
+    `ControlResult.unknown` persists it in `topicsJson`; it survives re-scores AND manual
+    corrections — the pending/arbitrated distinction is `unknown && !manual` (an operator's
+    verdict takes precedence; « ↺ mesuré » restores the unknown state via `auto.unknown`).
+  - Emitters (exhaustive list): `images.lcppreload` (LCP unknown — the old weak-match PASS
+    is gone), `images.lcpnotlazy` (LCP unknown), `images.compressed` (no transfer size
+    observed — the old low-confidence PASS is gone, a deliberate hardening worth 5 pts on
+    fully-cached captures), `slider.reservedspace`/`video.reservedspace` (CLS null),
+    `css.unused` (coverage null), `fonts.fontdisplay` (fonts downloaded, no @font-face
+    captured). `ttfb.bfcache` deliberately does NOT emit it (structural limitation on
+    every page — it would flood the arbitration queue).
+  - Engine: `countPendingConfirmations(topics)` (`engine/score.ts`, re-exported by
+    `engine/index.ts`) counts applicable + unknown + not-manual; the site aggregate flags
+    a criterion unknown as soon as ONE applicable page is pending and suffixes the
+    evidence with « — N à confirmer ».
+  - UI: orange `?` badge (`.unknown-flag`) on pending criteria, « provisoire — N
+    critère(s) à confirmer » badge next to page/site/China scores, `?` mark in the run
+    ranking (`pendingBySite`). Arbitration = the existing manual-correction route, which
+    stashes `unknown` in `auto` and restores it on `verdict=auto`.
+  - Backcompat: historical `topicsJson` without the field behaves as before
+    (absent = false, counter = 0); emitters flag unknown on the next re-score/capture.
 - **Webperf monitoring mode** (2026-07): a Project with `mode=MONITORING` is re-run on a
   fixed frequency (DAILY/WEEKLY) by an in-process scheduler (`web/monitor.ts`, started by
   `web/server.ts`, 60 s tick). Each cycle collects CrUX field p75s (LCP/TTFB/INP/CLS/FCP)
@@ -372,7 +460,7 @@ npm run db:studio                         # Prisma Studio (inspect DB)
 
 # Quality
 npm run typecheck                         # tsc --noEmit
-npm test                                  # vitest (395 tests)
+npm test                                  # vitest (567 tests)
 
 # CLI (no DB, writes out/ reports)
 npm run audit -- --browser cloak          # full audit over data/WEBSITES.csv

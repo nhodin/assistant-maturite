@@ -141,12 +141,17 @@ describe("css.preload", () => {
 })
 
 describe("css.unused", () => {
-  it("FAIL — coverage unavailable (null)", () => {
-    expect(ctrl("css.unused").evaluate(makeEvidence()).passed).toBe(false)
+  it("À CONFIRMER — coverage unavailable (null) → unknown, still not passed", () => {
+    const r = ctrl("css.unused").evaluate(makeEvidence())
+    expect(r.passed).toBe(false)
+    expect(r.unknown).toBe(true)
+    expect(r.evidence).toMatch(/À confirmer/i)
   })
   it("PASS — unused < 30%", () => {
     const e = makeEvidence({ coverage: { cssUnusedPct: 10, jsUnusedPct: null } })
-    expect(ctrl("css.unused").evaluate(e).passed).toBe(true)
+    const r = ctrl("css.unused").evaluate(e)
+    expect(r.passed).toBe(true)
+    expect(r.unknown).toBeUndefined()
   })
   it("FAIL — unused >= 30%", () => {
     const e = makeEvidence({ coverage: { cssUnusedPct: 35, jsUnusedPct: null } })

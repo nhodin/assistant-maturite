@@ -3,7 +3,7 @@ import { prisma } from "../db";
 import { activeRun, resumeRun, recaptureSite } from "../runner";
 import { parseClientId, listClients } from "../clients";
 import { renderCsv } from "../../engine/report";
-import { rescorePageFromVerdicts } from "../../engine";
+import { rescorePageFromVerdicts, countPendingConfirmations } from "../../engine";
 import type { ConfigMap } from "../../engine";
 import { buildConfigMap } from "../config-store";
 import { rebuildSiteScore } from "../site-score";
@@ -74,12 +74,22 @@ export async function runRoutes(app: FastifyInstance) {
     const byCategory: Record<string, any[]> = {};
     for (const s of ranking) (byCategory[s.category] ??= []).push(s);
 
+    // siteId → criteria still « à confirmer » (both families of page), so the
+    // ranking can mark a score as provisional without opening the site detail.
+    const pendingBySite: Record<number, number> = {};
+    for (const s of ranking) {
+      pendingBySite[s.siteId] =
+        countPendingConfirmations(s.topicsJson as unknown as TopicResult[]) +
+        countPendingConfirmations((s.chinaTopicsJson as unknown as TopicResult[]) ?? null);
+    }
+
     return reply.view("run-detail", {
       active: "runs",
       title: `Run #${run.id}`,
       run,
       ranking,
       byCategory,
+      pendingBySite,
       // A run is live only if THIS process is executing it; a RUNNING row that is
       // not the active run is a leftover from a previous server (see recoverStaleRuns).
       isLive: activeRun() === run.id,
@@ -177,6 +187,11 @@ export async function runRoutes(app: FastifyInstance) {
       pageUrl: rp.url,
       pageTopics: (rp.topicsJson as any[]) ?? [],
       derivedIds: DERIVED_CONTROL_IDS,
+      // « provisoire » badge: criteria the engine could not measure and nobody
+      // has arbitrated yet.
+      pendingCount: countPendingConfirmations(
+        (rp.topicsJson as unknown as TopicResult[]) ?? [],
+      ),
     });
   });
 
@@ -214,6 +229,9 @@ export async function runRoutes(app: FastifyInstance) {
       control.applicable = control.auto.applicable;
       control.passed = control.auto.passed;
       control.evidence = control.auto.evidence;
+      // A criterion the engine could not measure goes back to « à confirmer ».
+      if (control.auto.unknown === true) control.unknown = true;
+      else delete control.unknown;
       delete control.manual;
       delete control.auto;
     } else {
@@ -223,6 +241,8 @@ export async function runRoutes(app: FastifyInstance) {
         applicable: control.applicable,
         passed: control.passed,
         evidence: control.evidence,
+        // Remembered so « ↺ mesuré » restores the "à confirmer" state too.
+        ...(control.unknown === true ? { unknown: true } : {}),
       };
       const was = control.auto.applicable ? (control.auto.passed ? "✓" : "✗") : "N/A";
       control.applicable = verdict !== "na";
@@ -288,6 +308,10 @@ export async function runRoutes(app: FastifyInstance) {
       geo: rp.geo,
       china: rp.china,
       topics: (rp.topicsJson as any[]) ?? [],
+      // Criteria still « à confirmer » on this page → its score is provisional.
+      pending: countPendingConfirmations(
+        (rp.topicsJson as unknown as TopicResult[]) ?? [],
+      ),
     }));
 
     return reply.view("run-site-detail", {
@@ -297,6 +321,11 @@ export async function runRoutes(app: FastifyInstance) {
       topics: score.topicsJson as any[],
       chinaTopics: (score.chinaTopicsJson as any[]) ?? null,
       pages,
+      // Site-level « provisoire » badges, one per family of page.
+      pending: countPendingConfirmations(score.topicsJson as unknown as TopicResult[]),
+      chinaPending: countPendingConfirmations(
+        (score.chinaTopicsJson as unknown as TopicResult[]) ?? null,
+      ),
       derivedIds: DERIVED_CONTROL_IDS,
       // A recapture is only offerable when nothing else is executing.
       isLive: activeRun() !== null,

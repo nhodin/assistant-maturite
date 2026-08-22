@@ -128,4 +128,5 @@ export {
   scorePage,
   scoreSiteFromPages,
   rescorePageFromVerdicts,
+  countPendingConfirmations,
 } from "./score";

@@ -5,7 +5,7 @@
  */
 import type { EvidenceBundle, NetworkRequest } from "../core"
 import type { Control, TopicModule } from "../core"
-import { isFirstParty } from "./util"
+import { cacheControlMaxAge, edgeHitHeader, isFirstParty } from "./util"
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -28,23 +28,15 @@ function staticAssets(e: EvidenceBundle): NetworkRequest[] {
 }
 
 /**
- * Parse max-age from a Cache-Control header value.
- * Returns the numeric value in seconds, or -1 if not present.
- */
-export function cacheControlMaxAge(headerValue: string): number {
-  const match = /\bmax-age\s*=\s*(\d+)/i.exec(headerValue)
-  return match ? parseInt(match[1]!, 10) : -1
-}
-
-/**
  * Returns true if the response headers show the resource was served from the CDN cache
  * (`server-timing: cdn-cache; desc=HIT`, `x-cache: HIT`, `cf-cache-status: HIT`…) or has
  * spent a significant time in it (`age` ≥ 1h).
  */
 function isCdnHit(headers: Record<string, string>): boolean {
-  const hitHeaders = ["x-cache", "cf-cache-status", "akamai-cache-status", "x-cache-status", "x-cache-remote"]
-  if (hitHeaders.some((h) => /\bhit\b/i.test(headers[h] ?? ""))) return true
-  if (/cdn-cache[^,]*desc\s*=\s*"?hit/i.test(headers["server-timing"] ?? "")) return true
+  // Header-based hit detection is shared with ttfb.cdncache (util.ts:edgeHitHeader);
+  // only the age threshold is local — ≥1h backs the countdown-TTL heuristic, whereas
+  // ttfb.cdncache accepts any age > 0 as edge evidence.
+  if (edgeHitHeader(headers)) return true
   const age = parseInt(headers["age"] ?? "", 10)
   return Number.isFinite(age) && age >= 3600
 }
@@ -53,8 +45,8 @@ function isCdnHit(headers: Record<string, string>): boolean {
  * A `max-age` that is not a multiple of 60 is not an authored TTL: it is a CDN counting
  * down the remaining freshness of a much longer origin TTL (e.g. `max-age=1543716`).
  */
-function isCountdownMaxAge(maxAge: number): boolean {
-  return maxAge > 0 && maxAge % 60 !== 0
+function isCountdownMaxAge(maxAge: number | null): boolean {
+  return maxAge !== null && maxAge > 0 && maxAge % 60 !== 0
 }
 
 /**
@@ -66,7 +58,7 @@ function isCountdownMaxAge(maxAge: number): boolean {
 function hasLongTtl(cacheControl: string, headers: Record<string, string> = {}): boolean {
   if (/\bimmutable\b/i.test(cacheControl)) return true
   const maxAge = cacheControlMaxAge(cacheControl)
-  if (maxAge >= 15552000) return true // 180 days in seconds
+  if (maxAge !== null && maxAge >= 15552000) return true // 180 days in seconds
   return isCountdownMaxAge(maxAge) && isCdnHit(headers)
 }
 
@@ -85,6 +77,13 @@ const CDN_HEADERS = [
   "x-akamai-transformed",
   "x-akamai",
 ]
+
+/**
+ * Headers whose VALUE may be scanned for a CDN name. Restricted to infrastructure
+ * headers describing who served the response — a CDN name appearing in a policy or
+ * reporting header (CSP, report-uri, link…) is just a hostname the page references.
+ */
+const CDN_NAME_SCAN_HEADERS = ["server", "via", "x-served-by", "server-timing", "x-powered-by"]
 
 // ── controls ─────────────────────────────────────────────────────────────────
 
@@ -164,8 +163,14 @@ export const regionControl: Control = {
         }
       }
     }
-    // Also check for "fastly" or "akamai" as a substring in any header value
-    for (const [key, value] of Object.entries(headers)) {
+    // Fallback: a CDN name inside an INFRASTRUCTURE header value (server, via, …).
+    // Deliberately NOT every header: content-security-policy, report-to/report-uri,
+    // link and friends routinely list CDN hostnames (cdnjs.cloudflare.com, a report
+    // endpoint on fastly…) that say nothing about who served THIS document — scanning
+    // them inferred a CDN from a whitelist entry.
+    for (const key of CDN_NAME_SCAN_HEADERS) {
+      const value = headers[key]
+      if (value === undefined) continue
       const lVal = String(value).toLowerCase()
       if (lVal.includes("fastly") || lVal.includes("akamai") || lVal.includes("cloudflare")) {
         return {

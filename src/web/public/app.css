@@ -1,7 +1,7 @@
 :root {
   --bg: #f4f6f8; --panel: #fff; --ink: #1c2b4a; --muted: #6b7a90;
   --line: #d8dee8; --accent: #1565c0; --accent-d: #0d47a1;
-  --ok: #1b5e20; --ko: #c62828;
+  --ok: #1b5e20; --ko: #c62828; --todo: #e08600;
 }
 * { box-sizing: border-box; }
 body { margin: 0; font: 14px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
@@ -212,5 +212,20 @@ select.verdict.na   { color: #888; font-weight: 400; }
    verdict for a measured one. */
 select.verdict.manual { border: 1px dashed currentColor; }
 .manual-flag { font-size: .8em; opacity: .8; }
+
+/* ── « À confirmer » (unknown): the control could not measure ─────────────── */
+/* Counted as a failure until arbitrated, but never shown as one: an orange "?"
+   next to the verdict, and the score above it flagged provisional. */
+.unknown-flag {
+  display: inline-block; margin-right: .15rem;
+  color: var(--todo); font-weight: 700;
+}
+select.verdict.unknown { border: 1px solid var(--todo); }
+.provisional {
+  display: inline-block; padding: .1rem .4rem; border-radius: 999px;
+  background: #fff3e0; color: #a15c00; border: 1px solid #ffcc80;
+  font-size: 12px; font-weight: 600; white-space: nowrap;
+}
+.provisional-mark { margin-left: .2rem; color: var(--todo); font-weight: 700; }
 td.verdict-cell { white-space: nowrap; }
 p.note { margin: .2rem 0 .8rem; font-size: .9em; }
