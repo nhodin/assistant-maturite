@@ -42,12 +42,27 @@
   }
 %>
 
+<% if (allPages.length) { %>
+<ul class="page-urls">
+  <% allPages.forEach(function(p){ %>
+  <li>
+    <span class="lbl"><%= p.label %><% if (p.isChina) { %> (China)<% } %></span>
+    <a href="<%= p.url %>" target="_blank" rel="noopener noreferrer" title="<%= p.url %>"><%= p.url %></a>
+    <% if (!p.captured) { %><span class="uncaptured" title="Page jamais capturée — tous ses verdicts sont à saisir à la main">non capturée</span><% } %>
+  </li>
+  <% }); %>
+</ul>
+<% } %>
+
 <p class="muted note">
   ✏️ Un verdict par page est modifiable : le score du sujet, du site et le global
   sont recalculés aussitôt. La correction ne vit que dans ce résultat —
   recapturer la page la remplace par la mesure.
   <span class="unknown-flag">?</span> « à confirmer » : le contrôle n'a pas pu mesurer —
   compté comme échec tant qu'un opérateur ne tranche pas, et le score reste provisoire.
+  <span class="uncaptured">non capturée</span> : le run n'a jamais obtenu cette page —
+  ses critères partent tous « à confirmer » et n'entrent dans le score du site
+  qu'une fois saisis à la main.
 </p>
 
 <h2>Synthèse<% if (cnPages.length) { %> — pages hors China<% } %></h2>
@@ -62,7 +77,7 @@
   <thead>
     <tr>
       <th></th>
-      <% if (hasPageScores) { stdPages.forEach(function(p){ %><th title="<%= p.url %>"><%= p.label %></th><% }); } %>
+      <% if (hasPageScores) { stdPages.forEach(function(p){ %><th title="<%= p.url %>"><a class="page-head" href="<%= p.url %>" target="_blank" rel="noopener noreferrer"><%= p.label %></a><% if (!p.captured) { %><span class="uncaptured" title="Page jamais capturée — tous ses verdicts sont à saisir à la main">non capturée</span><% } %></th><% }); } %>
       <th>Site</th>
     </tr>
   </thead>
@@ -104,7 +119,7 @@
     <thead>
       <tr>
         <th></th>
-        <% if (hasCnScores) { cnPages.forEach(function(p){ %><th title="<%= p.url %>"><%= p.label %></th><% }); } %>
+        <% if (hasCnScores) { cnPages.forEach(function(p){ %><th title="<%= p.url %>"><a class="page-head" href="<%= p.url %>" target="_blank" rel="noopener noreferrer"><%= p.label %></a><% if (!p.captured) { %><span class="uncaptured" title="Page jamais capturée — tous ses verdicts sont à saisir à la main">non capturée</span><% } %></th><% }); } %>
         <th>Site</th>
       </tr>
     </thead>
@@ -138,15 +153,22 @@
     <h3><%= t.topicId %>. <%= t.name %> —
       <span class="score <%= scoreClass(t.score) %>"><%= fmtScore(t.score) %><% if (t.score !== null){ %>/100<% } %></span>
     </h3>
-    <% if (t.score === null) { %>
+    <%# Un sujet entièrement N/A (aucun slider/vidéo détecté, par ex.) garde son
+        tableau tant qu'il y a des colonnes de pages : c'est le seul endroit d'où
+        un opérateur peut arbitrer ces critères à la main. Sans colonne, il n'y a
+        rien à corriger — on retombe sur la ligne N/A. %>
+    <% if (t.score === null && !hasCols) { %>
       <p class="muted">N/A — aucun critère applicable.</p>
     <% } else { %>
+      <% if (t.score === null) { %>
+        <p class="muted">N/A — aucun critère mesuré sur ce sujet. Basculez un verdict ci-dessous pour l'évaluer à la main.</p>
+      <% } %>
       <div class="scroll-x">
       <table class="grid small crit">
         <thead>
           <tr>
             <th>Critère</th>
-            <% if (hasCols) { familyPages.forEach(function(p){ %><th title="<%= p.url %>"><%= p.label %></th><% }); } %>
+            <% if (hasCols) { familyPages.forEach(function(p){ %><th title="<%= p.url %>"><a class="page-head" href="<%= p.url %>" target="_blank" rel="noopener noreferrer"><%= p.label %></a><% if (!p.captured) { %><span class="uncaptured" title="Page jamais capturée — tous ses verdicts sont à saisir à la main">non capturée</span><% } %></th><% }); } %>
             <th>Site (pts)</th>
             <th>Évidence</th>
           </tr>

@@ -251,6 +251,18 @@ describe("fonts.fontdisplay", () => {
     })
     expect(ctrl("fonts.fontdisplay").evaluate(e).passed).toBe(true)
   })
+  it("PASS — swiper-icons @font-face is excluded from scope like other icon fonts", () => {
+    const e = makeEvidence({
+      fonts: [
+        { family: "Good Sans", fontDisplay: "swap", src: 'url("/good.woff2") format("woff2")' },
+        { family: "swiper-icons", src: 'url("/swiper-icons.woff2") format("woff2")' },
+      ],
+    })
+    const res = ctrl("fonts.fontdisplay").evaluate(e)
+    expect(res.passed).toBe(true)
+    expect(res.evidence).toMatch(/1 icon font @font-face ignored/)
+    expect(res.evidence).not.toContain("swiper-icons")
+  })
 })
 
 describe("fonts.noiconfonts", () => {
@@ -288,6 +300,18 @@ describe("fonts.noiconfonts", () => {
   })
   it("FAIL — material-icons class in raw HTML", () => {
     const e = makeEvidence({ rawHtml: `<i class="material-icons">search</i>` })
+    expect(ctrl("fonts.noiconfonts").evaluate(e).passed).toBe(false)
+  })
+  it("FAIL — swiper-icons @font-face family, and it is named in the evidence", () => {
+    const e = makeEvidence({
+      fonts: [{ family: "swiper-icons", src: 'url("/swiper-icons.woff2") format("woff2")' }],
+    })
+    const res = ctrl("fonts.noiconfonts").evaluate(e)
+    expect(res.passed).toBe(false)
+    expect(res.evidence).toContain("swiper-icons")
+  })
+  it("FAIL — swiper-icons referenced in raw HTML (free text context)", () => {
+    const e = makeEvidence({ rawHtml: `<style>@font-face{font-family:'swiper-icons';}</style>` })
     expect(ctrl("fonts.noiconfonts").evaluate(e).passed).toBe(false)
   })
 })

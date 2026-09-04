@@ -4,7 +4,14 @@
  * Max points: 30+25+20+15+10 = 100
  */
 import type { Control, TopicModule } from "../core"
-import { header, headSlice, isNonBlockingScript, parseTags, requestsOfType } from "./util"
+import {
+  header,
+  headSlice,
+  isNonBlockingScript,
+  parseTags,
+  requestsOfType,
+  stripHtmlComments,
+} from "./util"
 
 // ── controls ──────────────────────────────────────────────────────────────────
 
@@ -21,67 +28,87 @@ function charsetByteOffset(rawHtml: string): number | null {
 }
 
 /**
- * 30 pts — Head order: meta[charset] → meta[viewport] → title → CSS → JS
+ * 30 pts — Head order: head group → CSS group → JS group
  *
- * From e.head.order we verify that among the PRESENT tokens from this ordered
- * set, each one appears before the next. Missing tokens are skipped (not a failure).
- * Tokens checked: "meta[charset]", "meta[viewport]", "title", "link[stylesheet]", "script"
+ * The head-group tags (meta[charset], meta[viewport], title) may appear in any
+ * order RELATIVE TO EACH OTHER, but all three must precede both the CSS group
+ * (link[stylesheet], link[preload-style], inline style) and the JS group
+ * (script, link[modulepreload]). The CSS group must in turn precede the JS
+ * group. Everything else (og:*, alternate, preconnect, dns-prefetch, icon,
+ * non-style preloads…) is ignored — `toOrderToken` either drops it from
+ * `head.order` entirely or emits a token that belongs to no group here.
+ *
+ * Missing groups are skipped (not a failure) — only tokens actually present in
+ * `e.head.order` are checked.
  *
  * Also requires — when a charset declaration is present — that it appears within
  * the first 1024 bytes of the document, per the HTML Standard's encoding-sniffing
  * rule; a later charset tag forces the browser to re-parse the whole document.
  */
+const HEAD_GROUP_TOKENS = ["meta[charset]", "meta[viewport]", "title"] as const
+const CSS_GROUP_TOKENS = ["link[stylesheet]", "link[preload-style]", "style"] as const
+const JS_GROUP_TOKENS = ["script", "link[modulepreload]"] as const
+
+const GROUPS: Array<{ name: string; tokens: readonly string[] }> = [
+  { name: "head group (charset/viewport/title)", tokens: HEAD_GROUP_TOKENS },
+  { name: "CSS group", tokens: CSS_GROUP_TOKENS },
+  { name: "JS group", tokens: JS_GROUP_TOKENS },
+]
+
 const headOrderControl: Control = {
   id: "cp.headorder",
   topicId: 8,
-  label: "Head tag order: charset → viewport → title → CSS → JS",
+  label: "Head tag order: head group → CSS → JS",
   description:
-    "The first occurrences of meta[charset], meta[viewport], title, link[stylesheet], script appear in that relative order, and meta[charset] (if present) is within the first 1024 bytes.",
+    "meta[charset], meta[viewport] and title (in any relative order) all appear before the CSS group (link[stylesheet]/link[preload][as=style]/inline style), which in turn appears entirely before the JS group (script/link[modulepreload]); meta[charset] (if present) is within the first 1024 bytes.",
   defaultPoints: 30,
   evaluate(e) {
-    const EXPECTED = [
-      "meta[charset]",
-      "meta[viewport]",
-      "title",
-      "link[stylesheet]",
-      "script",
-    ] as const
-
     const order = e.head.order
 
-    // Find the first index of each expected token (or -1 if absent)
-    const positions: Array<{ token: string; idx: number }> = EXPECTED.map((token) => ({
-      token,
-      idx: order.indexOf(token),
-    }))
-
-    // Collect only the present ones
-    const present = positions.filter((p) => p.idx !== -1)
-
-    if (present.length === 0) {
+    if (order.length === 0) {
       return {
         passed: true,
         evidence: "head.order is empty — no ordering violation possible (vacuously satisfied)",
       }
     }
 
-    // Check relative ordering among present tokens
+    // For each group, compute the last index of any of its tokens (the
+    // group "ends" there) and the first index (the group "starts" there).
+    // We only need: does the LAST occurrence of an earlier group come before
+    // the FIRST occurrence of a later group?
+    const groupStats = GROUPS.map((g) => {
+      const indices = order
+        .map((token, idx) => ({ token, idx }))
+        .filter((t) => g.tokens.includes(t.token))
+      return {
+        name: g.name,
+        first: indices.length > 0 ? indices[0]!.idx : null,
+        last: indices.length > 0 ? indices[indices.length - 1]!.idx : null,
+        occurrences: indices,
+      }
+    })
+
+    const observed = order.map((token, idx) => `${token}@${idx}`).join(", ")
+
     let violation: string | null = null
-    for (let i = 1; i < present.length; i++) {
-      const prev = present[i - 1]!
-      const curr = present[i]!
-      if (prev.idx > curr.idx) {
-        violation = `"${prev.token}" (pos ${prev.idx}) appears after "${curr.token}" (pos ${curr.idx})`
-        break
+    for (let i = 0; i < groupStats.length && !violation; i++) {
+      for (let j = i + 1; j < groupStats.length && !violation; j++) {
+        const earlier = groupStats[i]!
+        const later = groupStats[j]!
+        if (earlier.last === null || later.first === null) continue
+        if (earlier.last > later.first) {
+          // Find the offending tokens for a readable message.
+          const offendingLater = later.occurrences.find((o) => o.idx < earlier.last!)
+          const offendingEarlier = earlier.occurrences.find((o) => o.idx === earlier.last)
+          violation = `${later.name} tag "${offendingLater?.token}" (pos ${offendingLater?.idx}) appears before ${earlier.name} tag "${offendingEarlier?.token}" (pos ${offendingEarlier?.idx})`
+        }
       }
     }
-
-    const observed = present.map((p) => `${p.token}@${p.idx}`).join(", ")
 
     if (violation) {
       return {
         passed: false,
-        evidence: `Head order violation — ${violation}. Observed present tokens: [${observed}]`,
+        evidence: `Head order violation — ${violation}. Observed tokens: [${observed}]`,
       }
     }
 
@@ -91,7 +118,7 @@ const headOrderControl: Control = {
     if (charsetOffset !== null && charsetOffset >= CHARSET_BYTE_BUDGET) {
       return {
         passed: false,
-        evidence: `meta[charset] found but at byte offset ${charsetOffset} (≥${CHARSET_BYTE_BUDGET}) — triggers browser re-parse. Observed present tokens: [${observed}]`,
+        evidence: `meta[charset] found but at byte offset ${charsetOffset} (≥${CHARSET_BYTE_BUDGET}) — triggers browser re-parse. Observed tokens: [${observed}]`,
       }
     }
 
@@ -99,8 +126,8 @@ const headOrderControl: Control = {
       passed: true,
       evidence:
         charsetOffset !== null
-          ? `Head tag order correct among present tokens: [${observed}]; meta[charset] at byte offset ${charsetOffset} (< ${CHARSET_BYTE_BUDGET})`
-          : `Head tag order correct among present tokens: [${observed}]`,
+          ? `Head tag order correct: [${observed}]; meta[charset] at byte offset ${charsetOffset} (< ${CHARSET_BYTE_BUDGET})`
+          : `Head tag order correct: [${observed}]`,
     }
   },
 }
@@ -252,14 +279,16 @@ const preloadPrioControl: Control = {
   defaultPoints: 20,
   evaluate(e) {
     // Find <link rel="preload" as="...">
-    const linkTags = e.rawHtml.match(/<link\b[^>]*>/gi) ?? []
+    // Comment-free: a preload that only exists inside <!-- --> is never fetched.
+    const html = stripHtmlComments(e.rawHtml)
+    const linkTags = html.match(/<link\b[^>]*>/gi) ?? []
     const preloadWithAs = linkTags.filter((tag) => {
       const isPreload = /\brel\s*=\s*["']?preload["']?/i.test(tag)
       const hasAs = /\bas\s*=/i.test(tag)
       return isPreload && hasAs
     })
 
-    const hasFetchpriority = /\bfetchpriority\s*=/i.test(e.rawHtml)
+    const hasFetchpriority = /\bfetchpriority\s*=/i.test(html)
 
     const hasPreload = preloadWithAs.length > 0
 

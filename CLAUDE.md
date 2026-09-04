@@ -220,6 +220,26 @@ data/WEBSITES.csv      # seed source (website;url_hp;url_plp;url_pdp)
   header-less, or with a challenge title, `collect` refetches through `context.request` — the
   browser session's cookies (`cf_clearance` & co) come with it. Skipped on a healthy capture, so
   a normal origin takes no extra hit.
+- **Two false positives of the health check, fixed** (2026-08-31 — both observed on run 35/36,
+  and both rejected captures the operator had watched render correctly):
+  1. **A third-party iframe that 4xx'd condemned the whole page.** The document-status rule
+     looked at every `resourceType === "document"` request, iframes included — so a Stape
+     service-worker iframe 404 killed charlesheidsieck.com, and a threedium.co.uk 3D-viewer 404
+     killed a fendi.com PDP, while both pages themselves answered 200. It now judges the PAGE's
+     own document only (`sanity.ts:isPageDocument`): `NetworkRequest.isMainFrame` — recorded by
+     the collector from the CDP frame id (`Page.getFrameTree` once, `Network.responseReceived.frameId`
+     per request) — with the registrable domain of `bundle.url` as the fallback on evidence
+     captured before that field existed, so old bundles stay re-judgeable.
+  2. **rawHtml kept the challenge the browser had already cleared.** Step 1's raw fetch and the
+     `context.request` rescue both issue their OWN connection, so a WAF binding its clearance to
+     the tab's TLS fingerprint (Cloudflare Turnstile on lancome.fr) challenges them again — the
+     page rendered, the capture was rejected on a "Just a moment..." title. A third rescue tier
+     now evaluates a same-origin `fetch()` **inside the page**, which reuses that connection and
+     its clearance cookie and still returns SERVER html (the rendered DOM would silently pass the
+     no-JS criteria of topics 2/3/6). It takes no response headers from there — `fetch()` exposes
+     only CORS-safelisted ones, and a partial map would make topics 5/8/10 read absences as facts.
+  Fix 1 applies to evidence already stored; fix 2 only helps at capture time, so a page rejected
+  on a challenge title needs a recapture.
 - **Capture health check**: `collector/sanity.ts` (`assessCaptureHealth`) rejects a capture
   that landed on an error/bot-block page (document request ≥400 mid-capture, a Cloudflare/Akamai
   challenge title, or real `<img>` markup with zero image/stylesheet requests actually captured)
@@ -321,6 +341,29 @@ data/WEBSITES.csv      # seed source (website;url_hp;url_plp;url_pdp)
   (the measured verdict, stashed on the first correction) so the UI flags it ✏️ and offers
   « ↺ mesuré » to undo, and a `derivedFromTopics` criterion (`china.basics`) is read-only since
   the engine rewrites it at every re-score. Tests: `tests/manual-verdict.test.ts`.
+- **Grading a page the run never captured** (2026-08): a page left FAILED/PENDING (WAF block,
+  interrupted run) used to have no stored criteria at all — no column in the per-site view,
+  nothing to click, and a site whose standard block stayed N/A for good. `engine.emptyPageTopics(topics,
+  config, mode)` now builds the skeleton `scorePage` would have produced: the criteria the mode
+  does not measure are N/A as usual, the rest are **N/A + `unknown`** (« à confirmer » in the UI,
+  `NOT_CAPTURED_EVIDENCE` as evidence). N/A rather than failed is deliberate — an uncaptured page
+  must drag no score down on its own; a partially graded page scores only what was actually
+  arbitrated. The routes (`web/routes/runs.ts:pageTopicsOf`) hand the skeleton to the per-site
+  view and the criteria panel, and the correction route materializes it on the FIRST manual
+  verdict (it no longer 404s on `topicsJson === null`), so hand-grading goes through exactly the
+  same path as correcting a captured page. `site-score.rebuildSiteScore` therefore no longer
+  filters on `status: DONE`: a non-DONE page enters the aggregate **only** once it carries a
+  `manual` verdict, which keeps a stale mid-recapture result out. The views badge such a page
+  « non capturée » so its verdicts are never read as measurements.
+  A site whose **every** page failed has no `RunSiteScore` at all, so it is absent from the run
+  ranking and the per-site route used to 404 on it — unreachable, hence ungradable. That route
+  now falls back to an all-N/A placeholder (`engine.emptySiteTopics`) whenever the site has pages
+  in the run, the run detail lists such sites under « Sans score » (and links every site name in
+  « Capture des pages »), and the first manual verdict creates the real row via `rebuildSiteScore`.
+  Symmetrically, when nothing contributes any more AND every page is blank — no applicable
+  criterion anywhere, i.e. never captured or holding only the grading skeleton — `rebuildSiteScore`
+  DELETES the row instead of leaving a number nothing backs; a site that was really captured keeps
+  its row, so a failed recapture never erases what the run did produce.
 - **Detection-logic review** (2026-07, 25 findings — see
   `docs/2026-07-02-criteria-logic-review.md` for the full list, dispositions and rationale):
   20 fixes landed across the topic modules and the collector (e.g. `private, max-age>0` no
@@ -421,6 +464,44 @@ data/WEBSITES.csv      # seed source (website;url_hp;url_plp;url_pdp)
     stashes `unknown` in `auto` and restores it on `verdict=auto`.
   - Backcompat: historical `topicsJson` without the field behaves as before
     (absent = false, counter = 0); emitters flag unknown on the next re-score/capture.
+- **Field-review wave** (2026-09-04 — 7 findings from the operator's review of the last runs'
+  criteria; detection only, no criterion added or reweighted):
+  - **`ttfb.bfcache` also fails on `cache-control: no-store`** on the main document, which makes a
+    page bfcache-ineligible whatever its unload handlers. The unload grep is unchanged (still the
+    low-confidence inline-only heuristic); the evidence names whichever reason(s) applied.
+  - **OneTrust counts once**: `cookielaw.org` and `onetrust.com` are the same vendor, so
+    `PROVIDER_ALIASES` (`thirdparties.ts`) folds both to `"onetrust"` — a site using the standard
+    OneTrust setup no longer fails `tp.limit` on a phantom second consent provider.
+  - **`cp.headorder` grades three GROUPS, not a strict token sequence**: `meta[charset]`/
+    `meta[viewport]`/`title` in any order among themselves, then CSS (`link[stylesheet]`,
+    `link[rel=preload][as=style]` — new `link[preload-style]` order token in `collector/head.ts` —
+    and inline `<style>`), then JS (`<script>`, `link[modulepreload]`). Everything else is ignored
+    wherever it sits: informational metas, `alternate`, `preconnect`, `dns-prefetch`, `icon`, and
+    preloads whose `as` is not `style`. The 1024-byte charset rule is unchanged. Scores on topic 8
+    move up → runs before/after are not comparable on this criterion.
+  - **`swiper-icons` is an icon font** (plus `bootstrap-icons`, `remixicon`, `iconfont`,
+    `linearicons`, `themify`, `elegant-icons` in the technical-context regex only). It was the
+    most common miss in the field. Affects `fonts.noiconfonts` (now fails) and
+    `fonts.fontdisplay` (now excluded from its scope).
+  - **`cdn.longttl` measures first-party assets only** (page's registrable domain and its
+    subdomains) — third-party TTLs say nothing about the client's configuration. When a page
+    serves NO first-party static asset, it falls back to all assets rather than measuring
+    nothing, and the evidence says so. `staticAssets()` and its other consumers are untouched.
+  - **`js.defer` passes when the page has no first-party `<script src>`** — no JS to defer means
+    the practice is satisfied by construction, not failed.
+  - **HTML comments are invisible to detection** (`util.ts:stripHtmlComments`, exported). Markup
+    that exists only inside `<!-- -->` was validating criteria (a commented-out
+    `loading="lazy"` was the observed case). The strip is wired into `parseTags`/`headSlice`/
+    `bodySlice` — which covers most topics for free — and into every remaining direct scan of
+    `rawHtml`: `cp.preloadprio`, `ttfb.specrules`, `ttfb.bfcache`, `js.splittasks`,
+    `fonts.noiconfonts`/`fonts.fallback`, `inlineStyleBlocks` (css), `sliderWindows`,
+    `videoWindows`, and the `<img>`/`<source>` scans in `images.ts`. `<script>`/`<style>` bodies
+    are carved out first so the old `<!--` hiding idiom inside them survives; the result is
+    memoized on the last input since callers chain on the same multi-MB `rawHtml`. Two things
+    deliberately keep reading the RAW html: `charsetByteOffset` (`cp.headorder` — the browser
+    counts comment bytes too when sniffing the encoding) and `geo.weight1mb` (comments are
+    really transferred). Cross-topic regression tests: `tests/html-comments.test.ts`.
+
 - **Webperf monitoring mode** (2026-07): a Project with `mode=MONITORING` is re-run on a
   fixed frequency (DAILY/WEEKLY) by an in-process scheduler (`web/monitor.ts`, started by
   `web/server.ts`, 60 s tick). Each cycle collects CrUX field p75s (LCP/TTFB/INP/CLS/FCP)
@@ -460,7 +541,7 @@ npm run db:studio                         # Prisma Studio (inspect DB)
 
 # Quality
 npm run typecheck                         # tsc --noEmit
-npm test                                  # vitest (567 tests)
+npm test                                  # vitest (608 tests)
 
 # CLI (no DB, writes out/ reports)
 npm run audit -- --browser cloak          # full audit over data/WEBSITES.csv

@@ -4,6 +4,7 @@
  * scoring garbage (e.g. an Akamai/Cloudflare challenge page, a 403 mid-capture, or a
  * page whose assets never actually loaded).
  */
+import { getDomain } from "tldts";
 import type { EvidenceBundle } from "../core";
 
 /**
@@ -46,6 +47,27 @@ const ERROR_TITLE_PATTERNS: RegExp[] = [
   /request rejected/i, // common WAF wording
   /are you a robot/i,
 ];
+
+/**
+ * Is this request the document of the PAGE being captured, rather than one of an
+ * embedded iframe?
+ *
+ * Two signals, in order of trust:
+ *  1. `isMainFrame`, recorded by the collector from the CDP frame id — exact.
+ *  2. On evidence captured before that field existed, the registrable domain of
+ *     the request vs the captured URL. Coarser (a same-site iframe still counts)
+ *     but it catches the third parties, which is where the false positives come
+ *     from — and it keeps old bundles re-scorable.
+ */
+function isPageDocument(
+  request: EvidenceBundle["requests"][number],
+  pageUrl: string,
+): boolean {
+  if (request.resourceType !== "document") return false;
+  if (request.isMainFrame !== undefined) return request.isMainFrame;
+  const site = getDomain(pageUrl);
+  return site !== null && getDomain(request.url) === site;
+}
 
 function titleOf(rawHtml: string): string {
   return rawHtml.match(/<title[^>]*>([^<]*)<\/title>/i)?.[1]?.trim() ?? "";
@@ -102,9 +124,15 @@ export function assessCaptureHealth(bundle: EvidenceBundle): CaptureHealth {
   // 403 on the very URL the real page is then served from, so a bare "any 4xx"
   // rule would reject every capture that legitimately waited a challenge out.
   // Requests are in chronological order, so the last entry wins.
+  //
+  // And judged on the PAGE's OWN document only (see isPageDocument): a page is
+  // full of third-party iframes — consent, tag managers, analytics, 3D viewers —
+  // whose documents 4xx all the time without saying anything about whether the
+  // real page loaded. Condemning a healthy capture for a tracker's dead iframe
+  // is exactly the false positive this gate must not produce.
   const lastDocByUrl = new Map<string, EvidenceBundle["requests"][number]>();
   for (const r of bundle.requests) {
-    if (r.resourceType === "document") lastDocByUrl.set(r.url, r);
+    if (isPageDocument(r, bundle.url)) lastDocByUrl.set(r.url, r);
   }
   const blockedDoc = [...lastDocByUrl.values()].find((r) => r.status >= 400);
   if (blockedDoc) {

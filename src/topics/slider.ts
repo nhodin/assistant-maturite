@@ -12,7 +12,7 @@
 import type { EvidenceBundle } from "../core"
 import type { Control, TopicModule } from "../core"
 import type { ParsedTag } from "./util"
-import { parseTags, headSlice } from "./util"
+import { parseTags, headSlice, stripHtmlComments } from "./util"
 
 // ── slider markup scoping ─────────────────────────────────────────────────────
 
@@ -38,9 +38,11 @@ function isSliderTag(rawTag: string): boolean {
  * yield near-identical windows, so a match already covered by the previous window is
  * skipped. Empty array = the slider exists only in the rendered DOM (JS-built).
  */
-export function sliderWindows(html: string, span = 12000): string[] {
+export function sliderWindows(rawHtml: string, span = 12000): string[] {
   const out: string[] = []
-  if (!html) return out
+  if (!rawHtml) return out
+  // Slider markup that only exists inside an HTML comment is not a slider.
+  const html = stripHtmlComments(rawHtml)
   const re = /<[a-z][a-z0-9-]*\b[^>]*>/gi
   let m: RegExpExecArray | null
   let coveredUntil = -1

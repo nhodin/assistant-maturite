@@ -3,12 +3,17 @@ import { prisma } from "../db";
 import { activeRun, resumeRun, recaptureSite } from "../runner";
 import { parseClientId, listClients } from "../clients";
 import { renderCsv } from "../../engine/report";
-import { rescorePageFromVerdicts, countPendingConfirmations } from "../../engine";
+import {
+  rescorePageFromVerdicts,
+  countPendingConfirmations,
+  emptyPageTopics,
+  emptySiteTopics,
+} from "../../engine";
 import type { ConfigMap } from "../../engine";
 import { buildConfigMap } from "../config-store";
 import { rebuildSiteScore } from "../site-score";
 import { TOPICS } from "../../topics";
-import type { SiteResult, TopicResult } from "../../core/types";
+import type { PageScoringMode, SiteResult, TopicResult } from "../../core/types";
 import { isChinaKind } from "../categories";
 
 /**
@@ -19,6 +24,38 @@ import { isChinaKind } from "../categories";
 const DERIVED_CONTROL_IDS = TOPICS.flatMap((t) =>
   t.controls.filter((c) => c.derivedFromTopics === true).map((c) => c.id),
 );
+
+
+/**
+ * The per-page criteria of a captured page, or — for a page the run never
+ * managed to capture — the empty skeleton an operator can grade by hand.
+ *
+ * A run interrupted (or WAF-blocked) on one page used to leave that page with no
+ * criteria at all: no column in the site view, nothing to click, and a site
+ * whose standard block stayed N/A for good. Handing back a skeleton keeps the
+ * manual-correction route the ONLY way a verdict is ever set by hand, on
+ * captured and uncaptured pages alike.
+ */
+function pageTopicsOf(
+  rp: { topicsJson: unknown; mode: string },
+  config: ConfigMap,
+): TopicResult[] {
+  if (rp.topicsJson !== null) return rp.topicsJson as unknown as TopicResult[];
+  return emptyPageTopics(TOPICS, config, modeOf(rp));
+}
+
+function modeOf(rp: { mode: string }): PageScoringMode {
+  return rp.mode === "china" ? "china" : "standard";
+}
+
+/** The rules this run was graded by — never the current settings (see resumeRun). */
+async function runConfig(runId: number): Promise<ConfigMap> {
+  const run = await prisma.run.findUnique({
+    where: { id: runId },
+    select: { configJson: true },
+  });
+  return (run?.configJson as unknown as ConfigMap | null) ?? (await buildConfigMap());
+}
 
 export async function runRoutes(app: FastifyInstance) {
   app.get("/runs", async (req, reply) => {
@@ -83,6 +120,18 @@ export async function runRoutes(app: FastifyInstance) {
         countPendingConfirmations((s.chinaTopicsJson as unknown as TopicResult[]) ?? null);
     }
 
+    // Sites present in the run but with no aggregate: every one of their pages
+    // failed to capture, so they never appear in the ranking. They are listed
+    // apart, because their per-site page is where an operator grades them by hand.
+    const scoredSiteIds = new Set(ranking.map((s) => s.siteId));
+    const unscoredSites = [
+      ...new Map(
+        run.runPages
+          .filter((rp) => !scoredSiteIds.has(rp.page.siteId))
+          .map((rp) => [rp.page.siteId, rp.page.site]),
+      ).values(),
+    ].sort((a, b) => a.name.localeCompare(b.name));
+
     return reply.view("run-detail", {
       active: "runs",
       title: `Run #${run.id}`,
@@ -90,6 +139,7 @@ export async function runRoutes(app: FastifyInstance) {
       ranking,
       byCategory,
       pendingBySite,
+      unscoredSites,
       // A run is live only if THIS process is executing it; a RUNNING row that is
       // not the active run is a leftover from a previous server (see recoverStaleRuns).
       isLive: activeRun() === run.id,
@@ -180,18 +230,20 @@ export async function runRoutes(app: FastifyInstance) {
       include: { page: { include: { site: true } } },
     });
     if (!rp) return reply.code(404).send("");
+    // An uncaptured page gets the empty skeleton, so it can be graded by hand.
+    const config = await runConfig(id);
+    const pageTopics = pageTopicsOf(rp, config);
     return reply.view("partials/run-page-criteria", {
       runId: id,
       runPageId: rp.id,
       pageLabel: `${rp.page.site.name} — ${rp.page.label || rp.page.kind}`,
       pageUrl: rp.url,
-      pageTopics: (rp.topicsJson as any[]) ?? [],
+      pageTopics,
+      captured: rp.topicsJson !== null,
       derivedIds: DERIVED_CONTROL_IDS,
       // « provisoire » badge: criteria the engine could not measure and nobody
       // has arbitrated yet.
-      pendingCount: countPendingConfirmations(
-        (rp.topicsJson as unknown as TopicResult[]) ?? [],
-      ),
+      pendingCount: countPendingConfirmations(pageTopics),
     });
   });
 
@@ -215,9 +267,15 @@ export async function runRoutes(app: FastifyInstance) {
       where: { id: runPageId, runId: id },
       include: { page: { select: { siteId: true } }, run: { select: { configJson: true } } },
     });
-    if (!rp || rp.topicsJson === null) return reply.code(404).send("Page non scorée");
+    if (!rp) return reply.code(404).send("Page inconnue");
 
-    const topics = rp.topicsJson as unknown as TopicResult[];
+    // The run's own config, exactly as a resume/recapture does: a corrected page
+    // must stay graded by the same rules as its siblings — and it is also what
+    // shapes the skeleton of a page that was never captured.
+    const config = (rp.run.configJson as unknown as ConfigMap | null) ?? (await buildConfigMap());
+    // A page the run never captured has no stored criteria: it is graded from the
+    // empty skeleton, which this first correction persists.
+    const topics = pageTopicsOf(rp, config);
     const control = topics
       .flatMap((t) => t.controls ?? [])
       .find((c) => c.controlId === controlId);
@@ -251,13 +309,10 @@ export async function runRoutes(app: FastifyInstance) {
       control.evidence = `Corrigé manuellement (mesuré : ${was} — ${control.auto.evidence})`;
     }
 
-    // The run's own config, exactly as a resume/recapture does: a corrected page
-    // must stay graded by the same rules as its siblings.
-    const config = (rp.run.configJson as unknown as ConfigMap | null) ?? (await buildConfigMap());
     const rescored = rescorePageFromVerdicts(
       {
         url: rp.url,
-        mode: rp.mode === "china" ? "china" : "standard",
+        mode: modeOf(rp),
         topics,
         overall: rp.overall,
         geo: rp.geo,
@@ -284,35 +339,66 @@ export async function runRoutes(app: FastifyInstance) {
   app.get("/runs/:id/sites/:siteId", async (req, reply) => {
     const id = Number((req.params as any).id);
     const siteId = Number((req.params as any).siteId);
-    const score = await prisma.runSiteScore.findUnique({
-      where: { runId_siteId: { runId: id, siteId } },
-      include: { site: true, run: true },
+    const [stored, runPages] = await Promise.all([
+      prisma.runSiteScore.findUnique({
+        where: { runId_siteId: { runId: id, siteId } },
+        include: { site: true },
+      }),
+      // Per-page scores for the column breakdown (in capture order).
+      prisma.runPage.findMany({
+        where: { runId: id, page: { siteId } },
+        include: { page: true },
+        orderBy: { id: "asc" },
+      }),
+    ]);
+    // A site whose every page failed to capture has NO RunSiteScore at all — it
+    // is absent from the ranking, and this page used to 404 on it, which left it
+    // ungradable. Its pages are what make it part of the run, so they are what
+    // this route requires; the aggregate is stood in for until the first manual
+    // verdict creates the real row (see rebuildSiteScore).
+    const site = stored?.site ?? (await prisma.site.findUnique({ where: { id: siteId } }));
+    if (!site || (!stored && runPages.length === 0)) {
+      return reply.code(404).send("Ce site n'a ni score ni page dans ce run");
+    }
+    const score = stored ?? {
+      runId: id,
+      siteId,
+      site,
+      category: site.category,
+      overall: null,
+      geo: null,
+      china: null,
+      chinaOverall: null,
+      topicsJson: emptySiteTopics(TOPICS) as unknown as object,
+      // The China block only renders when the site has China pages to grade.
+      chinaTopicsJson: runPages.some((rp) => rp.mode === "china" || isChinaKind(rp.page.kind))
+        ? (emptySiteTopics(TOPICS) as unknown as object)
+        : null,
+    };
+    // Uncaptured pages are shown with the empty skeleton rather than dropped:
+    // a run blocked on a page must still be gradable by hand.
+    const config = await runConfig(id);
+    const pages = runPages.map((rp) => {
+      const topics = pageTopicsOf(rp, config);
+      return {
+        // RunPage id: what a manual correction of one criterion targets.
+        runPageId: rp.id,
+        label: rp.page.label || rp.page.kind,
+        url: rp.url,
+        status: rp.status,
+        // Grading family of the page: the two are displayed in separate blocks.
+        isChina: rp.mode === "china" || isChinaKind(rp.page.kind),
+        // A page nobody could capture: its criteria are all « à confirmer », and
+        // the view labels the column so its verdicts are not read as measurements.
+        captured: rp.topicsJson !== null,
+        overall: rp.overall,
+        geo: rp.geo,
+        china: rp.china,
+        topics: topics as any[],
+        // Criteria still « à confirmer » on this page → its score is provisional.
+        pending: countPendingConfirmations(topics),
+      };
     });
-    if (!score) return reply.code(404).send("No score for this site/run");
-
-    // Per-page scores for the column breakdown (in capture order).
-    const runPages = await prisma.runPage.findMany({
-      where: { runId: id, page: { siteId } },
-      include: { page: true },
-      orderBy: { id: "asc" },
-    });
-    const pages = runPages.map((rp) => ({
-      // RunPage id: what a manual correction of one criterion targets.
-      runPageId: rp.id,
-      label: rp.page.label || rp.page.kind,
-      url: rp.url,
-      status: rp.status,
-      // Grading family of the page: the two are displayed in separate blocks.
-      isChina: rp.mode === "china" || isChinaKind(rp.page.kind),
-      overall: rp.overall,
-      geo: rp.geo,
-      china: rp.china,
-      topics: (rp.topicsJson as any[]) ?? [],
-      // Criteria still « à confirmer » on this page → its score is provisional.
-      pending: countPendingConfirmations(
-        (rp.topicsJson as unknown as TopicResult[]) ?? [],
-      ),
-    }));
 
     return reply.view("run-site-detail", {
       active: "runs",

@@ -12,6 +12,7 @@ import {
   wordCount,
   sameSite,
   isNonBlockingScript,
+  stripHtmlComments,
 } from "./util"
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -34,7 +35,9 @@ const deferControl: Control = {
     "Majority (>50%) of first-party <script src> in raw HTML load non-blocking. " +
     "defer, async and type=module are ALL accepted as non-blocking loading — this " +
     "deviates slightly from the criterion's literal \"defer\" wording, since async and " +
-    "ES modules also avoid parser-blocking and are defensible modern equivalents.",
+    "ES modules also avoid parser-blocking and are defensible modern equivalents. " +
+    "A page with no first-party <script src> at all passes by construction — there is " +
+    "nothing to defer.",
   defaultPoints: 30,
   evaluate(e: EvidenceBundle) {
     const scripts = parseTags(e.rawHtml, "script")
@@ -46,8 +49,9 @@ const deferControl: Control = {
 
     if (fpScripts.length === 0) {
       return {
-        passed: false,
-        evidence: "no first-party scripts found",
+        passed: true,
+        evidence:
+          "no first-party <script src> in the server HTML — nothing to defer, criterion satisfied by construction",
       }
     }
 
@@ -147,7 +151,7 @@ const splitTasksControl: Control = {
     "rawHtml contains 'scheduler.yield' OR no long tasks observed (perf.longTasks.length === 0).",
   defaultPoints: 10,
   evaluate(e: EvidenceBundle) {
-    if (e.rawHtml.includes("scheduler.yield")) {
+    if (stripHtmlComments(e.rawHtml).includes("scheduler.yield")) {
       return {
         passed: true,
         evidence: "\"scheduler.yield\" found in raw HTML",

@@ -11,7 +11,7 @@
  */
 import type { EvidenceBundle } from "../core"
 import type { Control, TopicModule } from "../core"
-import { isFirstParty, host, requestsOfType } from "./util"
+import { isFirstParty, host, requestsOfType, stripHtmlComments } from "./util"
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -23,18 +23,30 @@ import { isFirstParty, host, requestsOfType } from "./util"
  * `feather` alone is deliberately NOT a token: it is a common English word
  * ("feather-light", "ostrich feather") and even `feather.woff2` is plausible for
  * a real decorative typeface — only the explicit `feather-icons` suffix removes
- * the ambiguity.
+ * the ambiguity. Same reasoning keeps bare `icons` and bare `feather` out of the
+ * list entirely — every token below is either a specific product/library name or
+ * carries an explicit `-icons`/`icon` suffix that has no plausible editorial use.
+ *
+ * `swiper-icons` is Swiper's own bundled icon font (its slide-navigation arrows) —
+ * unambiguous in both contexts, so it is added to BOTH regexes below (tolerating
+ * `swiper-icons`, `swiper_icons`, `swipericons`). The other additions
+ * (`bootstrap-icons`, `remixicon`, `iconfont`, `linearicons`, `themify`,
+ * `elegant-icons`) are common icon-font libraries whose names are technical
+ * identifiers, never editorial prose — kept TECHNICAL-only since some of them
+ * (e.g. `themify`) are less certain to never appear in free text.
  */
 const ICON_FONT_RE =
-  /font\s*awesome|fontawesome|icomoon|glyphicon|material[\s-]?icons|materialicons|feather[-_]?icons?|ionicons/i
+  /font\s*awesome|fontawesome|icomoon|glyphicon|material[\s-]?icons|materialicons|feather[-_]?icons?|ionicons|swiper[-_]?icons|bootstrap[-_]?icons|remixicon|iconfont|linearicons|themify|elegant[-_]?icons/i
 
 /**
  * Narrower set, matched against FREE TEXT (the whole raw HTML, editorial copy
  * included). Only signatures that cannot plausibly occur in running prose:
  * no bare `feather`, and no spaced `material icons` — "material icons" reads as
  * ordinary editorial wording, whereas `material-icons` is the class/family name.
+ * `swiper-icons` is added here too: it names Swiper's icon font specifically and
+ * has no plausible use in editorial copy.
  */
-const ICON_FONT_HTML_RE = /fontawesome|icomoon|glyphicon|material-icons|ionicons/i
+const ICON_FONT_HTML_RE = /fontawesome|icomoon|glyphicon|material-icons|ionicons|swiper[-_]?icons/i
 
 /**
  * True when a @font-face embeds its font file as a data: URI (base64 or not).
@@ -281,7 +293,7 @@ const noIconFontsControl: Control = {
     const fontReqs = requestsOfType(e.requests, "font")
     const reqHit = fontReqs.find((r) => ICON_FONT_RE.test(r.url))
     const familyHit = e.fonts.find((f) => ICON_FONT_RE.test(f.family ?? ""))
-    const htmlHit = ICON_FONT_HTML_RE.test(e.rawHtml)
+    const htmlHit = ICON_FONT_HTML_RE.test(stripHtmlComments(e.rawHtml))
     if (reqHit || familyHit || htmlHit) {
       const where = reqHit
         ? `font request ${reqHit.url}`
@@ -351,7 +363,7 @@ const fallbackControl: Control = {
     // is the standard "use the installed copy if present" idiom, not a fallback strategy.
     const hasLocalOnlyFace = e.fonts.some((f) => isLocalOnlySrc(f.src))
     const htmlHasAdjust = /size-adjust|ascent-override|descent-override/i.test(
-      e.rawHtml,
+      stripHtmlComments(e.rawHtml),
     )
     const passed = hasMetric || hasLocalOnlyFace || htmlHasAdjust
     const signal = hasMetric

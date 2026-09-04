@@ -68,10 +68,15 @@ function categoryForHost(hostname: string): string | null {
  * the same usage from the same vendor.
  *   - googletagmanager.com is just the delivery mechanism for GA4, whose beacons
  *     go to google-analytics.com → one analytics provider, not two.
+ *   - cookielaw.org (OneTrust's CDN/API domain) and onetrust.com (their marketing/product
+ *     domain) are the same vendor's single consent-management product → one provider,
+ *     not two.
  */
 const PROVIDER_ALIASES: Record<string, string> = {
   "googletagmanager.com": "google-analytics",
   "google-analytics.com": "google-analytics",
+  "cookielaw.org": "onetrust",
+  "onetrust.com": "onetrust",
 }
 
 /** Collapse a registrable domain to its vendor/provider identity. */

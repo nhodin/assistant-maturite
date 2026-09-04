@@ -129,4 +129,7 @@ export {
   scoreSiteFromPages,
   rescorePageFromVerdicts,
   countPendingConfirmations,
+  emptyPageTopics,
+  emptySiteTopics,
+  NOT_CAPTURED_EVIDENCE,
 } from "./score";

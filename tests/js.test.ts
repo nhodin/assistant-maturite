@@ -37,9 +37,11 @@ describe("js.defer", () => {
     })
     expect(ctrl("js.defer").evaluate(e).passed).toBe(false)
   })
-  it("FAIL — no first-party scripts", () => {
+  it("PASS — no first-party scripts (nothing to defer, satisfied by construction)", () => {
     const e = makeEvidence({ rawHtml: `<p>no scripts</p>` })
-    expect(ctrl("js.defer").evaluate(e).passed).toBe(false)
+    const result = ctrl("js.defer").evaluate(e)
+    expect(result.passed).toBe(true)
+    expect(result.evidence).toMatch(/nothing to defer/)
   })
 })
 

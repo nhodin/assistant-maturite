@@ -5,12 +5,14 @@
  */
 import type { EvidenceBundle } from "../core"
 import type { Control, TopicModule } from "../core"
-import { isThirdParty, parseTags, headSlice, header } from "./util"
+import { isThirdParty, parseTags, headSlice, header, stripHtmlComments } from "./util"
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 /** Extract all <style> block contents from rawHtml (including those in <head>). */
-function inlineStyleBlocks(html: string): string {
+function inlineStyleBlocks(rawHtml: string): string {
+  // A <style> block that only exists inside an HTML comment is never applied.
+  const html = stripHtmlComments(rawHtml)
   const blocks: string[] = []
   const re = /<style\b[^>]*>([\s\S]*?)<\/style>/gi
   let m: RegExpExecArray | null

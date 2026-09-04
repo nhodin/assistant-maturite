@@ -1,0 +1,2612 @@
+[
+ {
+  "site": "BULY1803",
+  "cat": "Beauty",
+  "overall": 48,
+  "geo": 75,
+  "china": null,
+  "chinaOverall": null,
+  "topics": [
+   {
+    "n": "Images management",
+    "s": 70
+   },
+   {
+    "n": "Slider management",
+    "s": null
+   },
+   {
+    "n": "Video management",
+    "s": null
+   },
+   {
+    "n": "Third parties",
+    "s": 35
+   },
+   {
+    "n": "TTFB/Cache",
+    "s": 25
+   },
+   {
+    "n": "JS management",
+    "s": 55
+   },
+   {
+    "n": "CSS management",
+    "s": 50
+   },
+   {
+    "n": "Critical path",
+    "s": 50
+   },
+   {
+    "n": "Fonts management",
+    "s": 20
+   },
+   {
+    "n": "CDN",
+    "s": 75
+   },
+   {
+    "n": "Technical GEO",
+    "s": 75
+   },
+   {
+    "n": "China Market Access",
+    "s": null
+   }
+  ]
+ },
+ {
+  "site": "MAKE UP FOR EVER",
+  "cat": "Beauty",
+  "overall": 44,
+  "geo": 85,
+  "china": 68,
+  "chinaOverall": 75,
+  "topics": [
+   {
+    "n": "Images management",
+    "s": 45
+   },
+   {
+    "n": "Slider management",
+    "s": null
+   },
+   {
+    "n": "Video management",
+    "s": null
+   },
+   {
+    "n": "Third parties",
+    "s": 0
+   },
+   {
+    "n": "TTFB/Cache",
+    "s": 0
+   },
+   {
+    "n": "JS management",
+    "s": 55
+   },
+   {
+    "n": "CSS management",
+    "s": 65
+   },
+   {
+    "n": "Critical path",
+    "s": 30
+   },
+   {
+    "n": "Fonts management",
+    "s": 70
+   },
+   {
+    "n": "CDN",
+    "s": 90
+   },
+   {
+    "n": "Technical GEO",
+    "s": 85
+   },
+   {
+    "n": "China Market Access",
+    "s": null
+   }
+  ]
+ },
+ {
+  "site": "GIVENCHY (BEAUTY)",
+  "cat": "Beauty",
+  "overall": 73,
+  "geo": 85,
+  "china": 69,
+  "chinaOverall": 78,
+  "topics": [
+   {
+    "n": "Images management",
+    "s": 85
+   },
+   {
+    "n": "Slider management",
+    "s": 75
+   },
+   {
+    "n": "Video management",
+    "s": null
+   },
+   {
+    "n": "Third parties",
+    "s": 85
+   },
+   {
+    "n": "TTFB/Cache",
+    "s": 35
+   },
+   {
+    "n": "JS management",
+    "s": 55
+   },
+   {
+    "n": "CSS management",
+    "s": 65
+   },
+   {
+    "n": "Critical path",
+    "s": 75
+   },
+   {
+    "n": "Fonts management",
+    "s": 90
+   },
+   {
+    "n": "CDN",
+    "s": 90
+   },
+   {
+    "n": "Technical GEO",
+    "s": 85
+   },
+   {
+    "n": "China Market Access",
+    "s": null
+   }
+  ]
+ },
+ {
+  "site": "KENZO PARFUM",
+  "cat": "Fragrances",
+  "overall": 33,
+  "geo": 70,
+  "china": 62,
+  "chinaOverall": 63,
+  "topics": [
+   {
+    "n": "Images management",
+    "s": 30
+   },
+   {
+    "n": "Slider management",
+    "s": null
+   },
+   {
+    "n": "Video management",
+    "s": 40
+   },
+   {
+    "n": "Third parties",
+    "s": 15
+   },
+   {
+    "n": "TTFB/Cache",
+    "s": 0
+   },
+   {
+    "n": "JS management",
+    "s": 55
+   },
+   {
+    "n": "CSS management",
+    "s": 30
+   },
+   {
+    "n": "Critical path",
+    "s": 25
+   },
+   {
+    "n": "Fonts management",
+    "s": 10
+   },
+   {
+    "n": "CDN",
+    "s": 90
+   },
+   {
+    "n": "Technical GEO",
+    "s": 70
+   },
+   {
+    "n": "China Market Access",
+    "s": null
+   }
+  ]
+ },
+ {
+  "site": "LOUIS VUITTON",
+  "cat": "Other",
+  "overall": 83,
+  "geo": 100,
+  "china": 68,
+  "chinaOverall": 75,
+  "topics": [
+   {
+    "n": "Images management",
+    "s": 95
+   },
+   {
+    "n": "Slider management",
+    "s": null
+   },
+   {
+    "n": "Video management",
+    "s": null
+   },
+   {
+    "n": "Third parties",
+    "s": 100
+   },
+   {
+    "n": "TTFB/Cache",
+    "s": 50
+   },
+   {
+    "n": "JS management",
+    "s": 90
+   },
+   {
+    "n": "CSS management",
+    "s": 95
+   },
+   {
+    "n": "Critical path",
+    "s": 75
+   },
+   {
+    "n": "Fonts management",
+    "s": 90
+   },
+   {
+    "n": "CDN",
+    "s": 70
+   },
+   {
+    "n": "Technical GEO",
+    "s": 100
+   },
+   {
+    "n": "China Market Access",
+    "s": null
+   }
+  ]
+ },
+ {
+  "site": "GIVENCHY (COUTURE)",
+  "cat": "Other",
+  "overall": 45,
+  "geo": 50,
+  "china": 68,
+  "chinaOverall": 75,
+  "topics": [
+   {
+    "n": "Images management",
+    "s": 65
+   },
+   {
+    "n": "Slider management",
+    "s": null
+   },
+   {
+    "n": "Video management",
+    "s": null
+   },
+   {
+    "n": "Third parties",
+    "s": 50
+   },
+   {
+    "n": "TTFB/Cache",
+    "s": 40
+   },
+   {
+    "n": "JS management",
+    "s": 55
+   },
+   {
+    "n": "CSS management",
+    "s": 40
+   },
+   {
+    "n": "Critical path",
+    "s": 25
+   },
+   {
+    "n": "Fonts management",
+    "s": 60
+   },
+   {
+    "n": "CDN",
+    "s": 25
+   },
+   {
+    "n": "Technical GEO",
+    "s": 50
+   },
+   {
+    "n": "China Market Access",
+    "s": null
+   }
+  ]
+ },
+ {
+  "site": "FENDI",
+  "cat": "Other",
+  "overall": 36,
+  "geo": 65,
+  "china": 43,
+  "chinaOverall": 25,
+  "topics": [
+   {
+    "n": "Images management",
+    "s": 60
+   },
+   {
+    "n": "Slider management",
+    "s": null
+   },
+   {
+    "n": "Video management",
+    "s": null
+   },
+   {
+    "n": "Third parties",
+    "s": 40
+   },
+   {
+    "n": "TTFB/Cache",
+    "s": 0
+   },
+   {
+    "n": "JS management",
+    "s": 55
+   },
+   {
+    "n": "CSS management",
+    "s": 10
+   },
+   {
+    "n": "Critical path",
+    "s": 20
+   },
+   {
+    "n": "Fonts management",
+    "s": 70
+   },
+   {
+    "n": "CDN",
+    "s": 35
+   },
+   {
+    "n": "Technical GEO",
+    "s": 65
+   },
+   {
+    "n": "China Market Access",
+    "s": null
+   }
+  ]
+ },
+ {
+  "site": "LOEWE",
+  "cat": "Other",
+  "overall": 57,
+  "geo": 70,
+  "china": 49,
+  "chinaOverall": 38,
+  "topics": [
+   {
+    "n": "Images management",
+    "s": 55
+   },
+   {
+    "n": "Slider management",
+    "s": null
+   },
+   {
+    "n": "Video management",
+    "s": 25
+   },
+   {
+    "n": "Third parties",
+    "s": 90
+   },
+   {
+    "n": "TTFB/Cache",
+    "s": 0
+   },
+   {
+    "n": "JS management",
+    "s": 75
+   },
+   {
+    "n": "CSS management",
+    "s": 75
+   },
+   {
+    "n": "Critical path",
+    "s": 40
+   },
+   {
+    "n": "Fonts management",
+    "s": 60
+   },
+   {
+    "n": "CDN",
+    "s": 90
+   },
+   {
+    "n": "Technical GEO",
+    "s": 70
+   },
+   {
+    "n": "China Market Access",
+    "s": null
+   }
+  ]
+ },
+ {
+  "site": "TIFFANY",
+  "cat": "WatchesJewelry",
+  "overall": 46,
+  "geo": 50,
+  "china": 75,
+  "chinaOverall": 50,
+  "topics": [
+   {
+    "n": "Images management",
+    "s": 70
+   },
+   {
+    "n": "Slider management",
+    "s": null
+   },
+   {
+    "n": "Video management",
+    "s": 100
+   },
+   {
+    "n": "Third parties",
+    "s": 25
+   },
+   {
+    "n": "TTFB/Cache",
+    "s": 0
+   },
+   {
+    "n": "JS management",
+    "s": 25
+   },
+   {
+    "n": "CSS management",
+    "s": 40
+   },
+   {
+    "n": "Critical path",
+    "s": 45
+   },
+   {
+    "n": "Fonts management",
+    "s": 70
+   },
+   {
+    "n": "CDN",
+    "s": 40
+   },
+   {
+    "n": "Technical GEO",
+    "s": 50
+   },
+   {
+    "n": "China Market Access",
+    "s": null
+   }
+  ]
+ },
+ {
+  "site": "ACQUA DI PARMA",
+  "cat": "Beauty",
+  "overall": 31,
+  "geo": 70,
+  "china": null,
+  "chinaOverall": null,
+  "topics": [
+   {
+    "n": "Images management",
+    "s": 45
+   },
+   {
+    "n": "Slider management",
+    "s": null
+   },
+   {
+    "n": "Video management",
+    "s": 25
+   },
+   {
+    "n": "Third parties",
+    "s": 0
+   },
+   {
+    "n": "TTFB/Cache",
+    "s": 0
+   },
+   {
+    "n": "JS management",
+    "s": 55
+   },
+   {
+    "n": "CSS management",
+    "s": 30
+   },
+   {
+    "n": "Critical path",
+    "s": 25
+   },
+   {
+    "n": "Fonts management",
+    "s": 10
+   },
+   {
+    "n": "CDN",
+    "s": 90
+   },
+   {
+    "n": "Technical GEO",
+    "s": 70
+   },
+   {
+    "n": "China Market Access",
+    "s": null
+   }
+  ]
+ },
+ {
+  "site": "GUERLAIN",
+  "cat": "Beauty",
+  "overall": 46,
+  "geo": 70,
+  "china": 67,
+  "chinaOverall": 33,
+  "topics": [
+   {
+    "n": "Images management",
+    "s": 70
+   },
+   {
+    "n": "Slider management",
+    "s": null
+   },
+   {
+    "n": "Video management",
+    "s": 0
+   },
+   {
+    "n": "Third parties",
+    "s": 35
+   },
+   {
+    "n": "TTFB/Cache",
+    "s": 0
+   },
+   {
+    "n": "JS management",
+    "s": 70
+   },
+   {
+    "n": "CSS management",
+    "s": 75
+   },
+   {
+    "n": "Critical path",
+    "s": 45
+   },
+   {
+    "n": "Fonts management",
+    "s": 50
+   },
+   {
+    "n": "CDN",
+    "s": 70
+   },
+   {
+    "n": "Technical GEO",
+    "s": 70
+   },
+   {
+    "n": "China Market Access",
+    "s": null
+   }
+  ]
+ },
+ {
+  "site": "FRESH",
+  "cat": "Beauty",
+  "overall": 54,
+  "geo": 75,
+  "china": null,
+  "chinaOverall": null,
+  "topics": [
+   {
+    "n": "Images management",
+    "s": 95
+   },
+   {
+    "n": "Slider management",
+    "s": null
+   },
+   {
+    "n": "Video management",
+    "s": null
+   },
+   {
+    "n": "Third parties",
+    "s": 65
+   },
+   {
+    "n": "TTFB/Cache",
+    "s": 0
+   },
+   {
+    "n": "JS management",
+    "s": 75
+   },
+   {
+    "n": "CSS management",
+    "s": 40
+   },
+   {
+    "n": "Critical path",
+    "s": 45
+   },
+   {
+    "n": "Fonts management",
+    "s": 20
+   },
+   {
+    "n": "CDN",
+    "s": 90
+   },
+   {
+    "n": "Technical GEO",
+    "s": 75
+   },
+   {
+    "n": "China Market Access",
+    "s": null
+   }
+  ]
+ },
+ {
+  "site": "BENEFIT",
+  "cat": "Beauty",
+  "overall": 48,
+  "geo": 70,
+  "china": 62,
+  "chinaOverall": 63,
+  "topics": [
+   {
+    "n": "Images management",
+    "s": 60
+   },
+   {
+    "n": "Slider management",
+    "s": 50
+   },
+   {
+    "n": "Video management",
+    "s": null
+   },
+   {
+    "n": "Third parties",
+    "s": 50
+   },
+   {
+    "n": "TTFB/Cache",
+    "s": 0
+   },
+   {
+    "n": "JS management",
+    "s": 70
+   },
+   {
+    "n": "CSS management",
+    "s": 40
+   },
+   {
+    "n": "Critical path",
+    "s": 25
+   },
+   {
+    "n": "Fonts management",
+    "s": 50
+   },
+   {
+    "n": "CDN",
+    "s": 90
+   },
+   {
+    "n": "Technical GEO",
+    "s": 70
+   },
+   {
+    "n": "China Market Access",
+    "s": null
+   }
+  ]
+ },
+ {
+  "site": "KVD",
+  "cat": "Beauty",
+  "overall": 52,
+  "geo": 85,
+  "china": null,
+  "chinaOverall": null,
+  "topics": [
+   {
+    "n": "Images management",
+    "s": 65
+   },
+   {
+    "n": "Slider management",
+    "s": null
+   },
+   {
+    "n": "Video management",
+    "s": null
+   },
+   {
+    "n": "Third parties",
+    "s": 70
+   },
+   {
+    "n": "TTFB/Cache",
+    "s": 25
+   },
+   {
+    "n": "JS management",
+    "s": 75
+   },
+   {
+    "n": "CSS management",
+    "s": 20
+   },
+   {
+    "n": "Critical path",
+    "s": 50
+   },
+   {
+    "n": "Fonts management",
+    "s": 20
+   },
+   {
+    "n": "CDN",
+    "s": 90
+   },
+   {
+    "n": "Technical GEO",
+    "s": 85
+   },
+   {
+    "n": "China Market Access",
+    "s": null
+   }
+  ]
+ },
+ {
+  "site": "LOEWE PARFUM",
+  "cat": "Beauty",
+  "overall": 42,
+  "geo": 70,
+  "china": 22,
+  "chinaOverall": 44,
+  "topics": [
+   {
+    "n": "Images management",
+    "s": 60
+   },
+   {
+    "n": "Slider management",
+    "s": null
+   },
+   {
+    "n": "Video management",
+    "s": 40
+   },
+   {
+    "n": "Third parties",
+    "s": 40
+   },
+   {
+    "n": "TTFB/Cache",
+    "s": 0
+   },
+   {
+    "n": "JS management",
+    "s": 55
+   },
+   {
+    "n": "CSS management",
+    "s": 30
+   },
+   {
+    "n": "Critical path",
+    "s": 45
+   },
+   {
+    "n": "Fonts management",
+    "s": 20
+   },
+   {
+    "n": "CDN",
+    "s": 90
+   },
+   {
+    "n": "Technical GEO",
+    "s": 70
+   },
+   {
+    "n": "China Market Access",
+    "s": null
+   }
+  ]
+ },
+ {
+  "site": "MFK",
+  "cat": "Beauty",
+  "overall": 45,
+  "geo": 85,
+  "china": null,
+  "chinaOverall": null,
+  "topics": [
+   {
+    "n": "Images management",
+    "s": 85
+   },
+   {
+    "n": "Slider management",
+    "s": 30
+   },
+   {
+    "n": "Video management",
+    "s": null
+   },
+   {
+    "n": "Third parties",
+    "s": 15
+   },
+   {
+    "n": "TTFB/Cache",
+    "s": 0
+   },
+   {
+    "n": "JS management",
+    "s": 55
+   },
+   {
+    "n": "CSS management",
+    "s": 60
+   },
+   {
+    "n": "Critical path",
+    "s": 20
+   },
+   {
+    "n": "Fonts management",
+    "s": 50
+   },
+   {
+    "n": "CDN",
+    "s": 90
+   },
+   {
+    "n": "Technical GEO",
+    "s": 85
+   },
+   {
+    "n": "China Market Access",
+    "s": null
+   }
+  ]
+ },
+ {
+  "site": "PCD",
+  "cat": "Beauty",
+  "overall": 59,
+  "geo": 85,
+  "china": 52,
+  "chinaOverall": 44,
+  "topics": [
+   {
+    "n": "Images management",
+    "s": 75
+   },
+   {
+    "n": "Slider management",
+    "s": null
+   },
+   {
+    "n": "Video management",
+    "s": 65
+   },
+   {
+    "n": "Third parties",
+    "s": 40
+   },
+   {
+    "n": "TTFB/Cache",
+    "s": 25
+   },
+   {
+    "n": "JS management",
+    "s": 70
+   },
+   {
+    "n": "CSS management",
+    "s": 65
+   },
+   {
+    "n": "Critical path",
+    "s": 65
+   },
+   {
+    "n": "Fonts management",
+    "s": 50
+   },
+   {
+    "n": "CDN",
+    "s": 75
+   },
+   {
+    "n": "Technical GEO",
+    "s": 85
+   },
+   {
+    "n": "China Market Access",
+    "s": null
+   }
+  ]
+ },
+ {
+  "site": "FENTY BEAUTY",
+  "cat": "Beauty",
+  "overall": 57,
+  "geo": 60,
+  "china": null,
+  "chinaOverall": null,
+  "topics": [
+   {
+    "n": "Images management",
+    "s": 75
+   },
+   {
+    "n": "Slider management",
+    "s": null
+   },
+   {
+    "n": "Video management",
+    "s": 80
+   },
+   {
+    "n": "Third parties",
+    "s": 40
+   },
+   {
+    "n": "TTFB/Cache",
+    "s": 10
+   },
+   {
+    "n": "JS management",
+    "s": 55
+   },
+   {
+    "n": "CSS management",
+    "s": 55
+   },
+   {
+    "n": "Critical path",
+    "s": 70
+   },
+   {
+    "n": "Fonts management",
+    "s": 50
+   },
+   {
+    "n": "CDN",
+    "s": 75
+   },
+   {
+    "n": "Technical GEO",
+    "s": 60
+   },
+   {
+    "n": "China Market Access",
+    "s": null
+   }
+  ]
+ },
+ {
+  "site": "BERLUTI",
+  "cat": "Fragrances",
+  "overall": 41,
+  "geo": 65,
+  "china": 55,
+  "chinaOverall": 50,
+  "topics": [
+   {
+    "n": "Images management",
+    "s": 55
+   },
+   {
+    "n": "Slider management",
+    "s": null
+   },
+   {
+    "n": "Video management",
+    "s": null
+   },
+   {
+    "n": "Third parties",
+    "s": 25
+   },
+   {
+    "n": "TTFB/Cache",
+    "s": 0
+   },
+   {
+    "n": "JS management",
+    "s": 70
+   },
+   {
+    "n": "CSS management",
+    "s": 40
+   },
+   {
+    "n": "Critical path",
+    "s": 25
+   },
+   {
+    "n": "Fonts management",
+    "s": 70
+   },
+   {
+    "n": "CDN",
+    "s": 45
+   },
+   {
+    "n": "Technical GEO",
+    "s": 65
+   },
+   {
+    "n": "China Market Access",
+    "s": null
+   }
+  ]
+ },
+ {
+  "site": "LORO PIANA",
+  "cat": "Fragrances",
+  "overall": 45,
+  "geo": 80,
+  "china": 64,
+  "chinaOverall": 67,
+  "topics": [
+   {
+    "n": "Images management",
+    "s": 55
+   },
+   {
+    "n": "Slider management",
+    "s": null
+   },
+   {
+    "n": "Video management",
+    "s": 55
+   },
+   {
+    "n": "Third parties",
+    "s": 35
+   },
+   {
+    "n": "TTFB/Cache",
+    "s": 50
+   },
+   {
+    "n": "JS management",
+    "s": 70
+   },
+   {
+    "n": "CSS management",
+    "s": 10
+   },
+   {
+    "n": "Critical path",
+    "s": 45
+   },
+   {
+    "n": "Fonts management",
+    "s": 50
+   },
+   {
+    "n": "CDN",
+    "s": 35
+   },
+   {
+    "n": "Technical GEO",
+    "s": 80
+   },
+   {
+    "n": "China Market Access",
+    "s": null
+   }
+  ]
+ },
+ {
+  "site": "CDC",
+  "cat": "Fragrances",
+  "overall": 59,
+  "geo": 85,
+  "china": 52,
+  "chinaOverall": 44,
+  "topics": [
+   {
+    "n": "Images management",
+    "s": 75
+   },
+   {
+    "n": "Slider management",
+    "s": null
+   },
+   {
+    "n": "Video management",
+    "s": 65
+   },
+   {
+    "n": "Third parties",
+    "s": 40
+   },
+   {
+    "n": "TTFB/Cache",
+    "s": 25
+   },
+   {
+    "n": "JS management",
+    "s": 70
+   },
+   {
+    "n": "CSS management",
+    "s": 65
+   },
+   {
+    "n": "Critical path",
+    "s": 65
+   },
+   {
+    "n": "Fonts management",
+    "s": 50
+   },
+   {
+    "n": "CDN",
+    "s": 75
+   },
+   {
+    "n": "Technical GEO",
+    "s": 85
+   },
+   {
+    "n": "China Market Access",
+    "s": null
+   }
+  ]
+ },
+ {
+  "site": "JWA",
+  "cat": "Fragrances",
+  "overall": 71,
+  "geo": 90,
+  "china": 55,
+  "chinaOverall": 50,
+  "topics": [
+   {
+    "n": "Images management",
+    "s": 90
+   },
+   {
+    "n": "Slider management",
+    "s": null
+   },
+   {
+    "n": "Video management",
+    "s": null
+   },
+   {
+    "n": "Third parties",
+    "s": 70
+   },
+   {
+    "n": "TTFB/Cache",
+    "s": 100
+   },
+   {
+    "n": "JS management",
+    "s": 75
+   },
+   {
+    "n": "CSS management",
+    "s": 60
+   },
+   {
+    "n": "Critical path",
+    "s": 70
+   },
+   {
+    "n": "Fonts management",
+    "s": 30
+   },
+   {
+    "n": "CDN",
+    "s": 75
+   },
+   {
+    "n": "Technical GEO",
+    "s": 90
+   },
+   {
+    "n": "China Market Access",
+    "s": null
+   }
+  ]
+ },
+ {
+  "site": "MOYNAT",
+  "cat": "Fragrances",
+  "overall": 51,
+  "geo": 70,
+  "china": 52,
+  "chinaOverall": 44,
+  "topics": [
+   {
+    "n": "Images management",
+    "s": 50
+   },
+   {
+    "n": "Slider management",
+    "s": null
+   },
+   {
+    "n": "Video management",
+    "s": 45
+   },
+   {
+    "n": "Third parties",
+    "s": 40
+   },
+   {
+    "n": "TTFB/Cache",
+    "s": 10
+   },
+   {
+    "n": "JS management",
+    "s": 55
+   },
+   {
+    "n": "CSS management",
+    "s": 20
+   },
+   {
+    "n": "Critical path",
+    "s": 50
+   },
+   {
+    "n": "Fonts management",
+    "s": 100
+   },
+   {
+    "n": "CDN",
+    "s": 90
+   },
+   {
+    "n": "Technical GEO",
+    "s": 70
+   },
+   {
+    "n": "China Market Access",
+    "s": null
+   }
+  ]
+ },
+ {
+  "site": "RIMOWA",
+  "cat": "Fragrances",
+  "overall": 52,
+  "geo": 70,
+  "china": 68,
+  "chinaOverall": 75,
+  "topics": [
+   {
+    "n": "Images management",
+    "s": 80
+   },
+   {
+    "n": "Slider management",
+    "s": null
+   },
+   {
+    "n": "Video management",
+    "s": null
+   },
+   {
+    "n": "Third parties",
+    "s": 90
+   },
+   {
+    "n": "TTFB/Cache",
+    "s": 0
+   },
+   {
+    "n": "JS management",
+    "s": 55
+   },
+   {
+    "n": "CSS management",
+    "s": 60
+   },
+   {
+    "n": "Critical path",
+    "s": 25
+   },
+   {
+    "n": "Fonts management",
+    "s": 50
+   },
+   {
+    "n": "CDN",
+    "s": 55
+   },
+   {
+    "n": "Technical GEO",
+    "s": 70
+   },
+   {
+    "n": "China Market Access",
+    "s": null
+   }
+  ]
+ },
+ {
+  "site": "CELINE",
+  "cat": "Fragrances",
+  "overall": 54,
+  "geo": 85,
+  "china": 52,
+  "chinaOverall": 44,
+  "topics": [
+   {
+    "n": "Images management",
+    "s": 75
+   },
+   {
+    "n": "Slider management",
+    "s": null
+   },
+   {
+    "n": "Video management",
+    "s": 25
+   },
+   {
+    "n": "Third parties",
+    "s": 0
+   },
+   {
+    "n": "TTFB/Cache",
+    "s": 45
+   },
+   {
+    "n": "JS management",
+    "s": 55
+   },
+   {
+    "n": "CSS management",
+    "s": 65
+   },
+   {
+    "n": "Critical path",
+    "s": 75
+   },
+   {
+    "n": "Fonts management",
+    "s": 90
+   },
+   {
+    "n": "CDN",
+    "s": 55
+   },
+   {
+    "n": "Technical GEO",
+    "s": 85
+   },
+   {
+    "n": "China Market Access",
+    "s": null
+   }
+  ]
+ },
+ {
+  "site": "KENZO",
+  "cat": "Fragrances",
+  "overall": 35,
+  "geo": 50,
+  "china": 62,
+  "chinaOverall": 63,
+  "topics": [
+   {
+    "n": "Images management",
+    "s": 85
+   },
+   {
+    "n": "Slider management",
+    "s": null
+   },
+   {
+    "n": "Video management",
+    "s": null
+   },
+   {
+    "n": "Third parties",
+    "s": 25
+   },
+   {
+    "n": "TTFB/Cache",
+    "s": 0
+   },
+   {
+    "n": "JS management",
+    "s": 55
+   },
+   {
+    "n": "CSS management",
+    "s": 40
+   },
+   {
+    "n": "Critical path",
+    "s": 20
+   },
+   {
+    "n": "Fonts management",
+    "s": 30
+   },
+   {
+    "n": "CDN",
+    "s": 25
+   },
+   {
+    "n": "Technical GEO",
+    "s": 50
+   },
+   {
+    "n": "China Market Access",
+    "s": null
+   }
+  ]
+ },
+ {
+  "site": "FRED",
+  "cat": "WatchesJewelry",
+  "overall": 42,
+  "geo": 85,
+  "china": 19,
+  "chinaOverall": 38,
+  "topics": [
+   {
+    "n": "Images management",
+    "s": 70
+   },
+   {
+    "n": "Slider management",
+    "s": null
+   },
+   {
+    "n": "Video management",
+    "s": null
+   },
+   {
+    "n": "Third parties",
+    "s": 35
+   },
+   {
+    "n": "TTFB/Cache",
+    "s": 15
+   },
+   {
+    "n": "JS management",
+    "s": 70
+   },
+   {
+    "n": "CSS management",
+    "s": 30
+   },
+   {
+    "n": "Critical path",
+    "s": 25
+   },
+   {
+    "n": "Fonts management",
+    "s": 30
+   },
+   {
+    "n": "CDN",
+    "s": 60
+   },
+   {
+    "n": "Technical GEO",
+    "s": 85
+   },
+   {
+    "n": "China Market Access",
+    "s": null
+   }
+  ]
+ },
+ {
+  "site": "HUBLOT",
+  "cat": "WatchesJewelry",
+  "overall": 40,
+  "geo": 85,
+  "china": 55,
+  "chinaOverall": 50,
+  "topics": [
+   {
+    "n": "Images management",
+    "s": 45
+   },
+   {
+    "n": "Slider management",
+    "s": null
+   },
+   {
+    "n": "Video management",
+    "s": null
+   },
+   {
+    "n": "Third parties",
+    "s": 0
+   },
+   {
+    "n": "TTFB/Cache",
+    "s": 75
+   },
+   {
+    "n": "JS management",
+    "s": 25
+   },
+   {
+    "n": "CSS management",
+    "s": 30
+   },
+   {
+    "n": "Critical path",
+    "s": 25
+   },
+   {
+    "n": "Fonts management",
+    "s": 30
+   },
+   {
+    "n": "CDN",
+    "s": 90
+   },
+   {
+    "n": "Technical GEO",
+    "s": 85
+   },
+   {
+    "n": "China Market Access",
+    "s": null
+   }
+  ]
+ },
+ {
+  "site": "ZENITH",
+  "cat": "WatchesJewelry",
+  "overall": 60,
+  "geo": 100,
+  "china": 74,
+  "chinaOverall": 88,
+  "topics": [
+   {
+    "n": "Images management",
+    "s": 55
+   },
+   {
+    "n": "Slider management",
+    "s": null
+   },
+   {
+    "n": "Video management",
+    "s": null
+   },
+   {
+    "n": "Third parties",
+    "s": 60
+   },
+   {
+    "n": "TTFB/Cache",
+    "s": 50
+   },
+   {
+    "n": "JS management",
+    "s": 60
+   },
+   {
+    "n": "CSS management",
+    "s": 50
+   },
+   {
+    "n": "Critical path",
+    "s": 45
+   },
+   {
+    "n": "Fonts management",
+    "s": 70
+   },
+   {
+    "n": "CDN",
+    "s": 90
+   },
+   {
+    "n": "Technical GEO",
+    "s": 100
+   },
+   {
+    "n": "China Market Access",
+    "s": null
+   }
+  ]
+ },
+ {
+  "site": "BVLGARI",
+  "cat": "WatchesJewelry",
+  "overall": 68,
+  "geo": 90,
+  "china": 64,
+  "chinaOverall": 67,
+  "topics": [
+   {
+    "n": "Images management",
+    "s": 90
+   },
+   {
+    "n": "Slider management",
+    "s": null
+   },
+   {
+    "n": "Video management",
+    "s": null
+   },
+   {
+    "n": "Third parties",
+    "s": 50
+   },
+   {
+    "n": "TTFB/Cache",
+    "s": 60
+   },
+   {
+    "n": "JS management",
+    "s": 55
+   },
+   {
+    "n": "CSS management",
+    "s": 85
+   },
+   {
+    "n": "Critical path",
+    "s": 75
+   },
+   {
+    "n": "Fonts management",
+    "s": 70
+   },
+   {
+    "n": "CDN",
+    "s": 55
+   },
+   {
+    "n": "Technical GEO",
+    "s": 90
+   },
+   {
+    "n": "China Market Access",
+    "s": null
+   }
+  ]
+ },
+ {
+  "site": "CHAUMET",
+  "cat": "WatchesJewelry",
+  "overall": 52,
+  "geo": 100,
+  "china": 58,
+  "chinaOverall": 56,
+  "topics": [
+   {
+    "n": "Images management",
+    "s": 55
+   },
+   {
+    "n": "Slider management",
+    "s": null
+   },
+   {
+    "n": "Video management",
+    "s": 80
+   },
+   {
+    "n": "Third parties",
+    "s": 75
+   },
+   {
+    "n": "TTFB/Cache",
+    "s": 90
+   },
+   {
+    "n": "JS management",
+    "s": 60
+   },
+   {
+    "n": "CSS management",
+    "s": 0
+   },
+   {
+    "n": "Critical path",
+    "s": 0
+   },
+   {
+    "n": "Fonts management",
+    "s": 30
+   },
+   {
+    "n": "CDN",
+    "s": 75
+   },
+   {
+    "n": "Technical GEO",
+    "s": 100
+   },
+   {
+    "n": "China Market Access",
+    "s": null
+   }
+  ]
+ },
+ {
+  "site": "TAG HEUER",
+  "cat": "WatchesJewelry",
+  "overall": 46,
+  "geo": 40,
+  "china": 64,
+  "chinaOverall": 67,
+  "topics": [
+   {
+    "n": "Images management",
+    "s": 70
+   },
+   {
+    "n": "Slider management",
+    "s": 0
+   },
+   {
+    "n": "Video management",
+    "s": null
+   },
+   {
+    "n": "Third parties",
+    "s": 75
+   },
+   {
+    "n": "TTFB/Cache",
+    "s": 0
+   },
+   {
+    "n": "JS management",
+    "s": 75
+   },
+   {
+    "n": "CSS management",
+    "s": 55
+   },
+   {
+    "n": "Critical path",
+    "s": 55
+   },
+   {
+    "n": "Fonts management",
+    "s": 40
+   },
+   {
+    "n": "CDN",
+    "s": 45
+   },
+   {
+    "n": "Technical GEO",
+    "s": 40
+   },
+   {
+    "n": "China Market Access",
+    "s": null
+   }
+  ]
+ },
+ {
+  "site": "BELMOND",
+  "cat": "Other",
+  "overall": 46,
+  "geo": 80,
+  "china": null,
+  "chinaOverall": null,
+  "topics": [
+   {
+    "n": "Images management",
+    "s": 45
+   },
+   {
+    "n": "Slider management",
+    "s": null
+   },
+   {
+    "n": "Video management",
+    "s": 50
+   },
+   {
+    "n": "Third parties",
+    "s": 0
+   },
+   {
+    "n": "TTFB/Cache",
+    "s": 90
+   },
+   {
+    "n": "JS management",
+    "s": 55
+   },
+   {
+    "n": "CSS management",
+    "s": 45
+   },
+   {
+    "n": "Critical path",
+    "s": 40
+   },
+   {
+    "n": "Fonts management",
+    "s": 40
+   },
+   {
+    "n": "CDN",
+    "s": 45
+   },
+   {
+    "n": "Technical GEO",
+    "s": 80
+   },
+   {
+    "n": "China Market Access",
+    "s": null
+   }
+  ]
+ },
+ {
+  "site": "CHEVAL BLANC",
+  "cat": "Other",
+  "overall": 59,
+  "geo": 50,
+  "china": null,
+  "chinaOverall": null,
+  "topics": [
+   {
+    "n": "Images management",
+    "s": 80
+   },
+   {
+    "n": "Slider management",
+    "s": null
+   },
+   {
+    "n": "Video management",
+    "s": 40
+   },
+   {
+    "n": "Third parties",
+    "s": 65
+   },
+   {
+    "n": "TTFB/Cache",
+    "s": 0
+   },
+   {
+    "n": "JS management",
+    "s": 55
+   },
+   {
+    "n": "CSS management",
+    "s": 85
+   },
+   {
+    "n": "Critical path",
+    "s": 60
+   },
+   {
+    "n": "Fonts management",
+    "s": 80
+   },
+   {
+    "n": "CDN",
+    "s": 70
+   },
+   {
+    "n": "Technical GEO",
+    "s": 50
+   },
+   {
+    "n": "China Market Access",
+    "s": null
+   }
+  ]
+ },
+ {
+  "site": "SEPHORA FR",
+  "cat": "SR",
+  "overall": 70,
+  "geo": 85,
+  "china": null,
+  "chinaOverall": null,
+  "topics": [
+   {
+    "n": "Images management",
+    "s": 95
+   },
+   {
+    "n": "Slider management",
+    "s": 75
+   },
+   {
+    "n": "Video management",
+    "s": null
+   },
+   {
+    "n": "Third parties",
+    "s": 75
+   },
+   {
+    "n": "TTFB/Cache",
+    "s": 85
+   },
+   {
+    "n": "JS management",
+    "s": 55
+   },
+   {
+    "n": "CSS management",
+    "s": 60
+   },
+   {
+    "n": "Critical path",
+    "s": 60
+   },
+   {
+    "n": "Fonts management",
+    "s": 90
+   },
+   {
+    "n": "CDN",
+    "s": 35
+   },
+   {
+    "n": "Technical GEO",
+    "s": 85
+   },
+   {
+    "n": "China Market Access",
+    "s": null
+   }
+  ]
+ },
+ {
+  "site": "SEPHORA UK",
+  "cat": "SR",
+  "overall": 42,
+  "geo": 50,
+  "china": null,
+  "chinaOverall": null,
+  "topics": [
+   {
+    "n": "Images management",
+    "s": 75
+   },
+   {
+    "n": "Slider management",
+    "s": 75
+   },
+   {
+    "n": "Video management",
+    "s": null
+   },
+   {
+    "n": "Third parties",
+    "s": 40
+   },
+   {
+    "n": "TTFB/Cache",
+    "s": 0
+   },
+   {
+    "n": "JS management",
+    "s": 25
+   },
+   {
+    "n": "CSS management",
+    "s": 40
+   },
+   {
+    "n": "Critical path",
+    "s": 15
+   },
+   {
+    "n": "Fonts management",
+    "s": 60
+   },
+   {
+    "n": "CDN",
+    "s": 45
+   },
+   {
+    "n": "Technical GEO",
+    "s": 50
+   },
+   {
+    "n": "China Market Access",
+    "s": null
+   }
+  ]
+ },
+ {
+  "site": "SEPHORA NA",
+  "cat": "SR",
+  "overall": 55,
+  "geo": 100,
+  "china": null,
+  "chinaOverall": null,
+  "topics": [
+   {
+    "n": "Images management",
+    "s": 70
+   },
+   {
+    "n": "Slider management",
+    "s": 45
+   },
+   {
+    "n": "Video management",
+    "s": null
+   },
+   {
+    "n": "Third parties",
+    "s": 75
+   },
+   {
+    "n": "TTFB/Cache",
+    "s": 50
+   },
+   {
+    "n": "JS management",
+    "s": 25
+   },
+   {
+    "n": "CSS management",
+    "s": 85
+   },
+   {
+    "n": "Critical path",
+    "s": 0
+   },
+   {
+    "n": "Fonts management",
+    "s": 100
+   },
+   {
+    "n": "CDN",
+    "s": 45
+   },
+   {
+    "n": "Technical GEO",
+    "s": 100
+   },
+   {
+    "n": "China Market Access",
+    "s": null
+   }
+  ]
+ },
+ {
+  "site": "SEPHORA APAC",
+  "cat": "SR",
+  "overall": 52,
+  "geo": 25,
+  "china": null,
+  "chinaOverall": null,
+  "topics": [
+   {
+    "n": "Images management",
+    "s": 55
+   },
+   {
+    "n": "Slider management",
+    "s": 30
+   },
+   {
+    "n": "Video management",
+    "s": null
+   },
+   {
+    "n": "Third parties",
+    "s": 65
+   },
+   {
+    "n": "TTFB/Cache",
+    "s": 35
+   },
+   {
+    "n": "JS management",
+    "s": 50
+   },
+   {
+    "n": "CSS management",
+    "s": 85
+   },
+   {
+    "n": "Critical path",
+    "s": 75
+   },
+   {
+    "n": "Fonts management",
+    "s": 50
+   },
+   {
+    "n": "CDN",
+    "s": 25
+   },
+   {
+    "n": "Technical GEO",
+    "s": 25
+   },
+   {
+    "n": "China Market Access",
+    "s": null
+   }
+  ]
+ },
+ {
+  "site": "24s",
+  "cat": "SR",
+  "overall": 40,
+  "geo": 65,
+  "china": 47,
+  "chinaOverall": 33,
+  "topics": [
+   {
+    "n": "Images management",
+    "s": 30
+   },
+   {
+    "n": "Slider management",
+    "s": null
+   },
+   {
+    "n": "Video management",
+    "s": 70
+   },
+   {
+    "n": "Third parties",
+    "s": 25
+   },
+   {
+    "n": "TTFB/Cache",
+    "s": 75
+   },
+   {
+    "n": "JS management",
+    "s": 55
+   },
+   {
+    "n": "CSS management",
+    "s": 0
+   },
+   {
+    "n": "Critical path",
+    "s": 25
+   },
+   {
+    "n": "Fonts management",
+    "s": 40
+   },
+   {
+    "n": "CDN",
+    "s": 40
+   },
+   {
+    "n": "Technical GEO",
+    "s": 65
+   },
+   {
+    "n": "China Market Access",
+    "s": null
+   }
+  ]
+ },
+ {
+  "site": "MOET",
+  "cat": "WineSpirits",
+  "overall": 42,
+  "geo": 85,
+  "china": 22,
+  "chinaOverall": 44,
+  "topics": [
+   {
+    "n": "Images management",
+    "s": 70
+   },
+   {
+    "n": "Slider management",
+    "s": 55
+   },
+   {
+    "n": "Video management",
+    "s": null
+   },
+   {
+    "n": "Third parties",
+    "s": 15
+   },
+   {
+    "n": "TTFB/Cache",
+    "s": 75
+   },
+   {
+    "n": "JS management",
+    "s": 25
+   },
+   {
+    "n": "CSS management",
+    "s": 0
+   },
+   {
+    "n": "Critical path",
+    "s": 15
+   },
+   {
+    "n": "Fonts management",
+    "s": 30
+   },
+   {
+    "n": "CDN",
+    "s": 90
+   },
+   {
+    "n": "Technical GEO",
+    "s": 85
+   },
+   {
+    "n": "China Market Access",
+    "s": null
+   }
+  ]
+ },
+ {
+  "site": "HENNESSY",
+  "cat": "WineSpirits",
+  "overall": 38,
+  "geo": 85,
+  "china": 55,
+  "chinaOverall": 50,
+  "topics": [
+   {
+    "n": "Images management",
+    "s": 60
+   },
+   {
+    "n": "Slider management",
+    "s": null
+   },
+   {
+    "n": "Video management",
+    "s": 50
+   },
+   {
+    "n": "Third parties",
+    "s": 25
+   },
+   {
+    "n": "TTFB/Cache",
+    "s": 35
+   },
+   {
+    "n": "JS management",
+    "s": 25
+   },
+   {
+    "n": "CSS management",
+    "s": 0
+   },
+   {
+    "n": "Critical path",
+    "s": 40
+   },
+   {
+    "n": "Fonts management",
+    "s": 40
+   },
+   {
+    "n": "CDN",
+    "s": 65
+   },
+   {
+    "n": "Technical GEO",
+    "s": 85
+   },
+   {
+    "n": "China Market Access",
+    "s": null
+   }
+  ]
+ },
+ {
+  "site": "DOM PERIGNON",
+  "cat": "WineSpirits",
+  "overall": 66,
+  "geo": 65,
+  "china": null,
+  "chinaOverall": null,
+  "topics": [
+   {
+    "n": "Images management",
+    "s": 95
+   },
+   {
+    "n": "Slider management",
+    "s": null
+   },
+   {
+    "n": "Video management",
+    "s": 85
+   },
+   {
+    "n": "Third parties",
+    "s": 90
+   },
+   {
+    "n": "TTFB/Cache",
+    "s": 0
+   },
+   {
+    "n": "JS management",
+    "s": 75
+   },
+   {
+    "n": "CSS management",
+    "s": 50
+   },
+   {
+    "n": "Critical path",
+    "s": 45
+   },
+   {
+    "n": "Fonts management",
+    "s": 90
+   },
+   {
+    "n": "CDN",
+    "s": 60
+   },
+   {
+    "n": "Technical GEO",
+    "s": 65
+   },
+   {
+    "n": "China Market Access",
+    "s": null
+   }
+  ]
+ },
+ {
+  "site": "VEUVE CLICQUOT",
+  "cat": "WineSpirits",
+  "overall": 31,
+  "geo": 70,
+  "china": null,
+  "chinaOverall": null,
+  "topics": [
+   {
+    "n": "Images management",
+    "s": 55
+   },
+   {
+    "n": "Slider management",
+    "s": null
+   },
+   {
+    "n": "Video management",
+    "s": null
+   },
+   {
+    "n": "Third parties",
+    "s": 10
+   },
+   {
+    "n": "TTFB/Cache",
+    "s": 0
+   },
+   {
+    "n": "JS management",
+    "s": 55
+   },
+   {
+    "n": "CSS management",
+    "s": 10
+   },
+   {
+    "n": "Critical path",
+    "s": 25
+   },
+   {
+    "n": "Fonts management",
+    "s": 10
+   },
+   {
+    "n": "CDN",
+    "s": 80
+   },
+   {
+    "n": "Technical GEO",
+    "s": 70
+   },
+   {
+    "n": "China Market Access",
+    "s": null
+   }
+  ]
+ },
+ {
+  "site": "KRUG",
+  "cat": "WineSpirits",
+  "overall": 67,
+  "geo": 100,
+  "china": null,
+  "chinaOverall": null,
+  "topics": [
+   {
+    "n": "Images management",
+    "s": 95
+   },
+   {
+    "n": "Slider management",
+    "s": null
+   },
+   {
+    "n": "Video management",
+    "s": null
+   },
+   {
+    "n": "Third parties",
+    "s": 90
+   },
+   {
+    "n": "TTFB/Cache",
+    "s": 60
+   },
+   {
+    "n": "JS management",
+    "s": 25
+   },
+   {
+    "n": "CSS management",
+    "s": 60
+   },
+   {
+    "n": "Critical path",
+    "s": 55
+   },
+   {
+    "n": "Fonts management",
+    "s": 80
+   },
+   {
+    "n": "CDN",
+    "s": 70
+   },
+   {
+    "n": "Technical GEO",
+    "s": 100
+   },
+   {
+    "n": "China Market Access",
+    "s": null
+   }
+  ]
+ },
+ {
+  "site": "RUINART",
+  "cat": "WineSpirits",
+  "overall": 42,
+  "geo": 65,
+  "china": null,
+  "chinaOverall": null,
+  "topics": [
+   {
+    "n": "Images management",
+    "s": 75
+   },
+   {
+    "n": "Slider management",
+    "s": null
+   },
+   {
+    "n": "Video management",
+    "s": null
+   },
+   {
+    "n": "Third parties",
+    "s": 25
+   },
+   {
+    "n": "TTFB/Cache",
+    "s": 15
+   },
+   {
+    "n": "JS management",
+    "s": 55
+   },
+   {
+    "n": "CSS management",
+    "s": 30
+   },
+   {
+    "n": "Critical path",
+    "s": 25
+   },
+   {
+    "n": "Fonts management",
+    "s": 50
+   },
+   {
+    "n": "CDN",
+    "s": 60
+   },
+   {
+    "n": "Technical GEO",
+    "s": 65
+   },
+   {
+    "n": "China Market Access",
+    "s": null
+   }
+  ]
+ }
+]

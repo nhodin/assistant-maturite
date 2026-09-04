@@ -15,6 +15,9 @@
         provisoire — <%= pending %> critère<%= pending > 1 ? 's' : '' %> à confirmer
       </span>
     <% } %>
+    <% if (typeof captured !== 'undefined' && !captured) { %>
+      <span class="uncaptured" title="Page jamais capturée — tous ses verdicts sont à saisir à la main">non capturée</span>
+    <% } %>
     <span class="muted url"><%= pageUrl %></span>
     <button class="btn sm" type="button" title="Fermer"
             onclick="this.closest('.crit-panel').parentNode.innerHTML=''">✕</button>

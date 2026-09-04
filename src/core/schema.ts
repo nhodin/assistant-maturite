@@ -41,6 +41,16 @@ export const NetworkRequestSchema = z.object({
    * a missing phase is treated as "load" by every control.
    */
   phase: z.enum(["load", "interaction"]).optional(),
+  /**
+   * Whether the request belongs to the page's OWN (top-level) frame, as opposed
+   * to an embedded iframe. Only meaningful for `resourceType === "document"`,
+   * where it separates the page itself from a third-party iframe document — a
+   * distinction the capture health check needs, since a tracking iframe that
+   * 404s says nothing about whether the real page loaded.
+   * Optional for backward-compat with evidence captured before this field
+   * existed; consumers must treat `undefined` as unknown, never as false.
+   */
+  isMainFrame: z.boolean().optional(),
 });
 
 /** A significant tag inside <head>, in document order. */

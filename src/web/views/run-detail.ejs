@@ -80,13 +80,26 @@
   </table>
   </div>
 
+  <%# A site whose every page failed has no aggregate, so it is nowhere in the
+      ranking above. Its per-site page still opens: that is where its criteria
+      are graded by hand, and the first verdict puts it back in the classement. %>
+  <% var unscored = (typeof unscoredSites !== 'undefined' && unscoredSites) ? unscoredSites : []; %>
+  <% if (unscored.length) { %>
+    <p class="muted note">
+      <strong>Sans score :</strong>
+      <% unscored.forEach(function(site, i){ %><%= i ? ' · ' : '' %><a href="/runs/<%= run.id %>/sites/<%= site.id %>"><%= site.name %></a><% }) %>
+      — aucune de leurs pages n'a pu être capturée. Ouvrir le site permet d'en saisir
+      les verdicts à la main ; le premier saisi le fait entrer dans le classement.
+    </p>
+  <% } %>
+
   <h2>Capture des pages</h2>
   <table class="grid small">
     <thead><tr><th>Site</th><th>Type</th><th>URL</th><th>Statut</th></tr></thead>
     <tbody>
       <% run.runPages.forEach(function(rp){ %>
         <tr>
-          <td><%= rp.page.site.name %></td>
+          <td><a href="/runs/<%= run.id %>/sites/<%= rp.page.siteId %>"><%= rp.page.site.name %></a></td>
           <td><span class="badge<%= rp.page.kind === 'CHINA' ? ' b-china' : '' %>"><%= rp.page.kind %></span></td>
           <td class="url"><%= rp.url %></td>
           <td><span class="badge b-<%= rp.status %>"><%= rp.status %></span></td>

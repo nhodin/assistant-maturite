@@ -377,6 +377,43 @@ describe("tp.limit", () => {
     const { passed } = ctrl["tp.limit"]!.evaluate(e)
     expect(passed).toBe(true)
   })
+
+  it("PASS — cookielaw.org + onetrust.com collapse to 1 consent provider", () => {
+    // OneTrust serves its consent-management platform from two domains (its CDN/API
+    // domain cookielaw.org and its product/marketing domain onetrust.com) — same
+    // vendor, same usage, should NOT be counted as 2 providers in the "consent"
+    // category.
+    const e = makeEvidence({
+      finalUrl: "https://example.com/",
+      requests: [
+        {
+          url: "https://cdn.cookielaw.org/consent/abc/otSDKStub.js",
+          resourceType: "script",
+          status: 200,
+          fromCache: false,
+          encodedBytes: 20000,
+          decodedBytes: 40000,
+          requestHeaders: {},
+          responseHeaders: {},
+          mimeType: "text/javascript",
+        },
+        {
+          url: "https://geolocation.onetrust.com/cookieconsentpub/v1/geo/location",
+          resourceType: "xhr",
+          status: 200,
+          fromCache: false,
+          encodedBytes: 500,
+          decodedBytes: 500,
+          requestHeaders: {},
+          responseHeaders: {},
+          mimeType: "application/json",
+        },
+      ],
+    })
+    const { passed, evidence } = ctrl["tp.limit"]!.evaluate(e)
+    expect(passed).toBe(true)
+    expect(evidence).toMatch(/no category exceeds 1/)
+  })
 })
 
 // ─────────────────────────────────────────────────────────────────────────────

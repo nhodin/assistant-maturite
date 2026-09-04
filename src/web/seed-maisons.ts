@@ -1,12 +1,16 @@
 /**
- * Seed the LVMH maisons from data/maisons.csv (Division,Maison,Locale principale,Page China)
- * as sites with an HP page plus, when the maison has one, a CHINA page — and add
- * every one of those pages to a project. An "x" in the China column means none.
+ * Seed maisons from a CSV as sites with an HP page plus, when there is one, a CHINA
+ * page — and add every one of those pages to a project. An "x" in the China column
+ * means the maison has no China page.
+ *
+ * The CSV needs a division column, a name column and an HP-URL column, under any of
+ * the header spellings listed in COLUMNS below (the LVMH sheet and the competitors
+ * sheet name them differently).
  *
  * Idempotent: an existing site (matched by name or by an alias below) is reused,
  * an existing page with the same URL is reused, and the project link is upserted.
  *
- * Run: npx tsx src/web/seed-maisons.ts [projectId=8] [--dry]
+ * Run: npx tsx src/web/seed-maisons.ts [projectId=8] [--csv data/maisons.csv] [--dry]
  */
 import "dotenv/config";
 import fs from "node:fs";
@@ -16,15 +20,32 @@ import { prisma } from "./db";
 
 type Cat = "Beauty" | "Fragrances" | "WatchesJewelry" | "WineSpirits" | "SR" | "Other";
 
-/** LVMH division (CSV) → Category enum. FG has no dedicated enum value. */
+/** Division (CSV, matched lower-cased) → Category enum. FG has no dedicated enum value. */
 const CATEGORY_BY_DIVISION: Record<string, Cat> = {
-  Beauty: "Beauty",
-  FG: "Other",
-  WJ: "WatchesJewelry",
-  WS: "WineSpirits",
-  SR: "SR",
-  Other: "Other",
+  beauty: "Beauty",
+  fg: "Other",
+  wj: "WatchesJewelry",
+  ws: "WineSpirits",
+  sr: "SR",
+  other: "Other",
 };
+
+/** Accepted header spellings per logical column, in priority order. */
+const COLUMNS = {
+  division: ["Division"],
+  name: ["Maison", "COMPETITORS"],
+  hp: ["Locale principale", "URL HP"],
+  china: ["Page China", "URL CHINA"],
+};
+
+/** First non-empty value among the accepted headers for that column. */
+function cell(row: Record<string, string>, column: keyof typeof COLUMNS): string {
+  for (const header of COLUMNS[column]) {
+    const v = row[header];
+    if (v?.trim()) return v.trim();
+  }
+  return "";
+}
 
 /**
  * Maisons already in the inventory under a different name. The existing site is
@@ -51,13 +72,18 @@ async function main() {
   const args = process.argv.slice(2);
   const dry = args.includes("--dry");
   const projectId = Number(args.find((a) => /^\d+$/.test(a)) ?? 8);
+  const csvArg = args[args.indexOf("--csv") + 1];
+  const csvPath = args.includes("--csv") && csvArg ? csvArg : path.resolve("data", "maisons.csv");
 
   const project = await prisma.project.findUnique({ where: { id: projectId }, include: { client: true } });
   if (!project) throw new Error(`Project ${projectId} not found`);
   const clientId = project.clientId;
-  console.log(`Project ${project.id} — ${project.name} (client: ${project.client?.name ?? "none"})${dry ? " [DRY RUN]" : ""}\n`);
+  console.log(
+    `Project ${project.id} — ${project.name} (client: ${project.client?.name ?? "none"})\n` +
+      `CSV: ${csvPath}${dry ? " [DRY RUN]" : ""}\n`
+  );
 
-  const rows = parse(fs.readFileSync(path.resolve("data", "maisons.csv"), "utf-8"), {
+  const rows = parse(fs.readFileSync(csvPath, "utf-8"), {
     columns: true,
     skip_empty_lines: true,
     trim: true,
@@ -67,12 +93,11 @@ async function main() {
   let sitesCreated = 0, sitesReused = 0, pagesCreated = 0, pagesReused = 0, linked = 0, alreadyLinked = 0, noChina = 0, skipped = 0;
 
   for (const r of rows) {
-    const maison = (r["Maison"] ?? "").trim();
-    const division = (r["Division"] ?? "").trim();
-    const url = normalizeUrl(r["Locale principale"] ?? "");
+    const maison = cell(r, "name");
+    const url = normalizeUrl(cell(r, "hp"));
     if (!maison || !url) continue;
 
-    const category = CATEGORY_BY_DIVISION[division] ?? "Other";
+    const category = CATEGORY_BY_DIVISION[cell(r, "division").toLowerCase()] ?? "Other";
     // The CSV name wins; the alias is only a fallback for a first import over an
     // inventory that predates this CSV (a previous run renames the site, so on the
     // next run the alias no longer resolves and must not create a duplicate).
@@ -143,8 +168,8 @@ async function main() {
 
     await ensurePage("HP", url);
 
-    // "Page China" column: an "x" (or an empty cell) means the maison has no China page.
-    const chinaRaw = (r["Page China"] ?? "").trim();
+    // China column: an "x" (or an empty cell) means the maison has no China page.
+    const chinaRaw = cell(r, "china");
     if (!chinaRaw || /^x$/i.test(chinaRaw)) {
       noChina++;
       console.log(`  china none`);

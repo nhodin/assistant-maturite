@@ -585,6 +585,59 @@ export function scorePage(
 }
 
 /**
+ * Evidence written on a criterion of a page that was never captured. It reads as
+ * a failure to measure, not as a failed criterion — which is exactly what
+ * « à confirmer » means, and why every slot below carries `unknown`.
+ */
+export const NOT_CAPTURED_EVIDENCE =
+  "Page non capturée — verdict à saisir manuellement";
+
+/**
+ * The empty skeleton of per-page results for a page that was never captured
+ * (the run was interrupted, the WAF blocked it…), so an operator can still grade
+ * it by hand from the UI instead of losing the site.
+ *
+ * Same shape `scorePage` would have produced: the criteria the mode does not
+ * measure are already N/A (a China page keeps only the first criterion of each
+ * topic, plus topic 12), and the rest are N/A too but flagged `unknown`, so the
+ * UI shows them as « à confirmer » rather than as measured verdicts.
+ *
+ * N/A rather than failed is deliberate: a page nobody could capture must drag no
+ * score down on its own. Feeding this to `rescorePageFromVerdicts` yields an
+ * all-N/A page, and each manual verdict then moves it exactly as on a captured
+ * page — a partially graded page scores only what was actually arbitrated.
+ */
+export function emptyPageTopics(
+  topics: TopicModule[],
+  config: ConfigMap,
+  mode: PageScoringMode,
+): TopicResult[] {
+  return topics.map((topic): TopicResult => {
+    const firstIdx = firstMeasuredIndex(topic, config);
+    const controls = topic.controls.map((control, index): ControlResult => {
+      const cfg = getConfig(config, control.id);
+      const na = (evidence: string): ControlResult => ({
+        controlId: control.id,
+        label: control.label,
+        applicable: false,
+        passed: false,
+        pointsAwarded: 0,
+        maxPoints: 0,
+        evidence,
+      });
+      if (!cfg.enabled) return na("disabled");
+      const plan = planControl(topic, control, index, cfg, mode, firstIdx);
+      if (!plan.measured) return na(plan.skipReason);
+      // Derived criteria are recomputed from the other topics at every re-score:
+      // they are never « à confirmer » and never editable.
+      if (plan.derived) return na("Calculé à partir des autres sujets");
+      return { ...na(NOT_CAPTURED_EVIDENCE), unknown: true };
+    });
+    return { topicId: topic.id, name: topic.name, score: null, controls };
+  });
+}
+
+/**
  * Re-score a page from the verdicts ALREADY STORED on it, instead of from its
  * EvidenceBundle. Same rule as `scorePage` — only the source of each verdict
  * differs: `applicable` / `passed` / `evidence` are taken verbatim from the
@@ -699,6 +752,15 @@ function combineBlocks(
     chinaOverall: china?.agg.overall ?? null,
     pages,
   };
+}
+
+/**
+ * The all-N/A topic list of a site with nothing scored yet — the same shape
+ * `combineBlocks` gives a site with no standard page, exposed so the UI can open
+ * a site whose every page failed to capture and let an operator grade it by hand.
+ */
+export function emptySiteTopics(topics: TopicModule[]): TopicResult[] {
+  return topics.map((t) => emptyTopicResult(t));
 }
 
 function emptyTopicResult(topic: TopicModule): TopicResult {

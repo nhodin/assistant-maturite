@@ -229,3 +229,27 @@ select.verdict.unknown { border: 1px solid var(--todo); }
 .provisional-mark { margin-left: .2rem; color: var(--todo); font-weight: 700; }
 td.verdict-cell { white-space: nowrap; }
 p.note { margin: .2rem 0 .8rem; font-size: .9em; }
+
+/* Run/site detail — URLs of the pages actually tested, so they can be opened. */
+.page-urls { list-style: none; margin: .6rem 0 1rem; padding: 0; font-size: 12px; }
+.page-urls li { display: flex; gap: .5rem; align-items: baseline; padding: .15rem 0; }
+.page-urls .lbl { color: var(--muted); min-width: 5.5rem; text-transform: uppercase;
+  letter-spacing: .03em; font-size: 11px; }
+.page-urls a { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60ch; }
+th a.page-head { color: inherit; text-decoration: none; }
+th a.page-head:hover { text-decoration: underline; }
+
+/* A page the run never captured: its criteria exist only so an operator can
+   grade them by hand — the badge keeps them from reading as measurements. */
+.uncaptured {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border: 1px solid #b45309;
+  border-radius: 10px;
+  background: #fffbeb;
+  color: #92400e;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}

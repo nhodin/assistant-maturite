@@ -25,6 +25,7 @@ import {
   scorePage,
   scoreSiteFromPages,
   rescorePageFromVerdicts,
+  emptyPageTopics,
 } from "../src/engine/index";
 
 function makeControl(
@@ -343,5 +344,72 @@ describe("manual arbitration of an « à confirmer » criterion", () => {
     // provisional: a human decided it.
     expect(after.topics.find((t) => t.topicId === 1)!.score).toBe(30);
     expect(countPendingConfirmations(after.topics)).toBe(0);
+  });
+});
+
+/**
+ * A page the run never managed to capture (interrupted run, WAF block) has no
+ * stored criteria at all. `emptyPageTopics` gives it the same shape a capture
+ * would have produced so an operator can grade it by hand from the UI — without
+ * that, a site blocked on one page stays N/A for good, with nothing to click.
+ */
+describe("emptyPageTopics — grading a page that was never captured", () => {
+  const skeleton = (mode: "standard" | "china" = "standard"): PageResult => ({
+    url: "https://example.com/",
+    mode,
+    topics: emptyPageTopics(topics, cfg, mode),
+    overall: null,
+    geo: null,
+    china: null,
+  });
+
+  it("scores as an all-N/A page until somebody arbitrates a criterion", () => {
+    const page = rescorePageFromVerdicts(skeleton(), topics, cfg);
+    expect(page.overall).toBeNull();
+    expect(topicOf(page, 1).score).toBeNull();
+    expect(controlOf(page, "t1.c1").applicable).toBe(false);
+  });
+
+  it("marks every measurable criterion « à confirmer », derived ones excepted", () => {
+    const page = skeleton();
+    expect(controlOf(page, "t1.c1").unknown).toBe(true);
+    expect(controlOf(page, "t1.c2").unknown).toBe(true);
+    // Recomputed from the other topics at every re-score: nothing to arbitrate.
+    expect(controlOf(page, "t12.basics").unknown).toBeUndefined();
+    // Only the criteria this MODE measures carry the flag: topic 12 is
+    // China-only, so a standard page leaves it N/A with nothing to arbitrate.
+    expect(controlOf(page, "t12.c2").unknown).toBeUndefined();
+    // They are N/A, not failures: an uncaptured page drags no score down, it
+    // simply has nothing to say until somebody grades it. Hence no « provisoire »
+    // badge either — there is no score above them to call provisional.
+    expect(countPendingConfirmations(page.topics)).toBe(0);
+  });
+
+  it("keeps the China rule: only the first criterion of a topic is gradable", () => {
+    const page = skeleton("china");
+    expect(controlOf(page, "t12.c2").unknown).toBe(true); // topic 12 in full
+    expect(controlOf(page, "t11.c1").unknown).toBe(true);
+    const scored = rescorePageFromVerdicts(
+      withVerdict(skeleton("china"), "t1.c1", { passed: true }),
+      topics,
+      cfg,
+    );
+    // The first criterion carries the whole topic on a China page.
+    expect(topicOf(scored, 1).score).toBe(100);
+    expect(scored.overall).toBe(100);
+  });
+
+  it("moves the score exactly like a correction on a captured page", () => {
+    const scored = rescorePageFromVerdicts(
+      withVerdict(skeleton(), "t1.c1", { passed: true }),
+      topics,
+      cfg,
+    );
+    expect(topicOf(scored, 1).score).toBe(30);
+    expect(scored.overall).toBe(30);
+    // The criteria nobody graded stay N/A — they award nothing, so a partially
+    // graded page scores only what was actually arbitrated.
+    expect(controlOf(scored, "t1.c2").applicable).toBe(false);
+    expect(controlOf(scored, "t1.c2").unknown).toBe(true);
   });
 });

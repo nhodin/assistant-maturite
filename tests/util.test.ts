@@ -10,6 +10,10 @@ import {
   isFirstParty,
   cacheControlMaxAge,
   cacheControlSharedTtl,
+  stripHtmlComments,
+  parseTags,
+  bodySlice,
+  wordCount,
 } from "../src/topics/util"
 
 describe("registrableDomain", () => {
@@ -82,5 +86,71 @@ describe("cacheControlSharedTtl (shared/CDN semantics — s-maxage wins)", () =>
   })
   it("handles s-maxage=0 (distinct from absent)", () => {
     expect(cacheControlSharedTtl("public, s-maxage=0, max-age=600")).toBe(0)
+  })
+})
+
+// ── HTML comment stripping ────────────────────────────────────────────────────
+describe("stripHtmlComments", () => {
+  it("removes a simple comment", () => {
+    expect(stripHtmlComments("<p>a</p><!-- comment --><p>b</p>")).toBe(
+      "<p>a</p> <p>b</p>",
+    )
+  })
+  it("removes a multi-line comment", () => {
+    const html = "<p>a</p><!--\nline1\nline2\n--><p>b</p>"
+    const out = stripHtmlComments(html)
+    expect(out).not.toContain("line1")
+    expect(out).not.toContain("line2")
+    expect(out).toContain("<p>a</p>")
+    expect(out).toContain("<p>b</p>")
+  })
+  it("removes multiple separate comments", () => {
+    const html = "<!--one--><p>a</p><!--two--><p>b</p><!--three-->"
+    const out = stripHtmlComments(html)
+    expect(out).not.toContain("one")
+    expect(out).not.toContain("two")
+    expect(out).not.toContain("three")
+    expect(out).toContain("<p>a</p>")
+    expect(out).toContain("<p>b</p>")
+  })
+  it("truncates an unterminated comment to end of document", () => {
+    const html = "<p>a</p><!-- never closed <p>b</p>"
+    const out = stripHtmlComments(html)
+    expect(out).toContain("<p>a</p>")
+    expect(out).not.toContain("<p>b</p>")
+    expect(out).not.toContain("never closed")
+  })
+  it("does NOT mutilate a <script> body containing a literal <!-- -->", () => {
+    const html =
+      "<script>\n<!--\nvar x = 1;\n// -->\n</script><p>after</p>"
+    const out = stripHtmlComments(html)
+    expect(out).toContain("var x = 1;")
+    expect(out).toContain("<p>after</p>")
+  })
+  it("does NOT mutilate a <style> body containing a literal <!-- -->", () => {
+    const html = "<style><!-- body { color: red; } --></style><p>after</p>"
+    const out = stripHtmlComments(html)
+    expect(out).toContain("body { color: red; }")
+    expect(out).toContain("<p>after</p>")
+  })
+})
+
+describe("parseTags ignores markup inside HTML comments", () => {
+  it("does not return an <img> that only exists in a comment, but returns the real one", () => {
+    const html =
+      '<!-- <img src="commented.jpg" loading="lazy"> --><img src="real.jpg" loading="lazy">'
+    const imgs = parseTags(html, "img")
+    expect(imgs).toHaveLength(1)
+    expect(imgs[0]!.attrs["src"]).toBe("real.jpg")
+  })
+})
+
+describe("bodySlice / wordCount ignore commented-out text", () => {
+  it("does not count words that are only inside an HTML comment", () => {
+    const words = Array.from({ length: 100 }, (_, i) => "word" + i).join(" ")
+    const html = `<body><!-- ${words} --><p>only three real words</p></body>`
+    const body = bodySlice(html)
+    expect(body).not.toContain("word0")
+    expect(wordCount(body)).toBe(4)
   })
 })

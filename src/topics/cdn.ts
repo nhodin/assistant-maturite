@@ -28,6 +28,17 @@ function staticAssets(e: EvidenceBundle): NetworkRequest[] {
 }
 
 /**
+ * Static assets restricted to the page's own registrable domain (and its
+ * subdomains) — used ONLY by cdn.longttl. Third-party TTLs say nothing about
+ * the site's own caching configuration, so mixing them in dilutes the ratio.
+ * Other longTtl-adjacent controls (brotli/zstd) keep using `staticAssets`/
+ * `textResources` unchanged.
+ */
+function firstPartyStaticAssets(e: EvidenceBundle): NetworkRequest[] {
+  return staticAssets(e).filter((r) => isFirstParty(r.url, e.finalUrl))
+}
+
+/**
  * Returns true if the response headers show the resource was served from the CDN cache
  * (`server-timing: cdn-cache; desc=HIT`, `x-cache: HIT`, `cf-cache-status: HIT`…) or has
  * spent a significant time in it (`age` ≥ 1h).
@@ -126,11 +137,18 @@ const longTtlControl: Control = {
   topicId: 10,
   label: "Long TTL for static assets (≥180 days or immutable)",
   description:
-    "Majority of image/stylesheet/script/font responses have cache-control max-age ≥15552000 or immutable — " +
-    "a short but non-round max-age served from the CDN cache (countdown of a longer origin TTL) also counts.",
+    "Majority of image/stylesheet/script/font responses SERVED FROM THE PAGE'S OWN DOMAIN " +
+    "(root + subdomains) have cache-control max-age ≥15552000 or immutable — a short but " +
+    "non-round max-age served from the CDN cache (countdown of a longer origin TTL) also " +
+    "counts. Third-party asset TTLs say nothing about the site's own configuration, so they " +
+    "are excluded when at least one first-party asset was observed; when NONE was observed, " +
+    "the criterion falls back to measuring all domains (third-party included) rather than " +
+    "leaving the ratio unmeasured, and the evidence says so explicitly.",
   defaultPoints: 20,
   evaluate(e) {
-    const assets = staticAssets(e)
+    const firstPartyAssets = firstPartyStaticAssets(e)
+    const usingFallback = firstPartyAssets.length === 0
+    const assets = usingFallback ? staticAssets(e) : firstPartyAssets
     if (assets.length === 0) {
       return { passed: false, evidence: "No static asset requests observed" }
     }
@@ -140,9 +158,12 @@ const longTtlControl: Control = {
     })
     const pct = Math.round((longTtlAssets.length / assets.length) * 100)
     const passed = longTtlAssets.length / assets.length > 0.5
+    const scope = usingFallback
+      ? "third-party static assets (no first-party asset observed)"
+      : "first-party static assets"
     return {
       passed,
-      evidence: `${longTtlAssets.length}/${assets.length} static assets have long TTL (≥180d or immutable) = ${pct}%`,
+      evidence: `${longTtlAssets.length}/${assets.length} ${scope} have long TTL (≥180d or immutable) = ${pct}%`,
     }
   },
 }

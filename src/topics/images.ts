@@ -5,6 +5,7 @@
  */
 import type { EvidenceBundle, NetworkRequest } from "../core"
 import type { Control, TopicModule } from "../core"
+import { stripHtmlComments } from "./util"
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -59,8 +60,8 @@ function styleAttrValue(tag: string): string {
   return m ? (m[1] ?? m[2] ?? "") : ""
 }
 
-function countImgsWithBothDimensions(html: string): number {
-  const imgTags = html.match(/<img\b[^>]*>/gi) ?? []
+function countImgsWithBothDimensions(rawHtml: string): number {
+  const imgTags = stripHtmlComments(rawHtml).match(/<img\b[^>]*>/gi) ?? []
   return imgTags.filter((tag) => {
     const style = styleAttrValue(tag)
     // HTML attributes (width=/height=) OR equivalent CSS properties set inline
@@ -85,7 +86,7 @@ const lazyloadControl: Control = {
     'At least one lazy-loaded <img>: native (loading="lazy") or JS-driven (data-src/data-lazy with no eager src).',
   defaultPoints: 30,
   evaluate(e) {
-    const imgTags = e.rawHtml.match(/<img\b[^>]*>/gi) ?? []
+    const imgTags = stripHtmlComments(e.rawHtml).match(/<img\b[^>]*>/gi) ?? []
     const nativeCount = imgTags.filter((tag) => /\bloading\s*=\s*["']?lazy["']?/i.test(tag)).length
     // JS-lazyload pattern (as detected by the slider topic): an <img> carrying
     // data-src/data-lazy and NO eager src — the real URL is swapped in by script.
@@ -159,7 +160,7 @@ const lcpPreloadControl: Control = {
       }
     }
     // Check 2: a <link rel="preload" as="image" fetchpriority="high"> in rawHtml.
-    const preloadLinks = e.rawHtml.match(/<link\b[^>]*>/gi) ?? []
+    const preloadLinks = stripHtmlComments(e.rawHtml).match(/<link\b[^>]*>/gi) ?? []
     const imagePreloads = preloadLinks.filter((tag) => {
       const isPreload = /\brel\s*=\s*["']?preload["']?/i.test(tag)
       const isImage = /\bas\s*=\s*["']?image["']?/i.test(tag)
@@ -213,7 +214,7 @@ const fixedHeightControl: Control = {
     if (cls !== null && cls < 0.01) {
       return { passed: true, evidence: `CLS = ${cls} (< 0.01) — image sizing considered handled` }
     }
-    const imgTags = e.rawHtml.match(/<img\b[^>]*>/gi) ?? []
+    const imgTags = stripHtmlComments(e.rawHtml).match(/<img\b[^>]*>/gi) ?? []
     const total = imgTags.length
     if (total === 0) {
       return { passed: true, evidence: "No <img> tags found — criterion vacuously satisfied" }
@@ -269,11 +270,11 @@ const responsiveControl: Control = {
   evaluate(e) {
     const hasResponsiveAttr = (tag: string): boolean =>
       /\bsrcset\s*=/i.test(tag) || /\bsizes\s*=/i.test(tag)
-    const imgTags = e.rawHtml.match(/<img\b[^>]*>/gi) ?? []
+    const imgTags = stripHtmlComments(e.rawHtml).match(/<img\b[^>]*>/gi) ?? []
     // <source> inside <picture> — art-direction / format switching. Same intent as
     // srcset on the <img>, and the parser resolves it without JS. srcset/sizes only
     // exist on a <picture> child, so a media <source src=...> cannot false-positive.
-    const sourceTags = e.rawHtml.match(/<source\b[^>]*>/gi) ?? []
+    const sourceTags = stripHtmlComments(e.rawHtml).match(/<source\b[^>]*>/gi) ?? []
     const imgCount = imgTags.filter(hasResponsiveAttr).length
     const sourceCount = sourceTags.filter(hasResponsiveAttr).length
     const passed = imgCount + sourceCount > 0

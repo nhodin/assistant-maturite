@@ -178,4 +178,39 @@ describe("ttfb.bfcache", () => {
     const e = makeEvidence({ rawHtml: `<body onunload="x()"></body>` })
     expect(ctrl("ttfb.bfcache").evaluate(e).passed).toBe(false)
   })
+  it("FAIL — cache-control: no-store alone", () => {
+    const e = makeEvidence({
+      rawHtml: `<body>clean</body>`,
+      renderedHtml: `<body>clean</body>`,
+      mainResponseHeaders: { "cache-control": "no-store" },
+    })
+    const r = ctrl("ttfb.bfcache").evaluate(e)
+    expect(r.passed).toBe(false)
+    expect(r.evidence).toMatch(/no-store/)
+  })
+  it("FAIL — unload handler alone (normal cache-control)", () => {
+    const e = makeEvidence({
+      rawHtml: `<body onunload="x()"></body>`,
+      mainResponseHeaders: { "cache-control": "max-age=300" },
+    })
+    expect(ctrl("ttfb.bfcache").evaluate(e).passed).toBe(false)
+  })
+  it("FAIL — both no-store and unload handler", () => {
+    const e = makeEvidence({
+      rawHtml: `<body onunload="x()"></body>`,
+      mainResponseHeaders: { "cache-control": "no-store" },
+    })
+    const r = ctrl("ttfb.bfcache").evaluate(e)
+    expect(r.passed).toBe(false)
+    expect(r.evidence).toMatch(/no-store/)
+    expect(r.evidence).toMatch(/unload/)
+  })
+  it("PASS — no unload handler and normal cache-control", () => {
+    const e = makeEvidence({
+      rawHtml: `<body>clean</body>`,
+      renderedHtml: `<body>clean</body>`,
+      mainResponseHeaders: { "cache-control": "max-age=300" },
+    })
+    expect(ctrl("ttfb.bfcache").evaluate(e).passed).toBe(true)
+  })
 })

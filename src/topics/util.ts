@@ -114,6 +114,56 @@ export function cacheControlSharedTtl(value: string): number | null {
   return cacheControlMaxAge(value);
 }
 
+/**
+ * Strip HTML comments (`<!-- ... -->`) from `html` so markup that only exists inside a
+ * comment is never picked up by the regex-based parsing helpers below — a browser never
+ * executes a comment, so it must never validate (nor invalidate) a criterion.
+ *
+ * Approach: `<script>`/`<style>` bodies can legitimately contain a literal `<!--`/`-->`
+ * (the old "hide from ancient browsers" idiom), so those blocks are carved out FIRST and
+ * put back untouched; comments are only stripped from what remains. An unterminated
+ * comment (no closing `-->` before EOF) is truncated to end-of-document, matching how a
+ * browser's parser would treat it.
+ *
+ * Memoized on the last input string (by reference) since callers such as `parseTags`,
+ * `headSlice` and `bodySlice` are frequently chained on the same multi-MB `rawHtml`
+ * within one control evaluation — avoids re-scanning the whole document repeatedly.
+ */
+let lastCommentStripInput: string | null = null;
+let lastCommentStripOutput = "";
+export function stripHtmlComments(html: string): string {
+  if (!html) return html || "";
+  if (html === lastCommentStripInput) return lastCommentStripOutput;
+
+  // Carve out <script>/<style> bodies so a literal "<!--"/"-->" inside them survives.
+  // Sentinel from the Unicode private-use area: it cannot occur in real HTML, and
+  // unlike a NUL byte it keeps this file valid text for grep/diff/editors.
+  const placeholders: string[] = [];
+  const withPlaceholders = html.replace(
+    /<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi,
+    (block) => {
+      const idx = placeholders.push(block) - 1;
+      return `SCRIPTSTYLE${idx}`;
+    },
+  );
+
+  // Strip real comments from the remainder. Non-greedy handles multiple comments;
+  // the alternation's second branch handles an unterminated comment by eating to EOF.
+  const stripped = withPlaceholders.replace(
+    /<!--[\s\S]*?(?:-->|$)/g,
+    " ",
+  );
+
+  const restored = stripped.replace(
+    /SCRIPTSTYLE(\d+)/g,
+    (_m, idx) => placeholders[Number(idx)]!,
+  );
+
+  lastCommentStripInput = html;
+  lastCommentStripOutput = restored;
+  return restored;
+}
+
 export interface ParsedTag {
   /** Attribute map, names lowercased; valueless attrs map to "". */
   attrs: Record<string, string>;
@@ -142,9 +192,10 @@ function parseAttrs(s: string): Record<string, string> {
 export function parseTags(html: string, tag: string): ParsedTag[] {
   const out: ParsedTag[] = [];
   if (!html) return out;
+  const clean = stripHtmlComments(html);
   const re = new RegExp(`<${tag}\\b([^>]*)>`, "gi");
   let m: RegExpExecArray | null;
-  while ((m = re.exec(html)) !== null) {
+  while ((m = re.exec(clean)) !== null) {
     out.push({ attrs: parseAttrs(m[1]), raw: m[0] });
   }
   return out;
@@ -161,14 +212,16 @@ export function isNonBlockingScript(attrs: Record<string, string>): boolean {
 
 /** The raw <head>…</head> inner HTML, or "" if not found. */
 export function headSlice(html: string): string {
-  const m = /<head\b[^>]*>([\s\S]*?)<\/head>/i.exec(html);
+  const clean = stripHtmlComments(html);
+  const m = /<head\b[^>]*>([\s\S]*?)<\/head>/i.exec(clean);
   return m ? m[1] : "";
 }
 
 /** The raw <body>…</body> inner HTML, or the full html if no body tag. */
 export function bodySlice(html: string): string {
-  const m = /<body\b[^>]*>([\s\S]*?)<\/body>/i.exec(html);
-  return m ? m[1] : html;
+  const clean = stripHtmlComments(html);
+  const m = /<body\b[^>]*>([\s\S]*?)<\/body>/i.exec(clean);
+  return m ? m[1] : clean;
 }
 
 /** Strip scripts/styles/tags and collapse whitespace → visible text. */

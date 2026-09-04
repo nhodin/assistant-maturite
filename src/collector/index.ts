@@ -687,10 +687,23 @@ export const collect: CollectFn = async (
     }
 
     // ── CDP session for network events ─────────────────────────────────────────
+    // CDP id of the page's own top-level frame. Lets the bundle say whether a
+    // document response is the PAGE or an embedded iframe — a third-party
+    // tracking iframe that 404s must not condemn a capture that went fine.
+    let mainFrameId: string | null = null;
     let cdp: CDPSession;
     try {
       cdp = await context.newCDPSession(page);
       await cdp.send("Network.enable");
+      try {
+        const tree = (await cdp.send("Page.getFrameTree")) as {
+          frameTree?: { frame?: { id?: string } };
+        };
+        mainFrameId = tree.frameTree?.frame?.id ?? null;
+      } catch {
+        // Older/odd targets may refuse it — requests then carry no frame info and
+        // the health check falls back to matching on the captured URL's site.
+      }
       // CPU and network throttling, both OFF unless CAPTURE_CPU_THROTTLING /
       // CAPTURE_NETWORK_PROFILE ask for them (see throttling.ts): a throttle moves
       // every timing control, so it is an explicit operator decision, not a default
@@ -727,6 +740,7 @@ export const collect: CollectFn = async (
         requestHeaders: Record<string, string>;
         responseHeaders: Record<string, string>;
         mimeType: string;
+        frameId?: string;
       }
     >();
 
@@ -753,6 +767,7 @@ export const collect: CollectFn = async (
         (event: {
           requestId: string;
           type: string;
+          frameId?: string;
           response: {
             url: string;
             status: number;
@@ -789,6 +804,7 @@ export const collect: CollectFn = async (
               requestHeaders: reqHeaders,
               responseHeaders: respHeaders,
               mimeType: r.mimeType ?? "",
+              frameId: event.frameId,
             });
           } catch {
             // ignore bad events
@@ -983,6 +999,36 @@ export const collect: CollectFn = async (
       }
     }
 
+    // ── Raw HTML rescue, from INSIDE the page ──────────────────────────────────
+    // Last resort, and the only one that shares the browser's own network stack.
+    // `context.request` carries the session cookies but issues its own connection,
+    // so a WAF that binds its clearance to the TLS/JA3 fingerprint of the tab (a
+    // Cloudflare Turnstile the page visibly passed, for instance) challenges it
+    // again — and the capture ends up rejected on a "Just a moment..." title while
+    // the operator watched the real site render. A same-origin `fetch()` evaluated
+    // in the page reuses that very connection and its clearance cookie, and still
+    // returns the SERVER html, which is what rawHtml must hold: using the rendered
+    // DOM instead would silently pass the no-JS criteria (topics 2/3/6).
+    if (rawHtml.trim().length < 500 || isChallengeHtml(rawHtml)) {
+      try {
+        const body = await page.evaluate(async (url) => {
+          const res = await fetch(url, {
+            credentials: "include",
+            headers: { accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" },
+          });
+          return res.ok ? await res.text() : "";
+        }, finalUrl);
+        if (body.trim().length >= 500 && !isChallengeHtml(body)) {
+          rawHtml = body;
+          // No response headers from here — fetch() exposes only CORS-safelisted
+          // ones, and a partial header map would make topics 5/8/10 read absences
+          // as facts. Whatever the earlier tiers captured stays authoritative.
+        }
+      } catch {
+        // Best effort — let sanity judge whatever we ended up with.
+      }
+    }
+
     // ── Stop CSS coverage and compute unused % ───────────────────────────────────
     // Done after scroll/interaction so rules applied by deferred/below-the-fold
     // content count as used. unused% = (totalCssBytes - usedRuleBytes) / totalCssBytes.
@@ -1174,6 +1220,11 @@ export const collect: CollectFn = async (
         responseHeaders: entry.responseHeaders,
         mimeType: entry.mimeType,
         phase: phaseMap.get(requestId) ?? "load",
+        // Left undefined — "unknown" — when either id is missing, so consumers
+        // fall back instead of reading a guess as a fact.
+        ...(mainFrameId !== null && entry.frameId !== undefined
+          ? { isMainFrame: entry.frameId === mainFrameId }
+          : {}),
       });
     }
 

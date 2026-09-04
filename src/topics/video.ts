@@ -10,7 +10,14 @@
 import type { EvidenceBundle } from "../core"
 import type { Control, TopicModule } from "../core"
 import type { ParsedTag } from "./util"
-import { parseTags, headSlice, isFirstParty, requestsOfType, host } from "./util"
+import {
+  parseTags,
+  headSlice,
+  isFirstParty,
+  requestsOfType,
+  host,
+  stripHtmlComments,
+} from "./util"
 
 /**
  * The topic gate. A video only deserves to be graded when it is on the critical path:
@@ -128,7 +135,9 @@ function urlsWithoutJs(t: ParsedTag): string[] {
 
 /** Markup surrounding each <video>: the overlay is a sibling, almost always emitted
  *  BEFORE the video, hence the asymmetric window. */
-function videoWindows(html: string, before = 4000, after = 1000): string[] {
+function videoWindows(rawHtml: string, before = 4000, after = 1000): string[] {
+  // A commented-out <video> or poster overlay is never rendered.
+  const html = stripHtmlComments(rawHtml)
   const out: string[] = []
   const re = /<video\b/gi
   let m: RegExpExecArray | null

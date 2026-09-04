@@ -257,3 +257,66 @@ describe("assessCaptureHealth — failure kind", () => {
     expect(health.kind).toBeUndefined()
   })
 })
+
+/**
+ * A page embeds third-party iframes — consent, tag managers, analytics, 3D
+ * viewers — whose documents 4xx routinely without saying anything about whether
+ * the real page loaded. Two captures were rejected outright on exactly that:
+ * charlesheidsieck.com on a Stape service-worker iframe 404, fendi.com on a
+ * threedium.co.uk viewer 404, both while the page itself answered 200.
+ */
+describe("assessCaptureHealth — a failing iframe is not a failing page", () => {
+  const page = (over = {}) =>
+    req({ resourceType: "document", status: 200, url: "https://charlesheidsieck.com/fr", ...over })
+  const iframe = (over = {}) =>
+    req({
+      resourceType: "document",
+      status: 404,
+      url: "https://nxxfvodh.eul.stape.io/_/service_worker/sw_iframe.html",
+      ...over,
+    })
+  const evidence = (requests: NetworkRequest[]) =>
+    makeEvidence({
+      url: "https://charlesheidsieck.com/fr",
+      rawHtml: html("<title>Charles Heidsieck</title>"),
+      mainResponseHeaders: HEADERS,
+      requests,
+    })
+
+  it("accepts — third-party iframe 404s, the page itself is 200 (by frame id)", () => {
+    const health = assessCaptureHealth(
+      evidence([page({ isMainFrame: true }), iframe({ isMainFrame: false })]),
+    )
+    expect(health.ok).toBe(true)
+  })
+
+  it("accepts — same, on legacy evidence with no frame id (falls back to the site)", () => {
+    const health = assessCaptureHealth(evidence([page(), iframe()]))
+    expect(health.ok).toBe(true)
+  })
+
+  it("still rejects — the PAGE's own document 4xx", () => {
+    const health = assessCaptureHealth(
+      evidence([page({ status: 403, isMainFrame: true }), iframe({ isMainFrame: false })]),
+    )
+    expect(health.ok).toBe(false)
+    expect(health.kind).toBe("blocked")
+    expect(health.reason).toContain("charlesheidsieck.com")
+  })
+
+  it("still rejects — a SAME-SITE frame 4xx, which frame id is what settles", () => {
+    // Without isMainFrame the site fallback cannot tell the two apart, so it
+    // errs on the side of rejecting; with it, only the page itself counts.
+    const sub = req({
+      resourceType: "document",
+      status: 404,
+      url: "https://charlesheidsieck.com/embed/player",
+    })
+    expect(assessCaptureHealth(evidence([page(), sub])).ok).toBe(false)
+    expect(
+      assessCaptureHealth(
+        evidence([page({ isMainFrame: true }), { ...sub, isMainFrame: false }]),
+      ).ok,
+    ).toBe(true)
+  })
+})

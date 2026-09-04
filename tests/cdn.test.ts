@@ -171,6 +171,50 @@ describe("cdn.longttl", () => {
     expect(result.passed).toBe(false)
     expect(result.evidence).toMatch(/no static/i)
   })
+
+  it("passes on first-party long TTL even when third-party assets have short TTL (third parties excluded)", () => {
+    const e = makeEvidence({
+      finalUrl: "https://example.com/",
+      requests: [
+        { url: "https://example.com/a.jpg", resourceType: "image", status: 200, fromCache: false, encodedBytes: 50000, decodedBytes: 80000, requestHeaders: {}, responseHeaders: { "cache-control": "public, max-age=31536000, immutable" }, mimeType: "image/jpeg" },
+        { url: "https://static.example.com/b.css", resourceType: "stylesheet", status: 200, fromCache: false, encodedBytes: 5000, decodedBytes: 20000, requestHeaders: {}, responseHeaders: { "cache-control": "public, max-age=31536000, immutable" }, mimeType: "text/css" },
+        { url: "https://thirdparty.example.net/tp.js", resourceType: "script", status: 200, fromCache: false, encodedBytes: 20000, decodedBytes: 60000, requestHeaders: {}, responseHeaders: { "cache-control": "max-age=60" }, mimeType: "text/javascript" },
+      ],
+    })
+    const result = ctrl("cdn.longttl").evaluate(e)
+    expect(result.passed).toBe(true)
+    expect(result.evidence).toContain("2/2")
+    expect(result.evidence).toContain("first-party")
+  })
+
+  it("fails on first-party short TTL even when third-party assets have long TTL (third parties excluded)", () => {
+    const e = makeEvidence({
+      finalUrl: "https://example.com/",
+      requests: [
+        { url: "https://example.com/a.jpg", resourceType: "image", status: 200, fromCache: false, encodedBytes: 50000, decodedBytes: 80000, requestHeaders: {}, responseHeaders: { "cache-control": "max-age=60" }, mimeType: "image/jpeg" },
+        { url: "https://thirdparty.example.net/tp.js", resourceType: "script", status: 200, fromCache: false, encodedBytes: 20000, decodedBytes: 60000, requestHeaders: {}, responseHeaders: { "cache-control": "public, max-age=31536000, immutable" }, mimeType: "text/javascript" },
+      ],
+    })
+    const result = ctrl("cdn.longttl").evaluate(e)
+    expect(result.passed).toBe(false)
+    expect(result.evidence).toContain("0/1")
+    expect(result.evidence).toContain("first-party")
+  })
+
+  it("falls back to third-party assets, with evidence saying so, when no first-party asset is observed", () => {
+    const e = makeEvidence({
+      finalUrl: "https://example.com/",
+      requests: [
+        { url: "https://thirdparty.example.net/tp.js", resourceType: "script", status: 200, fromCache: false, encodedBytes: 20000, decodedBytes: 60000, requestHeaders: {}, responseHeaders: { "cache-control": "public, max-age=31536000, immutable" }, mimeType: "text/javascript" },
+        { url: "https://cdn.other.net/lib.css", resourceType: "stylesheet", status: 200, fromCache: false, encodedBytes: 5000, decodedBytes: 20000, requestHeaders: {}, responseHeaders: { "cache-control": "public, max-age=31536000, immutable" }, mimeType: "text/css" },
+      ],
+    })
+    const result = ctrl("cdn.longttl").evaluate(e)
+    expect(result.passed).toBe(true)
+    expect(result.evidence).toContain("2/2")
+    expect(result.evidence).toContain("third-party")
+    expect(result.evidence).toMatch(/no first-party asset observed/i)
+  })
 })
 
 // ── cdn.region ────────────────────────────────────────────────────────────────

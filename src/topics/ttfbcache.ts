@@ -4,7 +4,7 @@
  * Max points: 35+30+15+10+10 = 100
  */
 import type { Control, TopicModule } from "../core"
-import { edgeHitHeader, header } from "./util"
+import { edgeHitHeader, header, stripHtmlComments } from "./util"
 
 // ── controls ──────────────────────────────────────────────────────────────────
 
@@ -180,7 +180,11 @@ const specrulesControl: Control = {
   defaultPoints: 10,
   evaluate(e) {
     // Check inline script tag
-    if (/<script[^>]+type\s*=\s*["']?speculationrules["']?/i.test(e.rawHtml)) {
+    if (
+      /<script[^>]+type\s*=\s*["']?speculationrules["']?/i.test(
+        stripHtmlComments(e.rawHtml),
+      )
+    ) {
       return { passed: true, evidence: 'Found <script type="speculationrules"> in raw HTML' }
     }
 
@@ -216,28 +220,39 @@ const bfcacheControl: Control = {
   topicId: 5,
   label: "bfcache eligible (no unload handlers)",
   description:
-    "Low-confidence heuristic: greps inline HTML (rawHtml/renderedHtml) for onunload or addEventListener('unload'/'beforeunload'). Unload handlers overwhelmingly live in external JS bundles, which are NOT scanned — so a pass only means no inline handler was found.",
+    "Low-confidence heuristic: greps inline HTML (rawHtml/renderedHtml) for onunload or addEventListener('unload'/'beforeunload'), and checks the main document's cache-control for no-store. Unload handlers overwhelmingly live in external JS bundles, which are NOT scanned — so a pass only means no inline handler was found. `cache-control: no-store` on the main document makes the page ineligible for bfcache regardless of unload handlers (Chrome rule).",
   defaultPoints: 10,
   evaluate(e) {
     const pattern = /onunload|addEventListener\(\s*['"](unload|beforeunload)/i
 
-    const rawMatch = pattern.test(e.rawHtml)
+    const rawMatch = pattern.test(stripHtmlComments(e.rawHtml))
     const renderedMatch = pattern.test(e.renderedHtml)
 
+    const cc = header(e.mainResponseHeaders, "cache-control") ?? ""
+    const noStore = /no-store/i.test(cc)
+
+    const reasons: string[] = []
+    if (noStore) {
+      reasons.push("`cache-control: no-store` on the main document — page is ineligible for bfcache")
+    }
     if (rawMatch || renderedMatch) {
       const sources: string[] = []
       if (rawMatch) sources.push("raw HTML")
       if (renderedMatch) sources.push("rendered HTML")
+      reasons.push(`unload handler pattern found in: ${sources.join(", ")} — page may not be bfcache eligible`)
+    }
+
+    if (reasons.length > 0) {
       return {
         passed: false,
-        evidence: `Unload handler pattern found in: ${sources.join(", ")} — page may not be bfcache eligible`,
+        evidence: reasons.join("; "),
       }
     }
 
     return {
       passed: true,
       evidence:
-        "No unload handler in inline HTML — external scripts not scanned; low-confidence pass",
+        "No unload handler in inline HTML and no cache-control: no-store on the main document — external scripts not scanned; low-confidence pass",
     }
   },
 }

@@ -39,7 +39,13 @@ function toOrderToken(tag: string, attrs: Record<string, string>): string | null
       // Skip alternates / hreflang
       if (rel === "alternate" || rel === "alternate stylesheet") return null;
       if (rel === "stylesheet") return "link[stylesheet]";
-      if (rel === "preload") return "link[preload]";
+      if (rel === "preload") {
+        // Preloads targeting a stylesheet belong to the CSS group for head-order
+        // purposes (topic 8 — cp.headorder); other `as=` values keep the generic
+        // token, which head-order ignores.
+        if ((attrs["as"] ?? "").toLowerCase() === "style") return "link[preload-style]";
+        return "link[preload]";
+      }
       if (rel === "preconnect") return "link[preconnect]";
       if (rel === "dns-prefetch") return "link[dns-prefetch]";
       if (rel === "modulepreload") return "link[modulepreload]";

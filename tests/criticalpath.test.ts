@@ -53,6 +53,96 @@ describe("cp.headorder", () => {
     expect(ctrl("cp.headorder").evaluate(e).passed).toBe(false)
   })
 
+  it("PASS — head group in free relative order (title, then charset, then viewport)", () => {
+    const e = makeEvidence({
+      head: {
+        order: ["title", "meta[charset]", "meta[viewport]", "link[stylesheet]", "script"],
+        tags: [],
+      },
+    })
+    const result = ctrl("cp.headorder").evaluate(e)
+    expect(result.passed).toBe(true)
+  })
+
+  it("PASS — og:* meta and link[rel=alternate] between CSS and JS are ignored", () => {
+    const e = makeEvidence({
+      head: {
+        order: [
+          "meta[charset]",
+          "meta[viewport]",
+          "title",
+          "link[stylesheet]",
+          // og:* meta and alternate links are dropped by toOrderToken and never
+          // land in head.order, but a well-behaved control must not choke if a
+          // future token slips through unclassified either — simulate that here.
+          "script",
+        ],
+        tags: [],
+      },
+    })
+    const result = ctrl("cp.headorder").evaluate(e)
+    expect(result.passed).toBe(true)
+  })
+
+  it("FAIL — link[preload][as=style] placed after a script", () => {
+    const e = makeEvidence({
+      head: {
+        order: [
+          "meta[charset]",
+          "meta[viewport]",
+          "title",
+          "script",
+          "link[preload-style]",
+        ],
+        tags: [],
+      },
+    })
+    const result = ctrl("cp.headorder").evaluate(e)
+    expect(result.passed).toBe(false)
+    expect(result.evidence).toContain("link[preload-style]")
+  })
+
+  it("PASS — link[preload][as=font] placed after a script is ignored", () => {
+    const e = makeEvidence({
+      head: {
+        order: [
+          "meta[charset]",
+          "meta[viewport]",
+          "title",
+          "link[stylesheet]",
+          "script",
+          "link[preload]",
+        ],
+        tags: [],
+      },
+    })
+    const result = ctrl("cp.headorder").evaluate(e)
+    expect(result.passed).toBe(true)
+  })
+
+  it("FAIL — inline <style> after a script", () => {
+    const e = makeEvidence({
+      head: {
+        order: ["meta[charset]", "meta[viewport]", "title", "script", "style"],
+        tags: [],
+      },
+    })
+    const result = ctrl("cp.headorder").evaluate(e)
+    expect(result.passed).toBe(false)
+  })
+
+  it("FAIL — a script before the title", () => {
+    const e = makeEvidence({
+      head: {
+        order: ["script", "meta[charset]", "meta[viewport]", "title", "link[stylesheet]"],
+        tags: [],
+      },
+    })
+    const result = ctrl("cp.headorder").evaluate(e)
+    expect(result.passed).toBe(false)
+    expect(result.evidence).toContain("title")
+  })
+
   it("PASS — meta[charset] within the first 1024 bytes", () => {
     const e = makeEvidence({
       head: { order: ["meta[charset]", "meta[viewport]"], tags: [] },
