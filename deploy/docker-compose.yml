@@ -1,0 +1,50 @@
+# Local test of the image (or deployment in a dedicated VM / any Docker host).
+# MariaDB rather than MySQL, to reproduce the Home Assistant MariaDB add-on.
+#
+#   docker compose -f deploy/docker-compose.yml up --build
+#   → http://localhost:5180
+#
+# Secrets come from the app's .env (CRUX_API_KEY, CLOAKBROWSER_LICENSE_KEY…);
+# DATABASE_URL, CAPTURE_CONCURRENCY and TZ are overridden below.
+name: maturity-analyzer
+
+services:
+  db:
+    image: mariadb:11.4
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: root
+      MARIADB_DATABASE: maturite
+      MARIADB_USER: maturite
+      MARIADB_PASSWORD: maturite
+    # Published only for deploy/migrate-db.ps1 (local test of the migration).
+    ports:
+      - "127.0.0.1:3307:3306"
+    volumes:
+      - db:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      retries: 20
+
+  app:
+    build:
+      context: ..
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: ../.env
+    environment:
+      DATABASE_URL: mysql://maturite:maturite@db:3306/maturite
+      CAPTURE_CONCURRENCY: "2"
+      TZ: Europe/Paris
+    ports:
+      - "5180:5173"
+    shm_size: 1gb
+    volumes:
+      - data:/data
+
+volumes:
+  db:
+  data:

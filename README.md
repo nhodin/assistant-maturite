@@ -135,6 +135,12 @@ Data model: `Site → Page` (inventory) · `Project → ProjectPage` (selection)
 `Run → RunPage` (per-page capture + slim evidence) + `RunSiteScore` (aggregated,
 ranked) · `ControlConfig` (edited from Settings).
 
+## Deployment
+
+The app runs as a **Home Assistant OS local add-on** (Docker image: Debian,
+CloakBrowser Pro, Xvfb, MariaDB add-on). Install, data migration and update
+procedure: [deploy/README.md](deploy/README.md).
+
 ## Notes
 
 - `.env` is gitignored; see `.env.example` for the expected variables.

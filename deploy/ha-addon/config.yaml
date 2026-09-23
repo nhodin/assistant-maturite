@@ -1,0 +1,40 @@
+name: Maturity Analyzer
+version: "0.1.1"
+slug: maturity_analyzer
+description: Analyseur de maturitÃ© webperf (capture CloakBrowser, scoring dÃ©terministe)
+arch:
+  - amd64
+startup: application
+boot: auto
+# tini is PID 1 inside the image (reaps Chromium's children).
+init: false
+ports:
+  5173/tcp: 5173
+ports_description:
+  5173/tcp: Interface web
+webui: http://[HOST]:[PORT:5173]
+# /share/fonts-windows : polices Windows copiÃ©es depuis C:\Windows\Fonts.
+map:
+  - share:ro
+# The MariaDB add-on is reachable at core-mariadb:3306.
+services:
+  - mysql:want
+options:
+  database_url: mysql://maturite:CHANGE_ME@core-mariadb:3306/maturite
+  crux_api_key: ""
+  cloakbrowser_license_key: ""
+  capture_concurrency: 2
+  cloak_session_limit: 5
+  cloak_proxy: ""
+  timezone: Europe/Paris
+  env_vars: []
+schema:
+  database_url: password
+  crux_api_key: password?
+  cloakbrowser_license_key: password?
+  capture_concurrency: int(1,5)
+  cloak_session_limit: int(1,200)
+  cloak_proxy: password?
+  timezone: str
+  env_vars:
+    - str

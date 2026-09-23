@@ -15,3 +15,6 @@ scratch-*
 /data/chrome-profile/
 # Warm per-origin CloakBrowser profiles used by an escalated retry
 /data/cloak-profiles/
+
+# Assembled Home Assistant add-on (deploy/package-addon.ps1)
+/deploy/out/

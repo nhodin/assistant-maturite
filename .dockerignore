@@ -1,0 +1,17 @@
+node_modules
+.git
+.env
+.env.*
+!.env.example
+.claude
+.tmp
+data/chrome-profile
+data/cloak-profiles
+evidence
+out
+runs
+tests
+docs
+*.log
+run*.json
+deploy/out
