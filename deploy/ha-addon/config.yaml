@@ -1,5 +1,5 @@
 name: Maturity Analyzer
-version: "0.1.1"
+version: "0.1.2"
 slug: maturity_analyzer
 description: Analyseur de maturitÃ© webperf (capture CloakBrowser, scoring dÃ©terministe)
 arch:

@@ -23,11 +23,13 @@
     <li><strong>Ancrage sémantique</strong> — un <code>h1</code> non vide, un <code>title</code>
       non générique, un <code>og:title</code> ou un bloc JSON-LD identifiant la page.</li>
     <li><strong>Images</strong> — au moins une <code>&lt;img&gt;</code> avec un <code>src</code>/<code>srcset</code>
-      réel ; un placeholder base64 ou un <code>data-src</code> seul ne compte pas, ils exigent du JS.</li>
+      réel, ou un <code>&lt;picture&gt;</code> dont une <code>&lt;source srcset&gt;</code> est réelle ;
+      un placeholder base64 ou un <code>data-src</code> seul ne compte pas, ils exigent du JS.</li>
     <li><strong>Garde anti-coquille</strong> — si l'ancrage vient du <code>&lt;head&gt;</code>
       (<code>title</code>, <code>og:title</code>, JSON-LD), son sujet doit aussi apparaître dans
       le corps servi : sinon l'en-tête et le pied suffiraient à faire passer une page dont
-      le contenu est entièrement client-side.</li>
+      le contenu est entièrement client-side. Elle s'abstient quand le HTML servi porte
+      déjà la majorité du texte final : une coquille n'en sert jamais autant.</li>
   </ol>
   <p class="muted">
     Le <strong>pourcentage de recouvrement</strong> affiché dans le tableau est
@@ -38,7 +40,8 @@
   <p class="muted">
     Deux situations ne produisent <strong>aucun verdict</strong> mais un
     « à confirmer » : un <strong>crawler bloqué</strong> (403, challenge WAF) et un
-    <strong>visiteur bloqué</strong> (interstitiel anti-bot servi à la place de la page).
+    <strong>visiteur bloqué</strong> (document servi en 4xx/5xx, interstitiel anti-bot ou
+    page « indisponible / maintenance » à la place de la page).
     Mesurer le SSR sur une page de blocage donnerait un NOGO confiant et faux ; le check
     compte comme échec tant qu'un opérateur n'a pas tranché, via « Détail ».
   </p>

@@ -14,7 +14,7 @@
  */
 import type { BotFetch } from "../core";
 import type { RawFetchResult } from "./index";
-import { isChallengeHtml } from "./challenge";
+import { blockSignature, isChallengeHtml } from "./challenge";
 
 /**
  * The raw-HTML fetch this module depends on — structurally
@@ -70,7 +70,8 @@ export function classifyBotFetch(status: number, html: string): BlockedVerdict {
     return { blocked: true, blockReason: `réponse HTTP ${status}` };
   }
   if (isChallengeHtml(html)) {
-    return { blocked: true, blockReason: "page de challenge WAF détectée (titre de la page)" };
+    const sig = blockSignature(html);
+    return { blocked: true, blockReason: `page de challenge WAF détectée${sig ? ` (${sig})` : ""}` };
   }
   if (Buffer.byteLength(html, "utf-8") < MIN_BOT_HTML_BYTES) {
     return { blocked: true, blockReason: "réponse vide ou trop courte pour être le document" };

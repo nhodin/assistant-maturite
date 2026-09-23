@@ -84,6 +84,34 @@ describe("anti-shell guard", () => {
     expect(anchorPresentInBody(semanticAnchor(html), html)).toBeNull()
   })
 
+  it("does not fail a page whose title puts the site name FIRST (snipes.com)", () => {
+    // Regression (run 45): 1711 served words, 96% of the final text, but the
+    // guard only read "SNIPES Onlineshop" and "Onlineshop" is not in the body.
+    const html = `<html><head><title>SNIPES Onlineshop - Sneaker, Streetwear &amp; Accessories!</title></head>` +
+      `<body><img src="/p.jpg"><nav>SNIPES Sneaker Streetwear Accessories</nav><p>${words(300, "schuhe")}</p></body></html>`
+    expect(anchorPresentInBody(semanticAnchor(html), html)).toBe(true)
+    expect(evaluateSsr(html, RENDERED_WITH_EXTRAS).passed).toBe(true)
+  })
+
+  it("waives the guard when the served HTML already carries most of the final text", () => {
+    // snipes.com: English title over a German body — 2 of 5 title words match,
+    // yet the served HTML IS the final page. A shell never serves most of it.
+    const html = `<html><head><title>SNIPES Onlineshop - Sneaker, Streetwear &amp; Accessories!</title></head>` +
+      `<body><img src="/p.jpg"><nav>Snipes Schuhe Sneaker Accessoires</nav><p>${words(300, "schuhe")}</p></body></html>`
+    expect(anchorPresentInBody(semanticAnchor(html), html)).toBe(false)
+    const r = evaluateSsr(html, html) // served == rendered: 100% overlap
+    expect(r.passed).toBe(true)
+    expect(r.metrics.anchorInBody).toBeNull()
+    // The same served HTML against a much richer final page stays a shell.
+    expect(evaluateSsr(html, RENDERED_WITH_EXTRAS).metrics.anchorInBody).toBe(false)
+  })
+
+  it("decodes entities, so &amp; is not a word and &eacute; matches é", () => {
+    const html = `<html><head><title>Bermuda l&eacute;ger &amp; molleton</title></head>` +
+      `<body><p>Bermuda léger en molleton. ${words(300)}</p></body></html>`
+    expect(anchorPresentInBody(semanticAnchor(html), html)).toBe(true)
+  })
+
   it("strips the site-name suffix before looking (title vs body wording)", () => {
     const html = `<html><head><title>Rose Of No Man's Land — Byredo</title></head><body>` +
       `<img src="/p.jpg"><p>Rose of no man's land, eau de parfum. ${words(300, "parfum")}</p></body></html>`

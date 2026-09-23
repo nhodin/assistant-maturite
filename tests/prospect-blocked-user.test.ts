@@ -133,3 +133,46 @@ describe("presumption on a blocked crawler", () => {
     expect(check.presumption).toBeUndefined()
   })
 })
+
+describe("site-wide unavailability page (sarenza.com, run 45)", () => {
+  // A full branded 550 KB page — header, footer, the site's own title — answered
+  // with a 403. Too big for the size corroboration, no IP, no vendor mark.
+  const SARENZA = `<html><head><title>Sarenza | Serious about shoes and clothes</title></head><body>` +
+    `<header><nav>${"Femme Homme Enfant Marques Soldes ".repeat(40)}</nav></header>` +
+    `<h1 class="title-edito">Page momentanément indisponible.</h1>` +
+    `<p>Nous sommes en maintenance actuellement... Revenez un peu plus tard !</p>` +
+    `<footer>${"Aide Livraison Retours Contact ".repeat(40)}</footer></body></html>`
+
+  it("is recognised by its headline, whatever its size", () => {
+    expect(isChallengeHtml(SARENZA)).toBe(true)
+    expect(blockSignature(SARENZA)).toMatch(/indisponible \/ maintenance/)
+  })
+
+  it("leaves a product page with an out-of-stock notice alone", () => {
+    const pdp = `<html><head><title>Basket Stan Smith | Sarenza</title></head><body><h1>Basket Stan Smith</h1>` +
+      `<img src="/p.jpg"><p>Article temporairement indisponible dans cette taille.</p>` +
+      `<p>${"Cuir blanc, semelle caoutchouc, lacets. ".repeat(30)}</p></body></html>`
+    expect(blockSignature(pdp)).toBeNull()
+  })
+
+  it("leaves a long help page that merely mentions maintenance alone", () => {
+    const help = `<html><head><title>Aide | Sarenza</title></head><body><h1>Questions fréquentes</h1>` +
+      `<p>Le site peut être en maintenance quelques minutes la nuit.</p>` +
+      `<p>${"Vos commandes, vos retours et vos remboursements. ".repeat(40)}</p></body></html>`
+    expect(blockSignature(help)).toBeNull()
+  })
+})
+
+describe("visitor document served with an error status", () => {
+  it("is « à confirmer » even when the body looks like a real page", () => {
+    const check = ssrUserCheck(makeEvidence({ rawHtml: REAL_PAGE, renderedHtml: REAL_PAGE, rawStatus: 403 }))
+    expect(check.unknown).toBe(true)
+    expect(check.passed).toBe(false)
+    expect(check.evidence).toMatch(/HTTP 403/)
+  })
+
+  it("is measured as usual on a 200", () => {
+    const check = ssrUserCheck(makeEvidence({ rawHtml: REAL_PAGE, renderedHtml: REAL_PAGE, rawStatus: 200 }))
+    expect(check.unknown).toBeUndefined()
+  })
+})

@@ -636,6 +636,7 @@ export const collect: CollectFn = async (
 
   // ── Step 1: Raw HTML fetch (pre-JS, outside browser) ────────────────────────
   let rawHtml = "";
+  let rawStatus = 0;
   let mainResponseHeaders: Record<string, string> = {};
   let finalUrl = url;
   let altSvcHeader: string | null = null;
@@ -645,6 +646,7 @@ export const collect: CollectFn = async (
     const res = await fetchRawHtmlWithEarlyHints(url);
     finalUrl = res.finalUrl;
     rawHtml = res.html;
+    rawStatus = res.status;
     mainResponseHeaders = res.headers;
     earlyHints = res.earlyHints;
     altSvcHeader = mainResponseHeaders["alt-svc"] ?? null;
@@ -1011,6 +1013,7 @@ export const collect: CollectFn = async (
     // clearly failed: on a healthy origin this would be a pointless extra hit.
     const rawLooksBlocked =
       rawHtml.trim().length < 500 ||
+      rawStatus >= 400 ||
       Object.keys(mainResponseHeaders).length === 0 ||
       isChallengeHtml(rawHtml);
     if (rawLooksBlocked) {
@@ -1022,6 +1025,7 @@ export const collect: CollectFn = async (
         const body = await rescued.text();
         if (rescued.ok() && body.trim().length >= 500 && !isChallengeHtml(body)) {
           rawHtml = body;
+          rawStatus = rescued.status();
           // Playwright already lowercases header names here.
           mainResponseHeaders = { ...rescued.headers() };
           finalUrl = rescued.url();
@@ -1054,7 +1058,7 @@ export const collect: CollectFn = async (
     // in the page reuses that very connection and its clearance cookie, and still
     // returns the SERVER html, which is what rawHtml must hold: using the rendered
     // DOM instead would silently pass the no-JS criteria (topics 2/3/6).
-    if (rawHtml.trim().length < 500 || isChallengeHtml(rawHtml)) {
+    if (rawHtml.trim().length < 500 || rawStatus >= 400 || isChallengeHtml(rawHtml)) {
       try {
         const body = await page.evaluate(async (url) => {
           const res = await fetch(url, {
@@ -1065,6 +1069,7 @@ export const collect: CollectFn = async (
         }, finalUrl);
         if (body.trim().length >= 500 && !isChallengeHtml(body)) {
           rawHtml = body;
+          rawStatus = 200; // the in-page fetch only returns a body when res.ok
           // No response headers from here — fetch() exposes only CORS-safelisted
           // ones, and a partial header map would make topics 5/8/10 read absences
           // as facts. Whatever the earlier tiers captured stays authoritative.
@@ -1436,6 +1441,7 @@ export const collect: CollectFn = async (
     rawHtml,
     renderedHtml,
     htmlBytes: Buffer.byteLength(rawHtml, "utf-8"),
+    rawStatus,
     mainResponseHeaders,
     head,
     requests,

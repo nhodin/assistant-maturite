@@ -137,6 +137,48 @@ function selfBrandedBlock(html: string): boolean {
 }
 
 /**
+ * Wording of a site-wide "unavailable / maintenance" notice. sarenza.com answers
+ * Googlebot (and, at times, a plain fetch) with a 403 whose body is a full 550 KB
+ * branded page — header, footer, fonts — titled "Sarenza | Serious about shoes
+ * and clothes", with an h1 "Page momentanément indisponible." Too big for the
+ * size corroboration above, no IP echoed, no vendor mark: it was measured as the
+ * site and produced a confident NOGO.
+ *
+ * Scoped to the PAGE or SITE being unavailable, never to an item: a product page
+ * saying "article temporairement indisponible" is a real page.
+ */
+const UNAVAILABLE_WORDINGS: RegExp[] = [
+  /\b(page|site|service)\s+(momentanément|temporairement)\s+indisponible/i,
+  /\ben\s+(cours\s+de\s+)?maintenance\b/i,
+  /\b(site|page)\s+(is\s+)?(temporarily\s+)?(unavailable|down)\b/i,
+  /\bservice\s+(temporarily\s+)?unavailable\b/i,
+  /\b(under|down\s+for)\s+maintenance\b/i,
+];
+
+/** Words of visible text below which a document is a notice, not a page. */
+const NOTICE_MAX_WORDS = 150;
+
+/**
+ * A site-wide unavailability notice. The wording alone is not enough (a help page
+ * may explain maintenance windows), so it must be corroborated: either it IS the
+ * page's headline (`<h1>` or `<title>`), or the document carries almost no text.
+ */
+function unavailablePage(html: string): boolean {
+  const headline = [
+    html.match(/<title[^>]*>([^<]*)<\/title>/i)?.[1] ?? "",
+    html.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i)?.[1]?.replace(/<[^>]+>/g, " ") ?? "",
+  ].join(" ");
+  if (UNAVAILABLE_WORDINGS.some((re) => re.test(headline))) return true;
+  if (!UNAVAILABLE_WORDINGS.some((re) => re.test(html))) return false;
+  const text = html
+    .replace(/<(script|style|noscript|template)\b[\s\S]*?<\/\1>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .split(/\s+/)
+    .filter(Boolean);
+  return text.length < NOTICE_MAX_WORDS;
+}
+
+/**
  * Same verdict, on a raw HTML string rather than on a live page's title — plus
  * the body signatures above, because the most common interstitials keep the
  * site's own <title>, and a site's own firewall notice carries no vendor mark
@@ -146,7 +188,7 @@ export function isChallengeHtml(html: string): boolean {
   const title = html.match(/<title[^>]*>([^<]*)<\/title>/i)?.[1]?.trim() ?? "";
   if (isChallengeTitle(title)) return true;
   if (BLOCK_BODY_SIGNATURES.some((re) => re.test(html))) return true;
-  return selfBrandedBlock(html);
+  return selfBrandedBlock(html) || unavailablePage(html);
 }
 
 /**
@@ -175,11 +217,14 @@ export function challengeSignature(html: string): string | null {
 export function blockSignature(html: string): string | null {
   const vendor = challengeSignature(html);
   if (vendor) return vendor;
-  if (!selfBrandedBlock(html)) return null;
-  const ip = html.match(VISITOR_IP_RE)?.[0];
-  return ip
-    ? `page de blocage du site (adresse IP ${ip} refusée)`
-    : "page de blocage du site (pare-feu maison)";
+  if (selfBrandedBlock(html)) {
+    const ip = html.match(VISITOR_IP_RE)?.[0];
+    return ip
+      ? `page de blocage du site (adresse IP ${ip} refusée)`
+      : "page de blocage du site (pare-feu maison)";
+  }
+  if (unavailablePage(html)) return "page « indisponible / maintenance » servie à la place du site";
+  return null;
 }
 
 /**

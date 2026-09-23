@@ -252,6 +252,13 @@ export const EvidenceBundleSchema = z.object({
    * fall back to measuring `rawHtml` directly.
    */
   htmlBytes: z.number().optional(),
+  /**
+   * HTTP status of the response `rawHtml` came from (0 when every fetch failed).
+   * A WAF can answer the pre-JS fetch with a 403 whose body is a full branded
+   * page — sarenza.com serves a 550 KB "Page momentanément indisponible" — and
+   * that body must not be measured as the site. Optional: older bundles lack it.
+   */
+  rawStatus: z.number().optional(),
   /** Serialized DOM AFTER JS execution. */
   renderedHtml: z.string(),
   /** Response headers of the main HTML document (lowercased keys). */

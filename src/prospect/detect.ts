@@ -181,15 +181,47 @@ export function semanticAnchor(html: string): SemanticAnchorResult {
 export function anchorPresentInBody(anchor: SemanticAnchorResult, html: string): boolean | null {
   if (!anchor.present || !anchor.text) return null;
   if (anchor.source === "h1") return true; // in the body by construction
-  const subject = anchor.text.split(/[|–—·»«]|\s[-–]\s/)[0];
-  const words = subject
-    .toLowerCase()
-    .split(/[^\p{L}\p{N}]+/u)
-    .filter((w) => w.length >= 3);
+  // Every segment of the title, not just the first. The site name is not always a
+  // suffix: snipes.com's "SNIPES Onlineshop - Sneaker, Streetwear & Accessories!"
+  // puts it FIRST, and "Onlineshop" appears nowhere in the German body — judging
+  // on that segment alone failed a page serving 1711 words (96% of its final
+  // text). Pooling the words keeps the guard's teeth: a shell whose footer only
+  // names the brand still matches 1 word of "Bermuda en molleton léger bleu Kiabi".
+  const words = [
+    ...new Set(
+      decodeEntities(anchor.text)
+        .toLowerCase()
+        .split(/[^\p{L}\p{N}]+/u)
+        .filter((w) => w.length >= 3),
+    ),
+  ];
   if (words.length < 2) return null; // nothing solid enough to look for
-  const body = visibleText(bodySlice(html)).toLowerCase();
+  const body = decodeEntities(visibleText(bodySlice(html))).toLowerCase();
   const found = words.filter((w) => body.includes(w)).length;
   return found / words.length >= 0.6;
+}
+
+const NAMED_ENTITIES: Record<string, string> = {
+  amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " ",
+  eacute: "é", egrave: "è", ecirc: "ê", agrave: "à", acirc: "â", ccedil: "ç",
+  ocirc: "ô", ucirc: "û", ugrave: "ù", icirc: "î", iuml: "ï", euml: "ë",
+  auml: "ä", ouml: "ö", uuml: "ü", szlig: "ß", rsquo: "’", lsquo: "‘",
+  laquo: "«", raquo: "»", ndash: "–", mdash: "—", hellip: "…",
+};
+
+/**
+ * Decode HTML character references in a text run, so `&amp;` does not become a
+ * word "amp" and `&eacute;` in a title matches a literal "é" in the body.
+ * Numeric references in full, named ones for the common Latin-1 set.
+ */
+function decodeEntities(text: string): string {
+  return text.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+\d*);/gi, (m, ref: string) => {
+    if (ref[0] === "#") {
+      const code = ref[1] === "x" || ref[1] === "X" ? parseInt(ref.slice(2), 16) : parseInt(ref.slice(1), 10);
+      return Number.isFinite(code) && code > 0 && code < 0x110000 ? String.fromCodePoint(code) : m;
+    }
+    return NAMED_ENTITIES[ref.toLowerCase()] ?? m;
+  });
 }
 
 /** A `src`/`srcset` value that the HTML PARSER can resolve without JS — not a base64 placeholder. */
@@ -211,10 +243,16 @@ export interface ImagePresenceResult {
  * placeholder or a `data-src`-only image does NOT count — both need JS to resolve).
  */
 export function hasRealImage(html: string): ImagePresenceResult {
-  const imgs = parseTags(html, "img");
-  let count = 0;
-  for (const img of imgs) {
-    if (isRealImageSrc(img.attrs["src"]) || isRealImageSrc(img.attrs["srcset"])) count++;
+  const isReal = (img: { attrs: Record<string, string> }) =>
+    isRealImageSrc(img.attrs["src"]) || isRealImageSrc(img.attrs["srcset"]);
+  let count = parseTags(html, "img").filter(isReal).length;
+  // A <picture> resolves its image from its <source srcset>, with no JS: the
+  // browser's own source selection fills the inner <img>, which may carry no src
+  // at all. g-star.com serves 18 such pictures (React's `srcSet`) and read as
+  // "0 image sans JS". Counted only when the inner <img> was not counted already.
+  for (const picture of stripHtmlComments(html).match(/<picture\b[\s\S]*?<\/picture>/gi) ?? []) {
+    if (parseTags(picture, "img").some(isReal)) continue;
+    if (parseTags(picture, "source").some((s) => isRealImageSrc(s.attrs["srcset"]))) count++;
   }
   return { present: count > 0, count };
 }
@@ -271,7 +309,14 @@ export function evaluateSsr(html: string, renderedHtml: string): SsrEvaluation {
   const overlap = textOverlap(html, renderedHtml);
   const anchor = semanticAnchor(html);
   const images = hasRealImage(html);
-  const anchorInBody = anchorPresentInBody(anchor, html);
+  // The anti-shell guard is word matching, and word matching is fragile across
+  // languages: snipes.com titles its German site in English ("Sneaker, Streetwear
+  // & Accessories" over a body saying "Accessoires"). A shell, by definition,
+  // serves its header and footer and little of the final text, so a page that
+  // already serves most of it (snipes: 96%) cannot be one — the guard only speaks
+  // when the overlap is low too. The overlap still never gates on its own.
+  const guard = anchorPresentInBody(anchor, html);
+  const anchorInBody = guard === false && overlap.ratio >= SSR_TEXT_RATIO ? null : guard;
 
   // The verdict is ABSOLUTE — is the content there — not a share of the final
   // page. The share (`overlap.ratio`) is reported but no longer gates: it answers

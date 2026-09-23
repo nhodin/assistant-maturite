@@ -21,6 +21,22 @@ import { blockSignature } from "../collector/challenge";
  * unmeasurable check is « à confirmer », never a verdict.
  */
 export function ssrUserCheck(e: EvidenceBundle): DiagCheck {
+  // A 4xx/5xx document is a refusal whatever it looks like: sarenza.com's 403 is
+  // a full branded page with a header, a footer and a title, and nothing in the
+  // markup alone says "this is not the site". The crawler side has judged on the
+  // status from the start; the visitor side must too.
+  if (e.rawStatus !== undefined && e.rawStatus >= 400) {
+    const sig = blockSignature(e.rawHtml);
+    return {
+      id: "ssr.user",
+      label: "SSR — utilisateur",
+      passed: false,
+      unknown: true,
+      evidence:
+        `le document servi au visiteur a répondu HTTP ${e.rawStatus}${sig ? ` (${sig})` : ""} — ` +
+        `ce n'est pas la page, le SSR n'a pas pu être mesuré, à confirmer manuellement`,
+    };
+  }
   const blocked = blockSignature(e.rawHtml);
   if (blocked) {
     return {
@@ -60,6 +76,7 @@ export function ssrUserCheck(e: EvidenceBundle): DiagCheck {
  * saying nothing.
  */
 function botPresumption(e: EvidenceBundle): string | null {
+  if (e.rawStatus !== undefined && e.rawStatus >= 400) return null; // refused too
   if (blockSignature(e.rawHtml)) return null; // visitor document is a block page too
   const user = evaluateSsr(e.rawHtml, e.renderedHtml);
   if (!user.passed) return null;
