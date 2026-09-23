@@ -79,6 +79,12 @@ describe("cloakLaunchOptions", () => {
     expect(options.headless).toBe(false);
   });
 
+  it("passes CLOAK_EXTRA_ARGS through as Chromium args", () => {
+    const cfg = cloakConfigFromEnv({ CLOAK_EXTRA_ARGS: " --disable-dev-shm-usage  --foo=1 " });
+    expect(cloakLaunchOptions(cfg).args).toEqual(["--disable-dev-shm-usage", "--foo=1"]);
+    expect("args" in cloakLaunchOptions(cloakConfigFromEnv({ CLOAK_EXTRA_ARGS: " " }))).toBe(false);
+  });
+
   it("drops geoip when no proxy is configured — it has nothing to align to", () => {
     const options = cloakLaunchOptions(cloakConfigFromEnv({ CLOAK_GEOIP: "1" }));
     expect("geoip" in options).toBe(false);
