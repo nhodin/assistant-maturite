@@ -19,11 +19,13 @@
     var minWords = typeof SSR_MIN_WORDS === "number" ? SSR_MIN_WORDS : null;
   %>
   <ol class="muted diag-criteria">
-    <li><strong>Volume de texte</strong> — <%= minWords !== null ? "au moins " + minWords + " mots" : "un minimum de mots" %> de texte visible.</li>
+    <li><strong>Volume de texte</strong> — <%= minWords !== null ? "au moins " + minWords + " mots" : "un minimum de mots" %> de texte visible
+      (hors <code>&lt;noscript&gt;</code>, qu'un navigateur avec JS n'affiche jamais).</li>
     <li><strong>Ancrage sémantique</strong> — un <code>h1</code> non vide, un <code>title</code>
       non générique, un <code>og:title</code> ou un bloc JSON-LD identifiant la page.</li>
     <li><strong>Images</strong> — au moins une <code>&lt;img&gt;</code> avec un <code>src</code>/<code>srcset</code>
-      réel, ou un <code>&lt;picture&gt;</code> dont une <code>&lt;source srcset&gt;</code> est réelle ;
+      réel, un <code>&lt;picture&gt;</code> dont une <code>&lt;source srcset&gt;</code> est réelle, ou
+      une image de fond CSS déclarée dans le HTML servi ;
       un placeholder base64 ou un <code>data-src</code> seul ne compte pas, ils exigent du JS.</li>
     <li><strong>Garde anti-coquille</strong> — si l'ancrage vient du <code>&lt;head&gt;</code>
       (<code>title</code>, <code>og:title</code>, JSON-LD), son sujet doit aussi apparaître dans

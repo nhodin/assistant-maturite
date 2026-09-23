@@ -78,11 +78,21 @@ export interface TextOverlapResult {
  * see SSR_TEXT_RATIO.
  */
 export function textOverlap(rawHtml: string, renderedHtml: string): TextOverlapResult {
-  const rawText = visibleText(bodySlice(rawHtml));
-  const renderedText = visibleText(bodySlice(renderedHtml));
+  const rawText = visibleText(stripNoscript(bodySlice(rawHtml)));
+  const renderedText = visibleText(stripNoscript(bodySlice(renderedHtml)));
   const rawWords = rawText ? rawText.split(" ").filter(Boolean).length : 0;
   const ratio = shingleOverlapRatio(rawText, renderedText);
   return { ratio, rawWords, overlapOk: ratio >= SSR_TEXT_RATIO && rawWords >= SSR_MIN_WORDS };
+}
+
+/**
+ * Drop `<noscript>` content. A browser with JS never displays it, so it is not
+ * text a visitor sees before JS runs — and counting it would let a client-side
+ * page clear the word threshold with a fallback message (opodo.fr's "Veuillez
+ * activer JavaScript…" dialog was ~30 of its 268 served words).
+ */
+function stripNoscript(html: string): string {
+  return html.replace(/<noscript\b[\s\S]*?<\/noscript>/gi, " ");
 }
 
 /** Title strings that are placeholders, not a real page identity — never a valid anchor. */
@@ -236,6 +246,30 @@ function isRealImageSrc(value: string | undefined): boolean {
 export interface ImagePresenceResult {
   present: boolean;
   count: number;
+  /** Of `count`, the raster CSS backgrounds declared in the served HTML itself. */
+  cssBackgrounds?: number;
+}
+
+/** A raster image URL in a CSS `url()` — not a data: URI, not an SVG icon, not a font. */
+const CSS_RASTER_URL = /url\(\s*["']?(?!data:)([^"')]+?\.(?:jpe?g|png|webp|avif|gif)(?:\?[^"')]*)?)["']?\s*\)/gi;
+
+/**
+ * Distinct raster `background-image` URLs declared IN the served HTML — its
+ * `<style>` blocks and `style=""` attributes. Painted by the browser from the
+ * HTML and CSS alone, no JS: opodo.fr's only visual before JS is such a
+ * background, declared inline in its <head>. External stylesheets are left out on
+ * purpose: that is where icon sprites and decorative textures live, and counting
+ * them would make every page "have an image".
+ */
+function inlineCssBackgrounds(html: string): Set<string> {
+  const clean = stripHtmlComments(html);
+  const css = [
+    ...(clean.match(/<style\b[^>]*>[\s\S]*?<\/style>/gi) ?? []),
+    ...(clean.match(/\sstyle\s*=\s*("[^"]*"|'[^']*')/gi) ?? []),
+  ].join("\n");
+  const urls = new Set<string>();
+  for (const m of css.matchAll(CSS_RASTER_URL)) urls.add(m[1].trim());
+  return urls;
 }
 
 /**
@@ -254,7 +288,9 @@ export function hasRealImage(html: string): ImagePresenceResult {
     if (parseTags(picture, "img").some(isReal)) continue;
     if (parseTags(picture, "source").some((s) => isRealImageSrc(s.attrs["srcset"]))) count++;
   }
-  return { present: count > 0, count };
+  const cssBackgrounds = inlineCssBackgrounds(html).size;
+  count += cssBackgrounds;
+  return { present: count > 0, count, ...(cssBackgrounds > 0 ? { cssBackgrounds } : {}) };
 }
 
 /**
@@ -283,8 +319,13 @@ export interface SsrMetrics {
    * body),  when the anchor carries too few words to judge.
    */
   anchorInBody?: boolean | null;
-  /** Images carrying a real src/srcset (no base64 placeholder, no data-src-only). */
+  /**
+   * Images resolvable without JS: <img>/<picture> with a real src/srcset, plus the
+   * raster CSS backgrounds declared in the served HTML (see `cssBackgrounds`).
+   */
   imageCount: number;
+  /** Of `imageCount`, the CSS backgrounds. Absent when there are none. */
+  cssBackgrounds?: number;
   /**
    * The values this verdict was measured against, so a stored result is
    * self-describing.  is a REFERENCE only — the criterion is absolute.
@@ -334,7 +375,11 @@ export function evaluateSsr(html: string, renderedHtml: string): SsrEvaluation {
     anchorInBody === false
       ? `mais son sujet est absent du corps servi — page coquille (en-tête/pied seuls)`
       : null,
-    `images : ${images.present ? `${images.count} image(s) avec src/srcset réel` : "aucune image avec src/srcset réel (JS requis)"}`,
+    `images : ${
+      images.present
+        ? `${images.count} image(s) sans JS${images.cssBackgrounds ? ` (dont ${images.cssBackgrounds} fond(s) CSS déclaré(s) dans le HTML)` : ""}`
+        : "aucune image avec src/srcset réel ni fond CSS dans le HTML (JS requis)"
+    }`,
     `recouvrement du texte final : ${Math.round(overlap.ratio * 100)}% (indicatif, n'entre pas dans le verdict)`,
   ].filter((p): p is string => p !== null);
 
@@ -348,6 +393,7 @@ export function evaluateSsr(html: string, renderedHtml: string): SsrEvaluation {
       anchor: anchor.present ? anchor.detail : null,
       anchorInBody,
       imageCount: images.count,
+      ...(images.cssBackgrounds ? { cssBackgrounds: images.cssBackgrounds } : {}),
       thresholds: { textRatio: SSR_TEXT_RATIO, minWords: SSR_MIN_WORDS },
     },
   };

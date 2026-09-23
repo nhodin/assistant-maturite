@@ -47,8 +47,9 @@
   }
   function imagesHint(m){
     return m.imageCount > 0
-      ? m.imageCount + ' image(s) avec un src/srcset réel avant JS'
-      : "aucune image avec un src/srcset réel avant JS (un placeholder base64 ou un data-src seul ne compte pas : ils exigent du JS)";
+      ? m.imageCount + ' image(s) affichable(s) avant JS' +
+        (m.cssBackgrounds ? ' (dont ' + m.cssBackgrounds + ' fond(s) CSS déclaré(s) dans le HTML)' : '')
+      : "aucune image affichable avant JS : ni <img>/<picture> avec un src/srcset réel, ni fond CSS déclaré dans le HTML (un placeholder base64 ou un data-src seul ne compte pas : ils exigent du JS)";
   }
   function pathOf(u){ try { var x = new URL(u); return x.pathname + x.search; } catch (e) { return u; } }
 %>
