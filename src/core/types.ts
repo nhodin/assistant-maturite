@@ -234,7 +234,21 @@ export type BrowserProvider = "playwright" | "cloak" | "cdp";
  */
 export type CaptureMode = "standard" | "escalated";
 
+/**
+ * What the capture is FOR, which decides how much of it runs.
+ *
+ *  - "maturity" (default): the full bundle the 12 topics need — CrUX, TLS/IPv6/HTTP3
+ *    probes, CSS coverage, @font-face parsing, perf trace.
+ *  - "diag": the prospect diagnostic (docs/DIAGNOSTIC.md), which scores nothing.
+ *    Keeps the raw HTML (user), the raw HTML as served to a crawler, the rendered
+ *    DOM, the stack/navigation probes and the document headers; skips everything
+ *    the verdict cannot use. Faster runs, and less time in front of a WAF.
+ */
+export type CaptureProfile = "maturity" | "diag";
+
 export interface CollectOptions {
+  /** What the capture is for. Defaults to "maturity". */
+  profile?: CaptureProfile;
   device?: Device;
   /** Click the cookie-consent accept button before capturing (topic 4). */
   acceptCookies?: boolean;

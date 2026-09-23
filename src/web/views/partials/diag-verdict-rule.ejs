@@ -1,0 +1,50 @@
+<%# The verdict rule, spelled out where the results are read: a reader should
+    never have to open docs/DIAGNOSTIC.md to know what GO means here. %>
+<details class="diag-rule" open>
+  <summary>Comment le verdict est établi</summary>
+  <p class="muted">
+    Une seule question, posée deux fois : <strong>le contenu principal de la page
+    est-il présent dans le HTML avant toute exécution de JavaScript ?</strong>
+    La réponse pour un <strong>visiteur</strong> décide d'EdgeSpeed (qui optimise
+    le HTML servi aux visiteurs), celle pour un <strong>crawler</strong> décide
+    d'EdgeSEO (qui agit sur le HTML servi aux robots).
+  </p>
+  <p class="muted">Le HTML servi doit réunir les quatre conditions :</p>
+  <%
+    // The threshold comes from prospect/detect.ts through viewHelpers, so this
+    // text can never drift from the rule. Guarded because the views reload on
+    // every request while the helpers are TypeScript loaded at boot: a server
+    // started before the helper existed would otherwise 500 the whole page
+    // instead of showing the diagnostic.
+    var minWords = typeof SSR_MIN_WORDS === "number" ? SSR_MIN_WORDS : null;
+  %>
+  <ol class="muted diag-criteria">
+    <li><strong>Volume de texte</strong> — <%= minWords !== null ? "au moins " + minWords + " mots" : "un minimum de mots" %> de texte visible.</li>
+    <li><strong>Ancrage sémantique</strong> — un <code>h1</code> non vide, un <code>title</code>
+      non générique, un <code>og:title</code> ou un bloc JSON-LD identifiant la page.</li>
+    <li><strong>Images</strong> — au moins une <code>&lt;img&gt;</code> avec un <code>src</code>/<code>srcset</code>
+      réel ; un placeholder base64 ou un <code>data-src</code> seul ne compte pas, ils exigent du JS.</li>
+    <li><strong>Garde anti-coquille</strong> — si l'ancrage vient du <code>&lt;head&gt;</code>
+      (<code>title</code>, <code>og:title</code>, JSON-LD), son sujet doit aussi apparaître dans
+      le corps servi : sinon l'en-tête et le pied suffiraient à faire passer une page dont
+      le contenu est entièrement client-side.</li>
+  </ol>
+  <p class="muted">
+    Le <strong>pourcentage de recouvrement</strong> affiché dans le tableau est
+    <strong>indicatif</strong> et n'entre pas dans le verdict : il mesure la part du texte
+    final déjà servie, ce qui fait chuter une page correctement rendue côté serveur qui
+    charge ses avis et ses recommandations en JS.
+  </p>
+  <p class="muted">
+    Deux situations ne produisent <strong>aucun verdict</strong> mais un
+    « à confirmer » : un <strong>crawler bloqué</strong> (403, challenge WAF) et un
+    <strong>visiteur bloqué</strong> (interstitiel anti-bot servi à la place de la page).
+    Mesurer le SSR sur une page de blocage donnerait un NOGO confiant et faux ; le check
+    compte comme échec tant qu'un opérateur n'a pas tranché, via « Détail ».
+  </p>
+  <p class="muted">
+    <strong>Stack JS</strong> et <strong>MPA/SPA</strong> sont relevés à titre
+    d'information et n'entrent pas dans le verdict. Le détail complet est dans
+    <code>docs/DIAGNOSTIC.md</code>.
+  </p>
+</details>

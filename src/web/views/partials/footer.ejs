@@ -6,8 +6,49 @@
     function toggleCrit(btn) {
       var slot = document.getElementById(btn.dataset.critTarget);
       if (!slot) return;
-      if (slot.innerHTML.trim()) { slot.innerHTML = ''; return; }
-      htmx.ajax('GET', btn.dataset.critUrl, { target: slot, swap: 'innerHTML' });
+      // A toggle has to say which way it points; a button whose label never
+      // changes leaves the operator guessing whether the click registered.
+      var opened = btn.dataset.openLabel;
+      if (slot.innerHTML.trim()) {
+        slot.innerHTML = "";
+        if (opened) { btn.textContent = btn.dataset.shutLabel; btn.classList.remove("open"); }
+        return;
+      }
+      if (opened) { btn.textContent = opened; btn.classList.add("open"); }
+      htmx.ajax("GET", btn.dataset.critUrl, { target: slot, swap: "innerHTML" })
+        .catch(function () {
+          slot.innerHTML =
+            "<div class=\"diag-detail\"><p class=\"ko\">Détail indisponible — réessayer, " +
+            "ou redémarrer le serveur s'il vient d'être mis à jour.</p></div>";
+        });
+    }
+
+    // Manual arbitration of ONE diagnostic check, from wherever the accordion is
+    // open (live run view, finished run view, dedicated site view).
+    async function diagCheckEdit(el, runId, runPageId, checkId, verdict) {
+      const previous = el.dataset.current || "";
+      el.disabled = true;
+      try {
+        const res = await fetch(
+          "/runs/" + runId + "/pages/" + runPageId + "/checks/" + encodeURIComponent(checkId),
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: "verdict=" + encodeURIComponent(verdict),
+          },
+        );
+        if (!res.ok) {
+          window.alert("Correction impossible : " + (await res.text()));
+          el.value = previous;
+          el.disabled = false;
+          return;
+        }
+        window.location.reload();
+      } catch (err) {
+        window.alert("Correction impossible : " + err);
+        el.value = previous;
+        el.disabled = false;
+      }
     }
   </script>
 </body>

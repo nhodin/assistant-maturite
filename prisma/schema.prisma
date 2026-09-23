@@ -38,10 +38,15 @@ enum RunStatus {
   FAILED
 }
 
-/// Whether a project is a one-off (STANDARD) or a recurring webperf monitor.
+/// What a project produces: a one-off maturity audit (STANDARD), a recurring
+/// webperf monitor (MONITORING), or a prospect Speed/SEO eligibility diagnostic
+/// (DIAGNOSTIC — see docs/DIAGNOSTIC.md). The mode is STORED, never inferred from
+/// the pages: a maturity project whose pages all happen to be kind OTHER must not
+/// silently run as a diagnostic.
 enum ProjectMode {
   STANDARD
   MONITORING
+  DIAGNOSTIC
 }
 
 /// How often a MONITORING project re-runs its cycle.
@@ -182,6 +187,12 @@ model Run {
   project       Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
   projectId     Int
   status        RunStatus @default(PENDING)
+  // What this run produces: "maturity" (the 12-topic barème) or "diag" (the
+  // prospect Speed/SEO eligibility diagnostic — see docs/DIAGNOSTIC.md).
+  kind          String    @default("maturity")
+  // Fingerprint of the detection rules this run was produced by (diag runs).
+  // Null on maturity runs and on diag runs captured before stamping existed.
+  rulesVersion  String?
   browser       String    @default("cloak") // playwright | cloak | cdp
   source        String    @default("manual") // manual | scheduled
   device        String    @default("mobile")
@@ -219,6 +230,8 @@ model RunPage {
   geo          Int?
   china        Int?
   topicsJson   Json? // TopicResult[] for this single page
+  // PageDiagnostic for this page, on a "diag" run. Null on a maturity run.
+  diagJson     Json?
   error        String?   @db.Text
   createdAt    DateTime  @default(now())
 

@@ -73,8 +73,12 @@ function hasLongTtl(cacheControl: string, headers: Record<string, string> = {}):
   return isCountdownMaxAge(maxAge) && isCdnHit(headers)
 }
 
-/** Known CDN response header fingerprints. */
-const CDN_HEADERS = [
+/**
+ * Known CDN response header fingerprints. Exported because the prospect
+ * diagnostic names the same fingerprints as a vigilance flag — one list, so the
+ * two analyses can never disagree on who is in front of a site.
+ */
+export const CDN_HEADERS = [
   "cf-ray",
   "cf-cache-status",
   "x-amz-cf-pop",

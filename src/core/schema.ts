@@ -181,6 +181,57 @@ export const PageFeaturesSchema = z.object({
   cookieAccepted: z.boolean(),
 });
 
+/* ── Prospect diagnostic (Speed/SEO eligibility) ──────────────────────────────
+ * All optional / nullable: a maturity capture never fills them, and evidence
+ * captured before the diagnostic existed must stay valid. See docs/DIAGNOSTIC.md.
+ */
+
+/** Re-fetch of the SAME document with a crawler user-agent (Googlebot). */
+export const BotFetchSchema = z.object({
+  /** The exact UA string sent. */
+  userAgent: z.string(),
+  /** HTTP status of the bot fetch. 0 when the request itself failed. */
+  status: z.number(),
+  /** Raw HTML served to the crawler, before any JS. "" when the fetch failed. */
+  html: z.string(),
+  /** UTF-8 byte size of `html` as captured, stamped before any truncation. */
+  htmlBytes: z.number(),
+  responseHeaders: HeaderMapSchema,
+  /**
+   * The response is a WAF challenge / block page rather than the document.
+   * This is what makes the "SSR user but not bot" row `unknown` instead of a
+   * NOGO — see docs/DIAGNOSTIC.md.
+   */
+  blocked: z.boolean(),
+  /** Why it was judged blocked (status, challenge signature...). */
+  blockReason: z.string().optional(),
+});
+
+/** JS stack fingerprint + service-worker fact. Informational, never a verdict. */
+export const StackProbeSchema = z.object({
+  /** Matched framework ids, most specific first, e.g. ["next", "react"]. */
+  frameworks: z.array(z.string()),
+  /** Human-readable evidence backing each match, for the report. */
+  signals: z.array(z.string()),
+  /** A service worker is registered on the page (possible conflict at the edge). */
+  serviceWorker: z.boolean().optional(),
+});
+
+/** MPA vs SPA, decided by clicking an internal link. Informational. */
+export const NavigationProbeSchema = z.object({
+  kind: z.enum(["spa", "mpa", "unknown"]),
+  /** The internal link the probe clicked, when one was found. */
+  linkUrl: z.string().optional(),
+  /** URL after the click settled. */
+  landedUrl: z.string().optional(),
+  /** A marker set on `window` survived the navigation → client-side routing. */
+  contextSurvived: z.boolean().optional(),
+  /** A new main-frame document request was observed after the click. */
+  documentRequested: z.boolean().optional(),
+  /** Why the probe could not conclude (no internal link, click did nothing...). */
+  note: z.string().optional(),
+});
+
 export const EvidenceBundleSchema = z.object({
   /** URL requested. */
   url: z.string(),
@@ -226,6 +277,12 @@ export const EvidenceBundleSchema = z.object({
   field: CruxDataSchema.nullable(),
   network: NetworkProbeSchema,
   features: PageFeaturesSchema,
+  /** Diagnostic-only: the document as served to a crawler. Null on a maturity capture. */
+  bot: BotFetchSchema.nullable().default(null),
+  /** Diagnostic-only: JS stack fingerprint. Absent on a maturity capture. */
+  stack: StackProbeSchema.optional(),
+  /** Diagnostic-only: MPA/SPA navigation probe. Absent on a maturity capture. */
+  navigation: NavigationProbeSchema.optional(),
 });
 
 export type HeaderMap = z.infer<typeof HeaderMapSchema>;
@@ -241,4 +298,7 @@ export type CssAudit = z.infer<typeof CssAuditSchema>;
 export type NetworkProbe = z.infer<typeof NetworkProbeSchema>;
 export type CruxData = z.infer<typeof CruxDataSchema>;
 export type PageFeatures = z.infer<typeof PageFeaturesSchema>;
+export type BotFetch = z.infer<typeof BotFetchSchema>;
+export type StackProbe = z.infer<typeof StackProbeSchema>;
+export type NavigationProbe = z.infer<typeof NavigationProbeSchema>;
 export type EvidenceBundle = z.infer<typeof EvidenceBundleSchema>;

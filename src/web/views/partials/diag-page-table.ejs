@@ -1,0 +1,190 @@
+<%
+  // Per-page diagnostic table. Shared by the LIVE run view (partials/run-progress)
+  // and the finished run view (run-detail), so a diagnostic reads the same either
+  // way. Expects `run` with `runPages` including `page.site` and `diagJson`.
+  //
+  // ONE cell per population (visitor, crawler), carrying the SAME four measurements
+  // in both: the two documents are judged by identical rules, so showing the anchor
+  // and the images for the visitor only — as an earlier layout did — made the
+  // crawler column look like it was graded on word count alone.
+  //
+  // The raw measurements sit next to the verdict on purpose: a page at 48% overlap
+  // and one at 4% are both NOGO, but the first says the threshold may sit in the
+  // wrong place and the second says the page really is client-side.
+  var pages = run.runPages || [];
+
+  // Divergence is a SITE-level finding surfaced on the page rows: when a site's
+  // pages do not all reach the same verdict, that disagreement is itself the
+  // commercial signal (a deep page carries more optimisation volume than a home),
+  // so it is flagged here rather than hidden behind a separate summary table.
+  var divergentSites = {};
+  var seenSite = {};
+  (function(){
+    var bySite = {};
+    pages.forEach(function(rp){
+      var d = rp.status === 'DONE' ? rp.diagJson : null;
+      if (!d) return;
+      (bySite[rp.page.siteId] = bySite[rp.page.siteId] || []).push(d);
+    });
+    Object.keys(bySite).forEach(function(k){
+      var speeds = {}, seos = {};
+      bySite[k].forEach(function(d){ speeds[d.speed] = 1; seos[d.seo] = 1; });
+      if (Object.keys(speeds).length > 1 || Object.keys(seos).length > 1) divergentSites[k] = true;
+    });
+  })();
+
+  function pctOf(m){ return Math.round(m.overlapRatio * 100) + '%'; }
+  // The overlap ratio is CONTEXT, not a verdict — rendered neutral on purpose.
+  // Colouring it would suggest a threshold it no longer has.
+  function ratioHint(){ return "part du texte final déjà servie — indicatif, n'entre pas dans le verdict"; }
+  function wordsClass(m){ return m.rawWords >= m.thresholds.minWords ? 'ok' : 'ko'; }
+  function wordsHint(m){ return 'seuil : ' + m.thresholds.minWords + ' mots dans le HTML servi'; }
+  function anchorOk(m){ return !!m.anchor && m.anchorInBody !== false; }
+  function anchorHint(m){
+    if (!m.anchor) return 'ni h1, ni title exploitable, ni og:title, ni JSON-LD avant JS';
+    if (m.anchorInBody === false) return m.anchor + " — mais son sujet est absent du corps servi : page coquille";
+    return m.anchor;
+  }
+  function imagesHint(m){
+    return m.imageCount > 0
+      ? m.imageCount + ' image(s) avec un src/srcset réel avant JS'
+      : "aucune image avec un src/srcset réel avant JS (un placeholder base64 ou un data-src seul ne compte pas : ils exigent du JS)";
+  }
+  function pathOf(u){ try { var x = new URL(u); return x.pathname + x.search; } catch (e) { return u; } }
+%>
+<p class="muted small legend-nojs">
+  <strong>Contenu User</strong> et <strong>Contenu Googlebot</strong> mesurent le HTML tel que le
+  serveur le renvoie, <strong>avant toute exécution de JavaScript</strong> : le premier est ce que
+  reçoit un visiteur, le second le même HTML redemandé avec un user-agent de crawler. Les deux
+  sont jugés sur les mêmes conditions — <strong>nombre de mots</strong>,
+  <strong>titre / H1</strong> et <strong>images</strong> —, vert = rempli, rouge = non.
+  Le <strong>pourcentage</strong> (part du texte final déjà servie) est en gris parce qu'il est
+  <strong>indicatif</strong> : une page correctement rendue côté serveur qui charge ses avis et
+  ses recommandations en JS y tombe bas sans rien avoir à se reprocher.
+</p>
+<div class="scroll-x">
+<table class="grid matrix small">
+  <thead>
+    <tr>
+      <%# No status column: a DONE page is the norm and said nothing. Anything
+          else is shown on the site cell, where it qualifies the row it belongs
+          to — and keeps the live view's RUNNING visible. %>
+      <th>Site</th>
+      <th title="EdgeSpeed — suit le SSR vu par un visiteur">Speed</th>
+      <th title="EdgeSEO — suit le SSR vu par un crawler">SEO</th>
+      <th title="HTML servi à un visiteur, avant JS : recouvrement / mots, puis titre-H1 et images">Contenu User</th>
+      <th title="Le même HTML redemandé avec un user-agent Googlebot, jugé sur les mêmes conditions">Contenu Googlebot</th>
+      <%# Navigation and stack are one fact about the same thing — how the site is
+          built — and neither enters the verdict, so they share a column. %>
+      <th title="Navigation (MPA/SPA) et framework détecté — informatifs, n'entrent pas dans le verdict">Techno</th>
+      <%# Pinned to the right edge (position: sticky) so it stays on screen when the
+          table scrolls horizontally — a plain trailing column sat past the edge and
+          was never seen. %>
+      <th class="diag-action"></th>
+    </tr>
+  </thead>
+  <tbody>
+    <% pages.forEach(function(rp){
+         var done = rp.status === 'DONE';
+         var d = done ? rp.diagJson : null;
+         var checks = (d && d.checks) || [];
+         var cUser = checks.find(function(c){ return c.id === 'ssr.user'; });
+         var cBot  = checks.find(function(c){ return c.id === 'ssr.bot'; });
+    %>
+      <tr>
+        <td title="<%= rp.url %>">
+          <%= rp.page.site.name %>
+          <% if (divergentSites[rp.page.siteId] && !seenSite[rp.page.siteId]) { seenSite[rp.page.siteId] = true; %>
+            <span class="badge b-diag-divergent" title="Les pages de ce site n'ont pas toutes le même verdict">divergent</span>
+          <% } %>
+          <% if (!done) { %>
+            <span class="badge b-<%= rp.status %>"><%= rp.status %></span>
+          <% } %>
+          <%# The URL is what distinguishes two rows of the SAME site. %>
+          <div class="muted url diag-url"><%= pathOf(rp.url) %></div>
+        </td>
+        <td>
+          <% if (d) { %>
+            <span class="badge v-<%= d.speed %>"><%= d.speed %></span>
+            <%# A GO on a client-side-routed site is a GO with a caveat: EdgeSpeed
+                optimises the HTML the server sends, and after the first load a SPA
+                stops asking for any. Worth seeing next to the verdict, without
+                changing it — MPA/SPA has never been part of the decision. %>
+            <% if (d.speed === 'GO' && d.navigation && d.navigation.kind === 'spa') { %>
+              <div class="diag-warn" title="Navigation client-side : EdgeSpeed optimise le HTML servi par le serveur, donc le gain porte sur le premier chargement ; les navigations suivantes sont rendues par le JS et n'en bénéficient pas.">⚠ SPA</div>
+            <% } %>
+          <% } else { %><span class="muted">&middot;</span><% } %>
+        </td>
+        <td>
+          <% if (d) { %><span class="badge v-<%= d.seo %>"><%= d.seo === 'UNKNOWN' ? 'à confirmer' : d.seo %></span>
+             <% if (d.dynamicRendering) { %><span class="badge b-diag" title="<%= d.dynamicRenderingEvidence || '' %>">dyn. rendering</span><% } %>
+          <% } else { %><span class="muted">&middot;</span><% } %>
+        </td>
+        <%# One cell per population, same two lines in both. %>
+        <% [cUser, cBot].forEach(function(c){ var m = c && c.metrics; %>
+          <td class="diag-content">
+            <% if (c && c.unknown) { %>
+              <span class="badge v-UNKNOWN" title="<%= c.evidence %>">bloqué</span>
+              <%# A presumption is an INDICATION under « à confirmer », never a
+                  verdict: rendered as a muted note, with no GO styling. %>
+              <% if (c.presumption) { %>
+                <div class="muted diag-presumption" title="<%= c.presumption %>">présomption favorable — à confirmer</div>
+              <% } %>
+            <% } else if (m) { %>
+              <div class="nowrap">
+                <span class="muted" title="<%= ratioHint() %>"><%= pctOf(m) %></span>
+                <span class="muted">/</span>
+                <span class="<%= wordsClass(m) %>" title="<%= wordsHint(m) %>"><%= m.rawWords %> mots</span>
+              </div>
+              <div class="nowrap diag-conditions">
+                <span class="<%= anchorOk(m) ? 'ok' : 'ko' %>" title="<%= anchorHint(m) %>">titre / H1</span>
+                <span class="muted">&mdash;</span>
+                <span class="<%= m.imageCount > 0 ? 'ok' : 'ko' %>" title="<%= imagesHint(m) %>"><%= m.imageCount %> image<%= m.imageCount > 1 ? 's' : '' %> sans JS</span>
+                <%# Every value above carries its own tooltip; this mark is what tells
+                    the reader they exist, and holds the full evidence sentence. %>
+                <span class="info-mark" title="<%= c.evidence %>">&#9432;</span>
+              </div>
+            <% } else { %><span class="muted">&middot;</span><% } %>
+          </td>
+        <% }) %>
+        <td class="diag-techno">
+          <% if (d) { %>
+            <div>
+              <% if (d.navigation) { %>
+                <span class="badge" title="<%= d.navigation.kind === 'spa' ? 'SPA — routing client-side' : d.navigation.kind === 'mpa' ? 'MPA — rechargement complet du document' : 'navigation indéterminée' %><%= d.navigation.note ? ' : ' + d.navigation.note : (d.navigation.landedUrl ? ' (→ ' + d.navigation.landedUrl + ')' : '') %>"><%= d.navigation.kind === 'unknown' ? '?' : d.navigation.kind.toUpperCase() %></span>
+              <% } else { %><span class="muted">&middot;</span><% } %>
+            </div>
+            <div class="nowrap">
+              <% if (d.stack && d.stack.frameworks && d.stack.frameworks.length) { %>
+                <span class="muted" title="<%= (d.stack.signals || []).join(' · ') %>"><%= d.stack.frameworks.join(' + ') %></span>
+              <% } else { %><span class="muted">aucun framework</span><% } %>
+            </div>
+          <% } else { %><span class="muted">&middot;</span><% } %>
+        </td>
+        <td class="diag-action">
+          <% if (done) { %>
+            <button class="btn sm diag-toggle" type="button" onclick="toggleCrit(this)"
+                    data-crit-url="/runs/<%= run.id %>/pages/<%= rp.id %>/diag"
+                    data-crit-target="diag-<%= rp.id %>"
+                    data-shut-label="Détail" data-open-label="Masquer"
+                    title="Afficher le détail des checks de cette page">Détail</button>
+          <% } %>
+        </td>
+      </tr>
+      <%# Accordion slot: the page's full diagnostic is loaded on demand, in place,
+          instead of sending the operator to a separate page. hx-preserve keeps an
+          open panel open across the live view's polling. %>
+      <tr class="diag-slot">
+        <td colspan="7" id="diag-<%= rp.id %>" hx-preserve="true"></td>
+      </tr>
+      <% if (rp.error) { %>
+        <tr class="note-row">
+          <td colspan="7" class="ev <%= rp.status === 'FAILED' ? 'ko' : 'muted' %>">
+            <span class="note-for"><%= rp.page.site.name %> &mdash;</span> <%= rp.error %>
+          </td>
+        </tr>
+      <% } %>
+    <% }) %>
+  </tbody>
+</table>
+</div>

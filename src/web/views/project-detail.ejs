@@ -1,7 +1,13 @@
 <%- include('partials/header', { title, active }) %>
 
+<%
+  // A diagnostic project says what it is — never inferred from its page kinds.
+  var isDiagProject = project.mode === 'DIAGNOSTIC';
+%>
 <p><a href="/projects">← Projects</a></p>
-<h1><%= project.name %> <% if (project.mode === 'MONITORING') { %><span class="badge b-monitor">Suivi webperf</span><% if (project.monitorPaused) { %> <span class="badge b-paused">⏸ En pause</span><% } %><% } %></h1>
+<h1><%= project.name %>
+  <% if (isDiagProject) { %><span class="badge b-diag" title="Projet de diagnostic Speed/SEO — pas de score de maturité">Diagnostic Speed/SEO</span><% } %>
+  <% if (project.mode === 'MONITORING') { %><span class="badge b-monitor">Suivi webperf</span><% if (project.monitorPaused) { %> <span class="badge b-paused">⏸ En pause</span><% } %><% } %></h1>
 <p class="muted"><% if (project.client) { %>Client : <strong><%= project.client.name %></strong><% } else { %><span>Sans client</span><% } %><% if (project.description) { %> · <%= project.description %><% } %></p>
 
 <% if (flash === 'crux_started') { %>

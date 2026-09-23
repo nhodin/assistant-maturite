@@ -13,7 +13,7 @@
         <td><a href="/runs/<%= r.id %>">#<%= r.id %></a></td>
         <td><% if (r.project.client) { %><%= r.project.client.name %><% } else { %><span class="muted">—</span><% } %></td>
         <td><%= r.project.name %></td>
-        <td><span class="badge b-<%= r.status %>"><%= r.status %></span></td>
+        <td><span class="badge b-<%= r.status %>"><%= r.status %></span> <% if (r.kind === 'diag') { %><span class="badge b-diag" title="Diagnostic Speed/SEO — pas de score de maturité">Diag</span><% } %></td>
         <%# donePages counts failures too, so a run can read 30/30 with pages missing. %>
         <td>
           <%= r.donePages %>/<%= r.totalPages %>

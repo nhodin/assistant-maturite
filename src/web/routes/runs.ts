@@ -15,6 +15,16 @@ import { rebuildSiteScore } from "../site-score";
 import { TOPICS } from "../../topics";
 import type { PageScoringMode, SiteResult, TopicResult } from "../../core/types";
 import { isChinaKind } from "../categories";
+import {
+  applyManualDiagCheck,
+  rescorePageDiagnostic,
+  countPendingDiagConfirmations,
+  siteDiagnostic,
+  type DiagManualVerdict,
+} from "../../prospect/verdict";
+import { rulesFreshness, diagRulesVersion } from "../../prospect/rules-version";
+import { renderDiagCsv, type DiagCsvPage } from "../../prospect/report";
+import type { DiagCheckId, PageDiagnostic } from "../../prospect/types";
 
 /**
  * Criteria whose verdict is computed FROM the other topics (topic 12's
@@ -55,6 +65,75 @@ async function runConfig(runId: number): Promise<ConfigMap> {
     select: { configJson: true },
   });
   return (run?.configJson as unknown as ConfigMap | null) ?? (await buildConfigMap());
+}
+
+/** One page's diagnostic within a run's per-site grouping, as the diag views render it. */
+export interface DiagRunPageView {
+  runPageId: number;
+  url: string;
+  label: string;
+  status: string;
+  /** The run never captured this page (WAF block, interrupted run) — no checks to show. */
+  captured: boolean;
+  diag: PageDiagnostic | null;
+}
+
+export interface DiagSiteView {
+  siteId: number;
+  siteName: string;
+  pages: DiagRunPageView[];
+  /** The site's pages don't all reach the same verdict — see docs/DIAGNOSTIC.md "Granularité". */
+  divergent: boolean;
+  /** Checks still « à confirmer » across this site's captured pages. */
+  pending: number;
+}
+
+/**
+ * Group a "diag" run's pages by site and derive each site's `divergent` flag
+ * straight from the stored `PageDiagnostic`s (prospect/verdict.ts:siteDiagnostic)
+ * — a diag run writes no RunSiteScore (see runner.ts settleSite), so there is no
+ * aggregate table to read this from.
+ */
+function diagSitesOf(
+  runPages: {
+    id: number;
+    url: string;
+    status: string;
+    diagJson: unknown;
+    page: {
+      siteId: number;
+      label: string | null;
+      kind: string;
+      site: { id: number; name: string };
+    };
+  }[],
+): DiagSiteView[] {
+  const bySite = new Map<number, DiagSiteView>();
+  for (const rp of runPages) {
+    const siteId = rp.page.siteId;
+    let g = bySite.get(siteId);
+    if (!g) {
+      g = { siteId, siteName: rp.page.site.name, pages: [], divergent: false, pending: 0 };
+      bySite.set(siteId, g);
+    }
+    const diag = (rp.diagJson as unknown as PageDiagnostic | null) ?? null;
+    g.pages.push({
+      runPageId: rp.id,
+      url: rp.url,
+      label: rp.page.label || rp.page.kind,
+      status: rp.status,
+      captured: diag !== null,
+      diag,
+    });
+  }
+  for (const g of bySite.values()) {
+    const captured = g.pages
+      .map((p) => p.diag)
+      .filter((d): d is PageDiagnostic => d !== null);
+    g.divergent = siteDiagnostic(g.siteName, captured).divergent;
+    g.pending = countPendingDiagConfirmations(captured);
+  }
+  return [...bySite.values()].sort((a, b) => a.siteName.localeCompare(b.siteName));
 }
 
 export async function runRoutes(app: FastifyInstance) {
@@ -132,10 +211,25 @@ export async function runRoutes(app: FastifyInstance) {
       ).values(),
     ].sort((a, b) => a.name.localeCompare(b.name));
 
+    // A "diag" run scores nothing (no RunSiteScore rows — see runner.ts
+    // settleSite, which returns early for isDiag) — build the per-site summary
+    // straight from each page's stored PageDiagnostic instead.
+    const isDiagRun = run.kind === "diag";
+    const diagSites = isDiagRun ? diagSitesOf(run.runPages) : [];
+    const diagPending = diagSites.reduce((n, s) => n + s.pending, 0);
+
     return reply.view("run-detail", {
       active: "runs",
       title: `Run #${run.id}`,
       run,
+      isDiagRun,
+      diagSites,
+      diagPending,
+      // Were these results produced by the rules running now? A diag verdict
+      // scored by code that has since changed looks identical to a fresh one.
+      diagRules: isDiagRun
+        ? { freshness: rulesFreshness(run.rulesVersion), stored: run.rulesVersion, current: diagRulesVersion() }
+        : null,
       ranking,
       byCategory,
       pendingBySite,
@@ -174,6 +268,30 @@ export async function runRoutes(app: FastifyInstance) {
       include: { runSiteScores: { include: { site: true } } },
     });
     if (!run) return reply.code(404).send("Run not found");
+
+    // A diag run writes no RunSiteScore at all — it scores nothing — so its
+    // export is built from the per-page diagnostics instead, one row per page.
+    if (run.kind === "diag") {
+      const runPages = await prisma.runPage.findMany({
+        where: { runId: id },
+        include: { page: { include: { site: true } } },
+        orderBy: { id: "asc" },
+      });
+      const rows: DiagCsvPage[] = runPages.map((rp) => ({
+        site: rp.page.site.name,
+        url: rp.url,
+        status: rp.status,
+        diag: (rp.diagJson as unknown as PageDiagnostic | null) ?? null,
+      }));
+      const day = (run.finishedAt ?? run.createdAt).toISOString().slice(0, 10);
+      return reply
+        .header("Content-Type", "text/csv; charset=utf-8")
+        .header(
+          "Content-Disposition",
+          `attachment; filename="run-${run.id}-${day}-diagnostic.csv"`,
+        )
+        .send(renderDiagCsv(rows));
+    }
 
     const results = [...run.runSiteScores]
       .sort((a, b) => a.site.name.localeCompare(b.site.name))
@@ -222,6 +340,28 @@ export async function runRoutes(app: FastifyInstance) {
 
   // On-demand criteria detail for one captured page (available as soon as the
   // page is scored, i.e. before the run finishes).
+  // One page's diagnostic detail, served for the accordion under its row in the
+  // diag table. Same partial the dedicated site view uses, so both stay in step.
+  app.get("/runs/:id/pages/:runPageId/diag", async (req, reply) => {
+    const id = Number((req.params as any).id);
+    const runPageId = Number((req.params as any).runPageId);
+    const rp = await prisma.runPage.findFirst({
+      where: { id: runPageId, runId: id },
+      include: { page: { include: { site: true } } },
+    });
+    if (!rp) return reply.code(404).send("");
+    const diag = (rp.diagJson as unknown as PageDiagnostic | null) ?? null;
+    const view: DiagRunPageView = {
+      runPageId: rp.id,
+      url: rp.url,
+      label: rp.page.label || rp.page.kind,
+      status: rp.status,
+      captured: diag !== null,
+      diag,
+    };
+    return reply.view("partials/diag-page-detail", { runId: id, p: view });
+  });
+
   app.get("/runs/:id/pages/:runPageId/criteria", async (req, reply) => {
     const id = Number((req.params as any).id);
     const runPageId = Number((req.params as any).runPageId);
@@ -245,6 +385,51 @@ export async function runRoutes(app: FastifyInstance) {
       // has arbitrated yet.
       pendingCount: countPendingConfirmations(pageTopics),
     });
+  });
+
+  // Manual correction of ONE check (ssr.user | ssr.bot) on ONE diagnosed page:
+  // same shape as the maturity correction route below (manual/auto fields,
+  // "↺ mesuré" reset via verdict=auto) but operating on prospect/verdict.ts's
+  // DiagCheck[] instead of a Control's TopicResult[]. There is no N/A here — a
+  // check is always either measured or "à confirmer", never inapplicable.
+  //
+  // Deliberately NOT persisted anywhere but in the page's own diagJson —
+  // recapturing the page recomputes it from the bundle and the correction is
+  // gone, exactly like the maturity side.
+  app.post("/runs/:id/pages/:runPageId/checks/:checkId", async (req, reply) => {
+    const id = Number((req.params as any).id);
+    const runPageId = Number((req.params as any).runPageId);
+    const checkId = String((req.params as any).checkId);
+    const verdict = String((req.body as any)?.verdict ?? "");
+    if (checkId !== "ssr.user" && checkId !== "ssr.bot") {
+      return reply.code(400).send("checkId doit être ssr.user ou ssr.bot");
+    }
+    if (!["pass", "fail", "auto"].includes(verdict)) {
+      return reply.code(400).send("verdict must be pass | fail | auto");
+    }
+
+    const rp = await prisma.runPage.findFirst({
+      where: { id: runPageId, runId: id },
+      select: { id: true, diagJson: true },
+    });
+    if (!rp) return reply.code(404).send("Page inconnue");
+    if (rp.diagJson === null) return reply.code(404).send("Page non diagnostiquée");
+
+    const diag = rp.diagJson as unknown as PageDiagnostic;
+    const checks = applyManualDiagCheck(
+      diag.checks,
+      checkId as DiagCheckId,
+      verdict as DiagManualVerdict,
+    );
+    const rescored = rescorePageDiagnostic({ ...diag, checks });
+
+    await prisma.runPage.update({
+      where: { id: rp.id },
+      data: { diagJson: rescored as unknown as object },
+    });
+    // No RunSiteScore to rebuild for a diag run (see runner.ts settleSite) — the
+    // site view re-derives `divergent`/pending from the pages' diagJson each time.
+    return reply.code(204).send();
   });
 
   // Manual correction of ONE criterion on ONE captured page: the operator
@@ -339,6 +524,37 @@ export async function runRoutes(app: FastifyInstance) {
   app.get("/runs/:id/sites/:siteId", async (req, reply) => {
     const id = Number((req.params as any).id);
     const siteId = Number((req.params as any).siteId);
+
+    // A "diag" run has no RunSiteScore/topicsJson at all — its per-site page is
+    // built straight from the pages' PageDiagnostic, via a dedicated view.
+    const kindRow = await prisma.run.findUnique({ where: { id }, select: { kind: true } });
+    if (!kindRow) return reply.code(404).send("Run not found");
+    if (kindRow.kind === "diag") {
+      const [site, runPages] = await Promise.all([
+        prisma.site.findUnique({ where: { id: siteId } }),
+        prisma.runPage.findMany({
+          where: { runId: id, page: { siteId } },
+          include: { page: { include: { site: true } } },
+          orderBy: { id: "asc" },
+        }),
+      ]);
+      if (!site || runPages.length === 0) {
+        return reply.code(404).send("Ce site n'a aucune page dans ce run");
+      }
+      const [group] = diagSitesOf(runPages);
+      return reply.view("run-site-detail-diag", {
+        active: "runs",
+        title: `${site.name} — Run #${id}`,
+        runId: id,
+        site,
+        pages: group?.pages ?? [],
+        divergent: group?.divergent ?? false,
+        pending: group?.pending ?? 0,
+        isLive: activeRun() !== null,
+        flash: (req.query as any)?.flash ?? null,
+      });
+    }
+
     const [stored, runPages] = await Promise.all([
       prisma.runSiteScore.findUnique({
         where: { runId_siteId: { runId: id, siteId } },

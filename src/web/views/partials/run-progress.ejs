@@ -6,6 +6,8 @@
   function pgTopic(topics, id){ var t=(topics||[]).find(function(x){return x.topicId===id}); return t; }
   var pages = run.runPages || [];
   var running = pages.filter(function(p){ return p.status === 'RUNNING'; });
+  // A diag run has no topic scores: the maturity matrix would be 10 columns of dots.
+  var isDiagRun = run.kind === 'diag';
 %>
 <div id="run-progress"
      hx-get="/runs/<%= run.id %>/status" hx-trigger="load delay:2s" hx-swap="outerHTML">
@@ -23,6 +25,14 @@
   </div>
 
   <% if (pages.length) { %>
+    <% if (isDiagRun) { %>
+    <h2>Résultats en direct</h2>
+    <p class="muted">Diagnostic Speed/SEO — aucun score de maturité n'est calculé.</p>
+    <%# Same rule block as the finished run: the criteria are most useful WHILE the
+        results appear, not only once they are all in. %>
+    <%- include('diag-verdict-rule') %>
+    <%- include('diag-page-table', { run: run }) %>
+    <% } else { %>
     <h2>Résultats en direct</h2>
     <div class="scroll-x">
     <table class="grid matrix small">
@@ -73,5 +83,6 @@
       </tbody>
     </table>
     </div>
+    <% } %>
   <% } %>
 </div>

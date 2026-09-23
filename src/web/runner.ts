@@ -18,6 +18,8 @@
 import { prisma } from "./db";
 import { collect, assessCaptureHealth } from "../collector";
 import { asProvider } from "../collector/browser";
+import { ensureCloakBinary } from "../collector/cloak-binary";
+import { diagRulesVersion } from "../prospect/rules-version";
 import { captureConcurrencyFromEnv, groupByOrigin, runPool } from "../collector/concurrency";
 import { captureThrottlingFromEnv, describeThrottling } from "../collector/throttling";
 import type { CaptureFailureKind } from "../collector/sanity";
@@ -31,9 +33,11 @@ import type {
   Device,
   BrowserProvider,
   CaptureMode,
+  CaptureProfile,
   PageScoringMode,
 } from "../core";
 import { isChinaKind } from "./categories";
+import { diagnosePage } from "../prospect";
 
 /**
  * How a page is graded, from its inventory kind. A CHINA page is scored on the
@@ -94,6 +98,7 @@ async function tryCapture(
   device: Device,
   acceptCookies: boolean,
   mode: CaptureMode,
+  profile: CaptureProfile,
 ): Promise<CaptureAttempt> {
   let bundle: EvidenceBundle;
   try {
@@ -102,7 +107,10 @@ async function tryCapture(
       device,
       acceptCookies,
       mode,
-      cruxApiKey: process.env.CRUX_API_KEY,
+      profile,
+      // A "diag" capture scores nothing (docs/DIAGNOSTIC.md "Capture"), so CrUX
+      // would be paid for and never read. Only the "maturity" profile needs it.
+      cruxApiKey: profile === "maturity" ? process.env.CRUX_API_KEY : undefined,
     });
   } catch (err) {
     // A throw is a technical failure (launch/navigation/timeout), never a WAF verdict.
@@ -125,7 +133,46 @@ async function tryCapture(
  * so the JSON stays well under MySQL's max_allowed_packet. Scoring uses the full
  * in-memory bundle, so nothing is lost for the report — this is for record/debug.
  */
-function slimEvidence(b: EvidenceBundle): object {
+/**
+ * Per-document character cap for a stored diag capture. Three documents at this
+ * size stay comfortably inside a 1 MB MySQL packet alongside the rest of the
+ * bundle, while being long enough to read a page's real structure.
+ */
+const DIAG_DOC_MAX = 120_000;
+
+export function slimEvidence(b: EvidenceBundle, keepDocuments = false): object {
+  // A diag run keeps a GENEROUS EXCERPT of its three documents rather than the
+  // 2 KB stub, so a capture can be eyeballed after the fact — was the overlap low
+  // because the page is client-side, or because our notion of "visible text" is
+  // wrong? Changing a THRESHOLD needs none of this: the verdict carries its raw
+  // measurements (DiagCheck.metrics), and a threshold is just a comparison
+  // against a stored number. Only changing the MEASUREMENT METHOD needs the text.
+  //
+  // The excerpt is capped because MySQL's max_allowed_packet (1 MB on the dev
+  // server) bounds a single row: three uncapped documents would fail the write on
+  // any heavy page. `htmlBytes` still carries the true size, stamped at capture.
+  if (keepDocuments) {
+    return {
+      ...b,
+      rawHtml: b.rawHtml.slice(0, DIAG_DOC_MAX),
+      renderedHtml: b.renderedHtml.slice(0, DIAG_DOC_MAX),
+      bot: b.bot ? { ...b.bot, html: b.bot.html.slice(0, DIAG_DOC_MAX) } : null,
+      // Request bodies/headers say nothing about SSR; the URLs are kept for the
+      // stack fingerprint, everything else goes.
+      requests: b.requests.map((r) => ({
+        url: r.url,
+        resourceType: r.resourceType,
+        status: r.status,
+        fromCache: r.fromCache,
+        encodedBytes: r.encodedBytes,
+        decodedBytes: r.decodedBytes,
+        mimeType: r.mimeType,
+        phase: r.phase,
+        requestHeaders: {},
+        responseHeaders: {},
+      })),
+    };
+  }
   return {
     ...b,
     // Truncating the document here is what makes `htmlBytes` (stamped at capture)
@@ -293,10 +340,19 @@ async function executeRun(
   });
   if (!run) return;
 
+  // A "diag" run produces the prospect Speed/SEO diagnostic (docs/DIAGNOSTIC.md):
+  // it scores nothing, so it skips the config/scoring/site-aggregate machinery
+  // below entirely. Everything else — origin grouping, the capture pool, the
+  // block-retry escalation — is shared with "maturity" runs unchanged.
+  const isDiag = run.kind === "diag";
+  const captureProfile: CaptureProfile = isDiag ? "diag" : "maturity";
+
   // On a resume the config MUST be the one the already-scored sites were graded
-  // with, or a single ranking would mix two scoring rules.
-  const config =
-    opts.resume && run.configJson
+  // with, or a single ranking would mix two scoring rules. A diag run has no
+  // scoring config at all.
+  const config = isDiag
+    ? ({} as ConfigMap)
+    : opts.resume && run.configJson
       ? (run.configJson as unknown as ConfigMap)
       : await buildConfigMap();
 
@@ -331,6 +387,11 @@ async function executeRun(
       finishedAt: null,
       error: null,
       configJson: config as object,
+      // Stamp a diag run with the rules that produced it, so a result scored by
+      // code that has since changed can be SEEN rather than trusted. Never
+      // overwritten: a resume keeps its original stamp, because its already-DONE
+      // pages really were scored by those rules.
+      ...(isDiag && !run.rulesVersion ? { rulesVersion: diagRulesVersion() } : {}),
       totalPages: run.runPages.length,
       donePages: keptPages,
     },
@@ -343,6 +404,11 @@ async function executeRun(
 
   const device: Device = run.device === "desktop" ? "desktop" : "mobile";
   const browser = asProvider(run.browser);
+
+  // On a cold cache the stealth Chromium still has to be downloaded. Waiting for
+  // the single warm-up here is what keeps the parallel captures below from each
+  // starting their own download and deleting one another's install.
+  if (browser === "cloak") await ensureCloakBinary();
 
   /** Pages left to capture per site — a site reaching 0 is aggregated immediately. */
   const remainingBySite = new Map<number, number>();
@@ -367,6 +433,9 @@ async function executeRun(
     const left = (remainingBySite.get(site.id) ?? 1) - 1;
     remainingBySite.set(site.id, left);
     if (left > 0) return;
+    // A diag run scores nothing, so there is no RunSiteScore to (re)build — the
+    // per-page RunPage.diagJson rows already written are the whole result.
+    if (isDiag) return;
 
     // Same rebuild the UI runs after a manual correction — see web/site-score.ts.
     // `config` is passed so the site keeps the run's config snapshot.
@@ -389,7 +458,14 @@ async function executeRun(
     // humanize/careful, warm per-origin profile (see CaptureMode). Past the
     // per-origin block budget even that is skipped: the WAF has made up its mind
     // about this IP, and a second hit per page would only harden it further.
-    let attempt = await tryCapture(rp.url, browser, device, run.acceptCookies, "standard");
+    let attempt = await tryCapture(
+      rp.url,
+      browser,
+      device,
+      run.acceptCookies,
+      "standard",
+      captureProfile,
+    );
     let mode: CaptureMode = "standard";
     let firstFailure: string | null = null;
 
@@ -408,7 +484,14 @@ async function executeRun(
         // Coming straight back after a block just hands the WAF another data point.
         if (attempt.kind === "blocked") await sleep(BLOCK_COOLDOWN_MS);
         mode = "escalated";
-        attempt = await tryCapture(rp.url, browser, device, run.acceptCookies, "escalated");
+        attempt = await tryCapture(
+          rp.url,
+          browser,
+          device,
+          run.acceptCookies,
+          "escalated",
+          captureProfile,
+        );
         // Only a block the ESCALATION could not rescue spends budget: as long as the
         // warm headed session still gets through, the origin is not refusing us.
         if (!attempt.ok && attempt.kind === "blocked") bumpBlocked(blocksByOrigin, origin);
@@ -427,7 +510,7 @@ async function executeRun(
         data: {
           status: "FAILED",
           error: pageError.slice(0, 2000),
-          evidenceJson: failed.bundle ? slimEvidence(failed.bundle) : undefined,
+          evidenceJson: failed.bundle ? slimEvidence(failed.bundle, isDiag) : undefined,
         },
       });
       await prisma.run.update({ where: { id: runId }, data: { donePages: { increment: 1 } } });
@@ -443,6 +526,27 @@ async function executeRun(
           `being clicked — Third parties evidence is weaker here than on a standard capture.`
         : null;
 
+    if (isDiag) {
+      // No scoring: run the verdict engine and persist PageDiagnostic straight
+      // onto RunPage.diagJson. No topicsJson/overall/geo/china, no RunSiteScore.
+      const diagnostic = diagnosePage(bundle, rp.page.label || rp.page.kind);
+      await prisma.runPage.update({
+        where: { id: rp.id },
+        data: {
+          status: "DONE",
+          error: rescueNote?.slice(0, 2000) ?? null,
+          evidenceJson: slimEvidence(bundle, isDiag),
+          diagJson: diagnostic as unknown as object,
+        },
+      });
+      await prisma.run.update({
+        where: { id: runId },
+        data: { donePages: { increment: 1 } },
+      });
+      await settleSite(site);
+      return;
+    }
+
     // Score this page right away so the UI can show its criteria live, and so the
     // site aggregate can be rebuilt from these stored results later (settleSite).
     const scoringMode = modeOfKind(rp.page.kind);
@@ -455,7 +559,7 @@ async function executeRun(
         // Only an escalated capture has a story to tell: it says WHY the standard
         // attempt failed, and warns that a warm profile weakens Topic 4 evidence.
         error: rescueNote?.slice(0, 2000) ?? null,
-        evidenceJson: slimEvidence(bundle),
+        evidenceJson: slimEvidence(bundle, isDiag),
         overall: pageResult.overall,
         geo: pageResult.geo,
         china: pageResult.china,
@@ -510,9 +614,12 @@ async function executeRun(
   );
 
   // Truth comes from the DB, not from this process: on a resume the sites scored
-  // by the earlier attempt count too.
+  // by the earlier attempt count too. A diag run writes no RunSiteScore at all
+  // (it scores nothing), so its success is judged from DONE pages instead.
   const [scored, missed] = await Promise.all([
-    prisma.runSiteScore.count({ where: { runId } }),
+    isDiag
+      ? prisma.runPage.count({ where: { runId, status: "DONE" } })
+      : prisma.runSiteScore.count({ where: { runId } }),
     prisma.runPage.count({ where: { runId, status: { not: "DONE" } } }),
   ]);
   await prisma.run.update({

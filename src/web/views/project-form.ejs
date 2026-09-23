@@ -3,6 +3,68 @@
 <p><a href="/projects">← Projects</a></p>
 <h1>Nouveau projet</h1>
 
+<%# Mode switch: a maturity project (12-topic barème) picks pages from the
+    inventory; a diagnostic Speed/SEO project is created straight from a
+    pasted URL list — see docs/DIAGNOSTIC.md. %>
+<div class="ff-toggle">
+  <a class="ff-tab <%= formMode !== 'diag' ? 'active' : '' %>"
+     href="/projects/new<%= selectedClientId ? '?client=' + selectedClientId : '' %>">Maturité</a>
+  <a class="ff-tab <%= formMode === 'diag' ? 'active' : '' %>"
+     href="/projects/new?mode=diag<%= selectedClientId ? '&client=' + selectedClientId : '' %>">Diagnostic Speed/SEO</a>
+</div>
+
+<% if (formMode === 'diag') { %>
+
+<form method="post" action="/projects/diag">
+  <div class="form-row">
+    <input name="name" placeholder="Nom du projet (ex. Prospect Kiabi)" required style="flex:2">
+  </div>
+  <div class="form-row">
+    <input name="description" placeholder="Description (optionnel)" style="flex:1">
+  </div>
+  <div class="form-row">
+    <label>Client (optionnel)
+      <select name="clientId">
+        <option value="">— Aucun —</option>
+        <% clients.forEach(function(c){ %><option value="<%= c.id %>" <%= String(selectedClientId)===String(c.id)?'selected':'' %>><%= c.name %></option><% }) %>
+      </select>
+    </label>
+  </div>
+
+  <h2>URLs à diagnostiquer</h2>
+  <p class="muted small">
+    Une URL par ligne. Les sites et pages sont créés automatiquement, groupés par
+    <strong>domaine enregistrable</strong> (<code>fr.shop-orchestra.com</code> → <code>shop-orchestra.com</code>,
+    <code>travisperkins.co.uk</code> reste entier) ; les query strings (<code>?l=11</code>…) sont conservées.
+    Lignes vides ignorées, doublons exacts fusionnés, URLs non-http(s) rejetées et listées ci-dessous.
+    Recoller la même liste plus tard est sans risque : les sites/pages déjà créés sont réutilisés.
+  </p>
+  <div class="form-row">
+    <textarea name="urls" id="diagUrls" rows="12" style="flex:1;font-family:monospace;resize:vertical"
+      placeholder="https://www.exemple.fr/&#10;https://www.exemple.fr/produit?id=42"
+      required
+      hx-post="/projects/diag/preview" hx-trigger="input changed delay:400ms, load"
+      hx-target="#url-paste-preview" hx-include="closest form"></textarea>
+  </div>
+  <label class="chk">
+    <input type="checkbox" name="includeHomepages"
+      hx-post="/projects/diag/preview" hx-trigger="change"
+      hx-target="#url-paste-preview" hx-include="closest form">
+    Ajouter aussi la home de chaque domaine
+  </label>
+
+  <h3>Aperçu</h3>
+  <div id="url-paste-preview">
+    <div class="preview-box"><p class="muted">Collez des URLs ci-dessus pour voir l'aperçu.</p></div>
+  </div>
+
+  <div class="form-row" style="margin-top:1rem">
+    <button type="submit" class="btn-primary">Créer le projet</button>
+  </div>
+</form>
+
+<% } else { %>
+
 <%# Client picker: changing it reloads the form filtered to that client's sites. %>
 <form method="get" action="/projects/new" class="filter-bar">
   <label>Client
@@ -64,6 +126,8 @@
     <button type="submit" class="btn-primary">Créer le projet</button>
   </div>
 </form>
+<% } %>
+
 <% } %>
 
 <%- include('partials/footer') %>

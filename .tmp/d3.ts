@@ -1,0 +1,10 @@
+import { prisma } from "../src/web/db";
+const rp = await prisma.runPage.findUnique({ where: { id: 251 } });
+const e = rp!.evidenceJson as any;
+console.log(JSON.stringify(e.field).slice(0,800));
+const tb = e.perf.longTasks.reduce((a:number,t:any)=>a+Math.max(0,t.duration-50),0); console.log("TBT-ish", tb, e.perf.longTasks.length);
+console.log(JSON.stringify(e.mainResponseHeaders).slice(0,900));
+const reqs = e.requests as any[]; console.log("reqs", reqs.length, Object.keys(reqs[0]));
+const big = reqs.filter(r=>/image/.test(r.mimeType ?? r.contentType ?? "")).sort((a,b)=>(b.encodedBytes??b.transferSize??0)-(a.encodedBytes??a.transferSize??0)).slice(0,5).map(r=>[r.url.slice(0,120), r.encodedBytes??r.transferSize]); console.log(big);
+const v = reqs.filter(r=>/video|mp4/.test((r.mimeType??"")+r.url)).map(r=>[r.url.slice(-60), r.encodedBytes??r.transferSize, r.status]); console.log(v);
+await prisma.$disconnect();

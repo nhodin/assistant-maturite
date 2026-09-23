@@ -70,10 +70,116 @@ export function isChallengeTitle(title: string): boolean {
   return CHALLENGE_TITLE_PATTERNS.some((re) => re.test(title));
 }
 
-/** Same verdict, on a raw HTML string rather than on a live page's title. */
+/**
+ * Body markers of an interstitial served INSTEAD of the document, for the ones
+ * whose <title> is the site's own name and so never trip `isChallengeTitle`.
+ *
+ * DataDome is the case that forced this: it answers 200 with a 772-byte page
+ * titled "kiabi.com" saying "Please enable JS and disable any ad blocker". On
+ * title alone it reads as a real — if empty — document, so a diagnostic scored it
+ * as "no SSR" when the site had simply refused us.
+ *
+ * Deliberately TECHNICAL signatures (vendor hostnames, script and element ids),
+ * never editorial prose: a real page may well contain the words "access denied",
+ * and a false positive here turns a measured verdict into an "à confirmer".
+ */
+const BLOCK_BODY_SIGNATURES: RegExp[] = [
+  /captcha-delivery\.com/i, // DataDome
+  /\bdd\s*=\s*\{\s*'rt'/i, // DataDome inline config object
+  /please enable js and disable any ad blocker/i, // DataDome interstitial copy
+  /cf-browser-verification/i, // Cloudflare
+  /challenge-platform\/[^"']*\/orchestrate/i, // Cloudflare managed challenge
+  /_incapsula_resource/i, // Imperva / Incapsula
+  /incapsula incident id/i,
+  /px-captcha|perimeterx/i, // PerimeterX / HUMAN
+  /\/_sec\/cp_challenge\//i, // Akamai Bot Manager challenge assets
+];
+
+/**
+ * Wording of a SELF-BRANDED block page — a site's own firewall notice, with no
+ * vendor signature at all. printemps.com answers a product URL with a 10.9 KB
+ * page titled "Printemps.com - Mode homme, femme et beauté de luxe" saying
+ * "Une activité anormale a été détectée sur cette adresse IP … L'accès à notre
+ * site a été bloqué automatiquement par notre pare-feu". Nothing above catches
+ * it, and it scored as "no SSR" — a confident, wrong NOGO.
+ *
+ * Prose alone is NOT enough to conclude (an article may discuss firewalls), so a
+ * match here only counts alongside a corroborating structural signal — see
+ * `selfBrandedBlock`.
+ */
+const BLOCK_WORDINGS: RegExp[] = [
+  /activité anormale/i,
+  /bloqué automatiquement/i,
+  /par notre pare-?feu/i,
+  /votre adresse ip a été bloquée/i,
+  /unusual activity (has been )?detected/i,
+  /your (ip )?access (to this site )?has been blocked/i,
+  /blocked by our (firewall|security service)/i,
+  /why have i been blocked/i,
+];
+
+/** An IPv4 address shown in the page — block pages echo the visitor's IP. */
+const VISITOR_IP_RE = /\b(?:\d{1,3}\.){3}\d{1,3}\b/;
+
+/** Documents above this size are real pages; a block notice is always small. */
+const BLOCK_PAGE_MAX_BYTES = 25_000;
+
+/**
+ * A site's own block page: blocking wording PLUS a corroborating structural
+ * signal (tiny document, or the visitor's IP echoed back). Requiring two
+ * independent signals is what keeps an editorial article about firewalls — long,
+ * illustrated, no IP — from being read as a block.
+ */
+function selfBrandedBlock(html: string): boolean {
+  if (!BLOCK_WORDINGS.some((re) => re.test(html))) return false;
+  const small = Buffer.byteLength(html, "utf-8") < BLOCK_PAGE_MAX_BYTES;
+  return small || VISITOR_IP_RE.test(html);
+}
+
+/**
+ * Same verdict, on a raw HTML string rather than on a live page's title — plus
+ * the body signatures above, because the most common interstitials keep the
+ * site's own <title>, and a site's own firewall notice carries no vendor mark
+ * at all.
+ */
 export function isChallengeHtml(html: string): boolean {
   const title = html.match(/<title[^>]*>([^<]*)<\/title>/i)?.[1]?.trim() ?? "";
-  return isChallengeTitle(title);
+  if (isChallengeTitle(title)) return true;
+  if (BLOCK_BODY_SIGNATURES.some((re) => re.test(html))) return true;
+  return selfBrandedBlock(html);
+}
+
+/**
+ * Which signature matched, for an evidence string that names the reason rather
+ * than asserting "blocked" without saying how we know. Null when none did.
+ */
+export function challengeSignature(html: string): string | null {
+  const title = html.match(/<title[^>]*>([^<]*)<\/title>/i)?.[1]?.trim() ?? "";
+  if (isChallengeTitle(title)) return `titre d'interstitiel « ${title} »`;
+  const hit = BLOCK_BODY_SIGNATURES.find((re) => re.test(html));
+  if (!hit) return null;
+  if (/captcha-delivery|'rt'|ad blocker/i.test(hit.source)) return "interstitiel DataDome";
+  if (/cf-browser|challenge-platform/i.test(hit.source)) return "interstitiel Cloudflare";
+  if (/incapsula/i.test(hit.source)) return "interstitiel Imperva/Incapsula";
+  if (/perimeterx|px-captcha/i.test(hit.source)) return "interstitiel PerimeterX";
+  if (/cp_challenge/i.test(hit.source)) return "interstitiel Akamai Bot Manager";
+  return "interstitiel anti-bot";
+}
+
+/**
+ * Same as `challengeSignature`, but also names a site's own firewall notice.
+ * Kept separate from the vendor list so the reason stays precise: "pare-feu du
+ * site" is a different fact from "interstitiel DataDome", and an operator
+ * arbitrating the check needs to know which.
+ */
+export function blockSignature(html: string): string | null {
+  const vendor = challengeSignature(html);
+  if (vendor) return vendor;
+  if (!selfBrandedBlock(html)) return null;
+  const ip = html.match(VISITOR_IP_RE)?.[0];
+  return ip
+    ? `page de blocage du site (adresse IP ${ip} refusée)`
+    : "page de blocage du site (pare-feu maison)";
 }
 
 /**

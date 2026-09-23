@@ -22,6 +22,9 @@
  *                               start headless by default (vendor guidance:
  *                               headed is the escalation after a block, not the
  *                               starting point).
+ *   CLOAK_EXTRA_ARGS            extra Chromium flags, space-separated (e.g.
+ *                               `--disable-dev-shm-usage` in a container whose
+ *                               /dev/shm is Docker's 64 MB default).
  */
 
 import { createRequire } from "node:module";
@@ -41,6 +44,8 @@ export interface CloakConfig {
   headless?: boolean;
   releaseChannel?: "stable" | "preview";
   browserVersion?: string;
+  /** Extra Chromium command-line flags, appended to cloakbrowser's stealth defaults. */
+  extraArgs?: string[];
 }
 
 type Env = Record<string, string | undefined>;
@@ -80,6 +85,7 @@ export function cloakConfigFromEnv(env: Env = process.env): CloakConfig {
   const preset = str(env, "CLOAK_HUMAN_PRESET")?.toLowerCase();
   const channel = str(env, "CLOAKBROWSER_RELEASE_CHANNEL")?.toLowerCase();
   const headless = str(env, "CLOAK_HEADLESS");
+  const extraArgs = str(env, "CLOAK_EXTRA_ARGS")?.split(/\s+/);
 
   return {
     licenseKey: str(env, "CLOAKBROWSER_LICENSE_KEY"),
@@ -90,6 +96,7 @@ export function cloakConfigFromEnv(env: Env = process.env): CloakConfig {
     headless: headless === undefined ? undefined : bool(env, "CLOAK_HEADLESS", false),
     releaseChannel: channel === "preview" || channel === "stable" ? channel : undefined,
     browserVersion: str(env, "CLOAKBROWSER_VERSION"),
+    extraArgs,
   };
 }
 
@@ -126,6 +133,7 @@ export function cloakLaunchOptions(
     ...(geoip ? { geoip: true } : {}),
     ...(cfg.releaseChannel ? { releaseChannel: cfg.releaseChannel } : {}),
     ...(cfg.browserVersion ? { browserVersion: cfg.browserVersion } : {}),
+    ...(cfg.extraArgs ? { args: cfg.extraArgs } : {}),
   };
 }
 
@@ -152,5 +160,6 @@ export function describeCloakConfig(cfg: CloakConfig): string[] {
   ];
   if (cfg.releaseChannel) lines.push(`channel      ${cfg.releaseChannel}`);
   if (cfg.browserVersion) lines.push(`version      ${cfg.browserVersion}`);
+  if (cfg.extraArgs) lines.push(`extra args   ${cfg.extraArgs.join(" ")}`);
   return lines;
 }

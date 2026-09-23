@@ -1,0 +1,84 @@
+<%
+  // One page's full diagnostic, rendered inline under its row in the diag table
+  // (accordion) and reused by the dedicated site view. Expects `p` (DiagRunPageView)
+  // and `runId`.
+  //
+  // A check the operator can still arbitrate is `unknown && !manual` — the same
+  // « à confirmer » semantics as the maturity side (engine/score.ts).
+  function isPending(c){ return c && c.unknown && !c.manual; }
+  function checkVerdict(c){ return c.passed ? 'pass' : 'fail'; }
+  var d = p.diag;
+%>
+<div class="diag-detail">
+  <% if (!p.captured || !d) { %>
+    <p class="muted">Page non capturée dans ce run — aucun check à afficher.</p>
+  <% } else { %>
+    <div class="diag-verdicts">
+      <span class="badge v-<%= d.speed %>" title="EdgeSpeed — optimise le HTML servi aux visiteurs">EdgeSpeed : <%= d.speed %></span>
+      <span class="badge v-<%= d.seo %>" title="EdgeSEO — agit sur le HTML servi aux crawlers">EdgeSEO : <%= d.seo === 'UNKNOWN' ? 'à confirmer' : d.seo %></span>
+      <% if (d.dynamicRendering) { %>
+        <span class="badge b-diag" title="<%= d.dynamicRenderingEvidence || '' %>">Dynamic rendering identifié</span>
+      <% } %>
+      <a class="muted small" href="<%= p.url %>" target="_blank" rel="noopener noreferrer">ouvrir la page ↗</a>
+    </div>
+
+    <table class="grid small crit">
+      <thead><tr><th>Check</th><th>Verdict</th><th>Évidence</th></tr></thead>
+      <tbody>
+        <% d.checks.forEach(function(c){
+             var cur = checkVerdict(c);
+             var todo = isPending(c);
+        %>
+          <tr>
+            <td><%= c.label %></td>
+            <td class="verdict-cell">
+              <% if (todo) { %><span class="unknown-flag" title="À confirmer — le check n'a pas pu mesurer ; compté comme échec en attendant">?</span><% } %>
+              <select class="verdict <%= cur %><%= c.manual ? ' manual' : '' %><%= todo ? ' unknown' : '' %>"
+                      data-current="<%= cur %>"
+                      title="<%= c.manual ? 'Corrigé manuellement — ' : '' %><%= c.evidence %>"
+                      onchange="diagCheckEdit(this, <%= runId %>, <%= p.runPageId %>, '<%= c.id %>', this.value)">
+                <option value="pass" <%= cur === 'pass' ? 'selected' : '' %>>✓</option>
+                <option value="fail" <%= cur === 'fail' ? 'selected' : '' %>>✗</option>
+                <% if (c.auto) { %><option value="auto">↺ mesuré</option><% } %>
+              </select>
+              <% if (c.manual) { %><span class="manual-flag" title="Corrigé manuellement">✏️</span><% } %>
+            </td>
+            <td class="ev">
+              <%= c.evidence %>
+              <%# Shown under the evidence, never as a verdict: the check stays
+                  « à confirmer » until an operator decides. %>
+              <% if (c.presumption) { %>
+                <div class="diag-presumption"><strong>Présomption :</strong> <%= c.presumption %></div>
+              <% } %>
+            </td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+
+    <% if (d.flags && d.flags.length) { %>
+      <h4>Points de vigilance</h4>
+      <ul class="diag-flags">
+        <% d.flags.forEach(function(f){ %><li><strong><%= f.label %></strong> — <%= f.detail %></li><% }) %>
+      </ul>
+    <% } %>
+
+    <% if (d.stack || d.navigation) { %>
+      <div class="diag-info">
+        <p class="muted small"><strong>Informatif — n'entre pas dans le verdict :</strong></p>
+        <ul>
+          <% if (d.stack) { %>
+            <li>Stack JS : <%= d.stack.frameworks && d.stack.frameworks.length ? d.stack.frameworks.join(', ') : 'aucune détectée' %>
+              <% if (d.stack.serviceWorker) { %> · service worker enregistré<% } %>
+            </li>
+          <% } %>
+          <% if (d.navigation) { %>
+            <li>Navigation : <%= d.navigation.kind === 'spa' ? 'SPA (routing client-side)' : d.navigation.kind === 'mpa' ? 'MPA (rechargement complet)' : 'indéterminé' %>
+              <% if (d.navigation.note) { %> — <%= d.navigation.note %><% } %>
+            </li>
+          <% } %>
+        </ul>
+      </div>
+    <% } %>
+  <% } %>
+</div>

@@ -1,0 +1,46 @@
+<%- include('partials/header', { title, active }) %>
+
+<p><a href="/runs/<%= runId %>">← Run #<%= runId %></a></p>
+<div class="head-row">
+  <h1><%= site.name %> <span class="badge b-diag">Diagnostic Speed/SEO</span>
+    <% if (divergent) { %><span class="badge b-diag-divergent" title="Les pages de ce site n'ont pas toutes le même verdict">divergent</span><% } %>
+  </h1>
+</div>
+<% if (flash) { %><div class="flash warn"><%= flash %></div><% } %>
+<% if (pending) { %>
+  <p><span class="provisional" title="Ces checks comptent comme échec tant qu'ils ne sont pas arbitrés">provisoire — <%= pending %> check<%= pending > 1 ? 's' : '' %> à confirmer</span></p>
+<% } %>
+<% if (divergent) { %>
+  <p class="muted note">
+    Les pages de ce site n'obtiennent pas toutes le même verdict — c'est affiché
+    explicitement plutôt que résumé en un seul GO/NOGO : une page produit/offre
+    (PDP) pèse davantage qu'une home en volume et en impact d'optimisation, et
+    c'est elle qui porte la conversation commerciale.
+  </p>
+<% } %>
+
+<p class="muted note">
+  ✏️ Un check est modifiable : EdgeSpeed/EdgeSEO sont recalculés aussitôt à partir
+  du <a href="#" onclick="return false" title="Le contenu principal de la page est-il présent dans le HTML avant JS, pour un visiteur normal / pour un crawler ?">tableau de décision</a>
+  (voir docs/DIAGNOSTIC.md).
+  <span class="unknown-flag">?</span> « à confirmer » : le check n'a pas pu mesurer
+  (crawler bloqué par un WAF le plus souvent) — compté comme échec tant qu'un
+  opérateur ne tranche pas.
+</p>
+
+<% (pages || []).forEach(function(p){ %>
+  <section class="diag-page">
+    <div class="head-row">
+      <h2><%= p.label %></h2>
+      <% if (!p.captured) { %><span class="uncaptured" title="Page jamais capturée — tous ses verdicts sont à saisir à la main">non capturée</span><% } %>
+      <span class="badge b-<%= p.status %>"><%= p.status %></span>
+    </div>
+    <p class="muted url"><a href="<%= p.url %>" target="_blank" rel="noopener noreferrer"><%= p.url %></a></p>
+
+    <%- include('partials/diag-page-detail', { p: p, runId: runId }) %>
+  </section>
+<% }) %>
+<% if (!pages || !pages.length) { %><p class="muted">Aucune page pour ce site dans ce run.</p><% } %>
+
+
+<%- include('partials/footer') %>

@@ -253,3 +253,92 @@ th a.page-head:hover { text-decoration: underline; }
   font-weight: 600;
   white-space: nowrap;
 }
+
+/* ── Prospect diagnostic (Speed/SEO eligibility) — project creation preview ── */
+.preview-box { background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  padding: .7rem .9rem; margin: .4rem 0 1rem; font-size: 13px; }
+.preview-summary { margin: 0 0 .4rem; }
+.preview-sites { list-style: none; margin: 0; padding: 0; max-height: 320px; overflow-y: auto; }
+.preview-sites > li { padding: .2rem 0; border-bottom: 1px solid var(--line); }
+.preview-sites > li:last-child { border-bottom: none; }
+.preview-urls { margin: .2rem 0 .3rem 1rem; padding: 0; list-style: none; }
+.preview-urls li.url { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.preview-rejects { margin: .2rem 0; padding: 0 0 0 1.1rem; font-size: 12px; color: var(--ko); }
+
+/* ── Prospect diagnostic — run views (GO/NOGO/à confirmer verdicts) ────────── */
+.b-diag { background: #e1f0ff; color: #0d47a1; }
+.b-diag-divergent { background: #fff3e0; color: #a15c00; }
+.v-GO { background: #c8e6c9; color: #1b5e20; }
+.v-NOGO { background: #ffcdd2; color: #c62828; }
+.v-UNKNOWN { background: #fff3e0; color: #a15c00; }
+.diag-page { background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  padding: .8rem 1rem; margin: 1rem 0; }
+.diag-page .url a { overflow-wrap: anywhere; }
+.diag-verdicts { display: flex; gap: .4rem; flex-wrap: wrap; margin: .3rem 0 .6rem; }
+.diag-flags { margin: .2rem 0 .6rem; padding-left: 1.2rem; font-size: 13px; }
+/* Informational only — deliberately styled apart so it never reads as part of
+   the GO/NOGO verdict above it (JS stack, MPA/SPA probe). */
+.diag-info { background: #f4f6f8; border: 1px dashed var(--line); border-radius: 6px;
+  padding: .5rem .7rem; margin-top: .5rem; font-size: 13px; }
+.diag-info ul { margin: .2rem 0 0; padding-left: 1.2rem; }
+
+/* Diagnostic: the page path under the site name — what tells two rows of the
+   same site apart, now that the separate capture table is gone on diag runs. */
+.diag-url { font-size: 11px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Diagnostic accordion toggle, in the last column and PINNED to the right edge:
+   a plain trailing column on a wide table sat past the viewport and was never
+   seen, so the button is sticky and stays on screen while the table scrolls. */
+.grid th.diag-action, .grid td.diag-action {
+  position: sticky; right: 0; z-index: 1; background: #fff;
+  box-shadow: -6px 0 6px -6px rgba(0, 0, 0, 0.25);
+}
+.diag-toggle.open { background: #e3f2fd; border-color: #90caf9; }
+
+/* Diagnostic: keep "84% / 2412 mots" on one line. */
+.grid td.nowrap { white-space: nowrap; }
+
+/* The verdict rule, stated above the results. Collapsible: useful on a first
+   read, in the way on the tenth. */
+.diag-rule { margin: 8px 0 14px; padding: 10px 12px; border: 1px solid #e0e0e0;
+  border-radius: 4px; background: #fbfbfb; }
+.diag-rule > summary { cursor: pointer; font-weight: 600; font-size: 13px; }
+.diag-rule p { margin: 8px 0; }
+.diag-rule code { background: #f0f0f0; padding: 0 3px; border-radius: 2px; font-size: 12px; }
+.diag-criteria { margin: 6px 0 6px 18px; padding: 0; }
+.diag-criteria li { margin-bottom: 4px; }
+
+/* Rules-version banner: a stale diagnostic is indistinguishable from a fresh one
+   without it, so it is stated loudly rather than footnoted. */
+.rules-stale { border-left: 4px solid #e65100; }
+.rules-unknown { border-left: 4px solid #9e9e9e; color: #555; }
+.rules-stale code, .rules-unknown code { background: rgba(0,0,0,.06); padding: 0 3px; border-radius: 2px; }
+
+/* Diagnostic cells: two lines per population, same conditions on both sides. */
+.diag-content .diag-conditions { font-size: 11px; margin-top: 2px; }
+.diag-techno div + div { font-size: 11px; margin-top: 2px; }
+/* Marks a value that carries a tooltip — without it nobody hovers. */
+.info-mark { color: #1565c0; cursor: help; font-size: 11px; margin-left: 3px; }
+
+/* Accordion check table: the evidence sentence is the point of the panel, so it
+   takes the remaining width instead of wrapping into five lines while the check
+   name and the verdict select sit in half the table. */
+.diag-detail table.crit { width: 100%; table-layout: fixed; }
+.diag-detail table.crit th:first-child,
+.diag-detail table.crit td:first-child { width: 150px; }
+.diag-detail table.crit th:nth-child(2),
+.diag-detail table.crit td:nth-child(2) { width: 110px; }
+/* The evidence column must be the AUTO one. Without this, .crit's own
+   th:last-child:46% leaves no auto column, and table-layout:fixed redistributes
+   the leftover width proportionally — inflating the two fixed columns right back. */
+.diag-detail table.crit th:last-child,
+.diag-detail table.crit td:last-child { width: auto; }
+.diag-detail table.crit td.ev { white-space: normal; word-break: break-word; }
+
+/* A presumption is reasoning, not a measurement: muted, never verdict-coloured,
+   so nobody reads it as a GO. */
+.diag-presumption { font-size: 11px; font-style: italic; margin-top: 2px; color: #6b6b6b; }
+.diag-detail .diag-presumption { margin-top: 6px; font-size: 11px; }
+
+/* Caveat under a verdict: visible, but never styled like a verdict itself. */
+.diag-warn { font-size: 10px; line-height: 1.2; margin-top: 3px; color: #a15c00; cursor: help; }

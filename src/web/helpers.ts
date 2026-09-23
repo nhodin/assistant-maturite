@@ -1,5 +1,6 @@
 /** View helpers exposed to all EJS templates via defaultContext. */
 import { categoryLabel, CATEGORY_LABELS, CATEGORIES, PAGE_KINDS } from "./categories";
+import { SSR_MIN_WORDS } from "../prospect/detect";
 
 /** CSS class bucket for a 0–100 score (or null/N-A). */
 export function scoreClass(score: number | null | undefined): string {
@@ -28,6 +29,9 @@ export function fmtDate(d: Date | string | null | undefined): string {
 }
 
 export const viewHelpers = {
+  // Exposed so the run view states the real threshold instead of a copy that
+  // would drift the next time the criterion is recalibrated.
+  SSR_MIN_WORDS,
   categoryLabel,
   CATEGORY_LABELS,
   CATEGORIES,

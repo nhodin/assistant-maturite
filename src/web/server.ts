@@ -20,6 +20,7 @@ import { settingsRoutes } from "./routes/settings";
 import { diagnosticsRoutes } from "./routes/diagnostics";
 import { startScheduler } from "./monitor";
 import { recoverStaleRuns } from "./runner";
+import { startCloakWarmUp } from "../collector/cloak-binary";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -53,6 +54,12 @@ async function main() {
   if (recovered > 0) {
     console.log(`  ${recovered} run(s) interrompu(s) récupéré(s) — reprise possible depuis /runs`);
   }
+
+  // Download the stealth Chromium once, here, rather than letting N parallel
+  // captures race to install it (cloakbrowser has no lock — see cloak-binary.ts).
+  // Not awaited: the UI comes up immediately, and a run started meanwhile waits
+  // on the same promise instead of racing it.
+  startCloakWarmUp();
 
   const port = Number(process.env.PORT ?? 5173);
   await app.listen({ port, host: "0.0.0.0" });

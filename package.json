@@ -19,7 +19,9 @@
     "db:seed-clients": "tsx src/web/seed-clients.ts",
     "db:seed-inventory": "tsx src/web/seed.ts",
     "db:purge-runs": "tsx src/web/purge-runs.ts",
-    "cloak:check": "tsx src/cli/check-cloak.ts"
+    "cloak:check": "tsx src/cli/check-cloak.ts",
+    "db:seed-domains": "tsx src/web/seed-domains.ts",
+    "discover:pages": "tsx src/web/discover-pages.ts"
   },
   "dependencies": {
     "@fastify/formbody": "^8.0.2",

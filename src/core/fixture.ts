@@ -54,6 +54,8 @@ const BASE: EvidenceBundle = {
     videoDetected: false,
     cookieAccepted: false,
   },
+  // Diagnostic-only fields: a maturity capture never fills them.
+  bot: null,
 };
 
 export function makeEvidence(

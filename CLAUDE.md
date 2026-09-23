@@ -41,6 +41,32 @@ tests/         # Vitest: per-control tests + engine + topics.meta
 data/WEBSITES.csv      # seed source (website;url_hp;url_plp;url_pdp)
 ```
 
+## Two kinds of analysis
+
+The app runs **two** analyses that share one collector and one evidence contract:
+
+1. **Maturity** (`src/topics/` + `src/engine/`) — the 12-topic barème of
+   `../CLAUDE.md`, scored 0–100. `Run.kind = "maturity"`.
+2. **Prospect diagnostic** (`src/prospect/`) — EdgeSpeed / EdgeSEO eligibility,
+   spec in `../docs/DIAGNOSTIC.md`. `Run.kind = "diag"`. It scores NOTHING: it
+   returns a categorical verdict per page, derived from two checks (is the main
+   content in the pre-JS HTML, for a visitor and for a crawler). Stack and MPA/SPA
+   are captured and displayed but never enter the verdict.
+
+They share: `EvidenceBundle` (the diagnostic adds the optional `bot` / `stack` /
+`navigation` fields), the collector (`CollectOptions.profile: "diag"` skips CrUX,
+the network probes, CSS coverage, @font-face parsing and the perf trace), and the
+`unknown` / `manual` / `auto` manual-arbitration machinery — a crawler fetch
+blocked by a WAF is « à confirmer », exactly like an unmeasurable maturity criterion.
+
+A diag run is STAMPED with `Run.rulesVersion` — a hash of the detection/verdict
+modules (`prospect/rules-version.ts`) — and the run view warns when a stored run
+was produced by rules that have since changed. The views reload per request but
+the detection code is TypeScript loaded at boot, so a server left running across a
+rule change keeps scoring with the old rules, and a stale verdict is
+indistinguishable from a fresh one: it silently produced a wrong NOGO on
+kiabi.com. **Restart `npm run web` after changing detection code.**
+
 ## Key concepts
 
 - **`Control` is pure**: returns only `{ passed, evidence }`. It does NOT compute points
@@ -534,6 +560,8 @@ npx playwright install chromium          # Playwright browser (CloakBrowser self
 cp .env.example .env                      # set DATABASE_URL (MySQL) — default: maturite/maturite@127.0.0.1:3306/maturite
 npm run db:push                           # create/sync MySQL tables (+ prisma generate)
 npm run db:seed-inventory                 # optional: seed sites/pages from data/WEBSITES.csv
+# 1 site + 1 HP page per domain of a CSV column, all added to a project (idempotent)
+npm run db:seed-domains -- --client Fasterize --project "Tests prods" --csv data/sites-prod-fasterize.csv
 
 # Web app (UI + persistence)
 npm run web                               # → http://localhost:5173

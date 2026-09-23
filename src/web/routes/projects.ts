@@ -7,9 +7,27 @@ import { runMonitoringCycle } from "../monitor";
 import { parseClientId, listClients } from "../clients";
 import { buildProjectTrend, type TrendRunInput, type TrendPageDef } from "../trend";
 import { buildCruxTrends, type CruxSnapshotInput } from "../crux-trend";
+import { parseUrlPaste } from "../url-paste";
 
 function parseMode(v: unknown): ProjectMode {
   return v === "MONITORING" ? "MONITORING" : "STANDARD";
+}
+
+/**
+ * Whether a project is a "diagnostic Speed/SEO" project (created by pasting a
+ * URL list — see ../url-paste.ts and docs/DIAGNOSTIC.md) rather than a
+ * maturity one. There is no dedicated Project field for this: a diagnostic
+ * project's pages are ALWAYS created with kind OTHER (deliberately — the spec
+ * says not to guess HP/PLP/PDP), so a project made ENTIRELY of OTHER pages is
+ * read as a diagnostic one. Used only to decide a started Run's `kind`.
+ */
+/**
+ * A project is a prospect diagnostic when it SAYS so. Deliberately not inferred
+ * from its pages: a maturity project whose pages are all kind OTHER would
+ * otherwise run as a diagnostic and silently lose its scoring.
+ */
+export function isDiagProject(project: { mode: string }): boolean {
+  return project.mode === "DIAGNOSTIC";
 }
 
 function parseFrequency(v: unknown): MonitorFrequency {
@@ -51,25 +69,88 @@ export async function projectRoutes(app: FastifyInstance) {
   });
 
   app.get("/projects/new", async (req, reply) => {
-    const clientId = parseClientId((req.query as any)?.client);
-    const [sites, clients] = await Promise.all([
-      // Only show the selected client's sites; none until a client is picked.
-      clientId !== null
-        ? prisma.site.findMany({
+    const q = req.query as any;
+    const clientId = parseClientId(q?.client);
+    const formMode = q?.mode === "diag" ? "diag" : "maturity";
+    const clients = await listClients();
+    // The diagnostic mode never needs the per-client site/page picker — it
+    // creates its own sites and pages from the pasted URL list.
+    const sites =
+      formMode === "maturity" && clientId !== null
+        ? await prisma.site.findMany({
             where: { clientId },
             orderBy: [{ category: "asc" }, { name: "asc" }],
             include: { pages: { orderBy: { id: "asc" } } },
           })
-        : Promise.resolve([]),
-      listClients(),
-    ]);
+        : [];
     return reply.view("project-form", {
       active: "projects",
       title: "New project",
+      formMode,
       sites,
       clients,
       selectedClientId: clientId,
     });
+  });
+
+  // Preview-only: parse the pasted URL list and report the grouping/rejects
+  // WITHOUT persisting anything, so the operator can check it before creating
+  // sites/pages/project. Pure computation (see ../url-paste.ts).
+  app.post("/projects/diag/preview", async (req, reply) => {
+    const b = req.body as any;
+    const result = parseUrlPaste(String(b?.urls ?? ""), {
+      includeHomepages: b?.includeHomepages === "on" || b?.includeHomepages === "true",
+    });
+    return reply.view("partials/url-paste-preview", { result });
+  });
+
+  // Create a "diagnostic Speed/SEO" project from a pasted URL list: sites and
+  // pages are created automatically (category Other / kind OTHER — never
+  // guessed as HP/PLP/PDP), grouped by registrable domain. Idempotent: pasting
+  // the same list again reuses the existing site/page rows instead of
+  // duplicating them. The client is OPTIONAL in this mode (unlike the
+  // maturity flow above, which still requires one).
+  app.post("/projects/diag", async (req, reply) => {
+    const b = req.body as any;
+    const name = String(b?.name ?? "").trim();
+    const clientId = parseClientId(b?.clientId);
+    const includeHomepages = b?.includeHomepages === "on" || b?.includeHomepages === "true";
+    const result = parseUrlPaste(String(b?.urls ?? ""), { includeHomepages });
+
+    if (!name || result.sites.length === 0) {
+      const qs = new URLSearchParams({ mode: "diag" });
+      if (clientId !== null) qs.set("client", String(clientId));
+      return reply.redirect(`/projects/new?${qs.toString()}`);
+    }
+
+    const pageIds: number[] = [];
+    for (const s of result.sites) {
+      let site = await prisma.site.findFirst({ where: { name: s.site, clientId } });
+      if (!site) {
+        site = await prisma.site.create({
+          data: { name: s.site, category: "Other", clientId },
+        });
+      }
+      for (const url of s.pages) {
+        let page = await prisma.page.findFirst({ where: { siteId: site.id, url } });
+        if (!page) {
+          page = await prisma.page.create({ data: { siteId: site.id, url, kind: "OTHER" } });
+        }
+        pageIds.push(page.id);
+      }
+    }
+
+    const project = await prisma.project.create({
+      data: {
+        name,
+        description: b?.description ? String(b.description).trim() : null,
+        clientId,
+        // A diagnostic project says what it is; the run kind is read from here.
+        mode: "DIAGNOSTIC",
+        pages: { create: pageIds.map((pageId) => ({ pageId })) },
+      },
+    });
+    return reply.redirect(`/projects/${project.id}`);
   });
 
   app.post("/projects", async (req, reply) => {
@@ -236,11 +317,13 @@ export async function projectRoutes(app: FastifyInstance) {
     if (!project || project.pages.length === 0) {
       return reply.redirect(`/projects/${id}`);
     }
+    const kind = isDiagProject(project) ? "diag" : "maturity";
     const run = await prisma.run.create({
       data: {
         projectId: id,
         status: "PENDING",
         source: "manual",
+        kind,
         browser: asProvider(String(b.browser ?? "cloak")),
         device: b.device === "desktop" ? "desktop" : "mobile",
         acceptCookies: b.acceptCookies === "on" || b.acceptCookies === "true",

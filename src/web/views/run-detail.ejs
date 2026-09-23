@@ -45,6 +45,48 @@
     </p>
   <% } %>
 
+  <% if (isDiagRun) { %>
+    <div class="head-row">
+      <h2>Diagnostic Speed/SEO</h2>
+      <% if (run.status === 'DONE' && run.runPages.length) { %>
+        <a class="btn" href="/runs/<%= run.id %>/export.csv"
+           title="Une ligne par page : verdicts, mesures, divergence, techno et évidences">⬇ Export CSV</a>
+      <% } %>
+    </div>
+
+    <%# A verdict scored by rules that have since changed looks exactly like a
+        fresh one. Saying so is the whole point — the alternative is trusting it. %>
+    <% if (typeof diagRules !== "undefined" && diagRules && diagRules.freshness !== "current") { %>
+      <% if (diagRules.freshness === "stale") { %>
+        <div class="flash warn rules-stale">
+          ⚠ Ces résultats ont été produits par une <strong>version antérieure des règles de
+          détection</strong> (<code><%= diagRules.stored %></code> ; version actuelle
+          <code><%= diagRules.current %></code>). Les verdicts affichés ne reflètent pas les
+          critères en vigueur — relancer le run pour les mettre à jour.
+          <% if (run.status === 'DONE') { %>
+            Si le serveur a été mis à jour sans redémarrage, le redémarrer d'abord.
+          <% } %>
+        </div>
+      <% } else { %>
+        <div class="flash rules-unknown">
+          Version des règles de détection <strong>inconnue</strong> pour ce run — il est
+          antérieur au suivi de version. Ses verdicts peuvent avoir été produits par des
+          critères différents de ceux en vigueur.
+        </div>
+      <% } %>
+    <% } %>
+    <p class="muted">
+      Pas de score de maturité : chaque page reçoit un verdict EdgeSpeed / EdgeSEO
+      catégoriel (GO / NOGO / à confirmer). Un site dont les pages ne sont pas
+      d'accord est marqué « divergent » : une PDP pèse plus qu'une home en volume
+      d'optimisation.
+      <% if (diagPending) { %><span class="provisional" title="Ces checks comptent comme échec tant qu'ils ne sont pas arbitrés">provisoire — <%= diagPending %> check<%= diagPending > 1 ? 's' : '' %> à confirmer</span><% } %>
+    </p>
+
+    <%- include("partials/diag-verdict-rule") %>
+    <% if (!diagSites.length) { %><p class="muted">Aucun site diagnostiqué.</p><% } %>
+    <%- include('partials/diag-page-table', { run: run }) %>
+  <% } else { %>
   <div class="head-row">
     <h2>Classement global</h2>
     <% if (run.status === 'DONE' && ranking.length) { %>
@@ -92,7 +134,12 @@
       les verdicts à la main ; le premier saisi le fait entrer dans le classement.
     </p>
   <% } %>
+  <% } %>
 
+  <%# Capture des pages — redundant on a diag run: the diagnostic table above
+      already carries the site, the URL, the status and the capture errors. Kept
+      for maturity runs, where the scoring tables carry none of that. %>
+  <% if (!isDiagRun) { %>
   <h2>Capture des pages</h2>
   <table class="grid small">
     <thead><tr><th>Site</th><th>Type</th><th>URL</th><th>Statut</th></tr></thead>
@@ -115,6 +162,7 @@
       <% }) %>
     </tbody>
   </table>
+  <% } %>
 
 <% } %>
 

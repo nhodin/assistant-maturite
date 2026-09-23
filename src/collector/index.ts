@@ -17,6 +17,8 @@ import {
   type HeaderMap,
   type PerfMetrics,
   type LcpElement,
+  type StackProbe,
+  type NavigationProbe,
 } from "../core";
 import { probeNetwork } from "./network";
 import { fetchCruxWithFallback } from "./crux";
@@ -24,6 +26,9 @@ import { parseHead } from "./head";
 import { openBrowser } from "./browser";
 import { applyThrottling, captureThrottlingFromEnv } from "./throttling";
 import { waitForChallengeToSettle, isChallengeHtml } from "./challenge";
+import { fetchBotHtml, rescueBotFetch } from "./bot-fetch";
+import { detectStack } from "./stack-probe";
+import { probeNavigation } from "./nav-probe";
 
 export { assessCaptureHealth, type CaptureHealth } from "./sanity";
 
@@ -45,6 +50,15 @@ const NAVIGATION_HEADERS: Record<string, string> = {
   "sec-fetch-user": "?1",
   "upgrade-insecure-requests": "1",
 };
+
+// Neutral "nothing captured" value for the diag profile, which skips the
+// TLS/IPv6/HTTP3 Node probes entirely (docs/DIAGNOSTIC.md's lighter capture).
+const NEUTRAL_NETWORK_PROBE = {
+  tlsVersion: null,
+  alpn: null,
+  ipv6: null,
+  http3: null,
+} as const;
 
 const COOKIE_SELECTORS = [
   "#onetrust-accept-btn-handler",
@@ -189,12 +203,14 @@ function hasAtImportRule(css: string): boolean {
 // invisible to it. Node's http(s).request exposes 1xx responses via the
 // 'information' event with full headers, so we use it directly here instead.
 
-interface RawFetchResult {
+export interface RawFetchResult {
   html: string;
   headers: Record<string, string>;
   finalUrl: string;
   /** Headers of the first 103 Early Hints response observed, or null if none. */
   earlyHints: Record<string, string> | null;
+  /** HTTP status of the final (non-redirect) response. 0 if the request itself failed. */
+  status: number;
 }
 
 function headerValue(v: string | string[] | undefined): string {
@@ -242,10 +258,11 @@ function decompressStream(
   return res;
 }
 
-function fetchRawHtmlWithEarlyHints(
+export function fetchRawHtmlWithEarlyHints(
   url: string,
   timeoutMs = 30000,
   maxRedirects = 5,
+  userAgent: string = MOBILE_UA,
 ): Promise<RawFetchResult> {
   return new Promise((resolve, reject) => {
     const attempt = (
@@ -264,7 +281,7 @@ function fetchRawHtmlWithEarlyHints(
       const req = lib.request(currentUrl, {
         method: "GET",
         headers: {
-          "user-agent": MOBILE_UA,
+          "user-agent": userAgent,
           "accept-encoding": rawFetchAcceptEncoding(),
           accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
           "accept-language": "fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7",
@@ -305,6 +322,7 @@ function fetchRawHtmlWithEarlyHints(
             headers: lowercaseHeaders(res.headers),
             finalUrl: currentUrl,
             earlyHints,
+            status,
           });
         });
         stream.on("error", reject);
@@ -609,6 +627,12 @@ export const collect: CollectFn = async (
   const acceptCookies = opts.acceptCookies ?? true;
   const timeoutMs = opts.timeoutMs ?? 45000;
   const capturedAt = new Date().toISOString();
+  const profile = opts.profile ?? "maturity";
+  // Diag (prospect diagnostic, docs/DIAGNOSTIC.md): lighter capture, no scoring.
+  // Skips CrUX, TLS/IPv6/HTTP3 probes, CSS coverage, @font-face parsing and the
+  // perf trace; adds the bot fetch + stack/navigation probes instead. The
+  // "maturity" path below is UNCHANGED by any `isDiag` branch.
+  const isDiag = profile === "diag";
 
   // ── Step 1: Raw HTML fetch (pre-JS, outside browser) ────────────────────────
   let rawHtml = "";
@@ -639,6 +663,12 @@ export const collect: CollectFn = async (
     if (h2Hints) earlyHints = h2Hints;
   }
 
+  // ── Step 1bis: Bot fetch (diag only) ────────────────────────────────────────
+  // Re-fetch the SAME document with a Googlebot Smartphone UA — the "HTML bot"
+  // column of docs/DIAGNOSTIC.md's GO/NOGO table. Independent of the browser
+  // capture below, so it runs right alongside the user's raw fetch.
+  let bot = isDiag ? await fetchBotHtml(url, fetchRawHtmlWithEarlyHints) : null;
+
   // ── Step 2: Browser capture ──────────────────────────────────────────────────
   let renderedHtml = "";
   const requests: NetworkRequest[] = [];
@@ -657,6 +687,8 @@ export const collect: CollectFn = async (
   let videoInViewport = false;
   let cssUnusedPct: number | null = null;
   const externalCssBodies: string[] = [];
+  let stackProbe: StackProbe | undefined;
+  let navigationProbe: NavigationProbe | undefined;
 
   // Browser capture via the selected provider — CloakBrowser stealth by default.
   // The provider returns a Playwright-compatible BrowserContext whichever it is.
@@ -827,6 +859,7 @@ export const collect: CollectFn = async (
             // Fire-and-collect: awaited together below, capped by count/size so a
             // page with hundreds of stylesheets can't blow up capture time/memory.
             if (
+              !isDiag &&
               entry?.resourceType === "stylesheet" &&
               externalCssBodies.length < MAX_EXTERNAL_CSS_FILES
             ) {
@@ -861,7 +894,7 @@ export const collect: CollectFn = async (
     // used. Must be started BEFORE navigation. Cross-origin sheets are tracked too.
     const styleSheetSizes = new Map<string, number>();
     let cssCoverageStarted = false;
-    if (cdp) {
+    if (cdp && !isDiag) {
       cdp.on(
         "CSS.styleSheetAdded",
         (event: { header?: { styleSheetId?: string; length?: number } }) => {
@@ -999,6 +1032,18 @@ export const collect: CollectFn = async (
       }
     }
 
+    // ── Crawler document rescue, through the browser session ───────────────────
+    // The Step 1bis fetch is a bare Node request — no cookies, no session — which
+    // is the easiest shape for a WAF to refuse when the UA claims Googlebot from
+    // an IP that is not Google's. Replaying it through `context.request` carries
+    // the session the browser already established. Only attempted when the first
+    // one was actually blocked, so an origin that answered normally takes no extra
+    // hit. See rescueBotFetch for why there is no in-page tier on this side.
+    if (isDiag && bot?.blocked) {
+      const rescued = await rescueBotFetch(finalUrl, context.request);
+      if (rescued) bot = rescued;
+    }
+
     // ── Raw HTML rescue, from INSIDE the page ──────────────────────────────────
     // Last resort, and the only one that shares the browser's own network stack.
     // `context.request` carries the session cookies but issues its own connection,
@@ -1032,7 +1077,7 @@ export const collect: CollectFn = async (
     // ── Stop CSS coverage and compute unused % ───────────────────────────────────
     // Done after scroll/interaction so rules applied by deferred/below-the-fold
     // content count as used. unused% = (totalCssBytes - usedRuleBytes) / totalCssBytes.
-    if (cdp && cssCoverageStarted) {
+    if (cdp && cssCoverageStarted && !isDiag) {
       try {
         const res = (await cdp.send("CSS.stopRuleUsageTracking")) as {
           ruleUsage?: {
@@ -1057,8 +1102,8 @@ export const collect: CollectFn = async (
       }
     }
 
-    // ── Extract perf metrics ───────────────────────────────────────────────────
-    try {
+    // ── Extract perf metrics (skipped in diag: no perf trace needed) ───────────
+    if (!isDiag) try {
       const perfData = await page.evaluate(() => {
         const perf = (window as unknown as { __perf?: {
           lcpTime: number | null;
@@ -1258,6 +1303,81 @@ export const collect: CollectFn = async (
     // Resolve external stylesheet body fetches before the CDP session/context go
     // away — Network.getResponseBody only works while the page is still alive.
     await Promise.allSettled(externalCssFetchPromises);
+
+    // ── Diag-only probes ────────────────────────────────────────────────────────
+    // Stack fingerprint: read `window` globals (+ the React root-property scan)
+    // and the service-worker registration list in-page, then hand them to the
+    // pure detector alongside the rendered HTML and every request URL seen.
+    if (isDiag) {
+      let windowGlobalNames: string[] = [];
+      let serviceWorkerRegistered: boolean | undefined;
+      try {
+        const probed = await page.evaluate(async () => {
+          const candidates = [
+            "__NEXT_DATA__",
+            "__NUXT__",
+            "__sveltekit",
+            "__remixContext",
+            "___gatsby",
+            "__REACT_DEVTOOLS_GLOBAL_HOOK__",
+            "__vue_app__",
+          ];
+          const names: string[] = [];
+          for (const name of candidates) {
+            try {
+              if (name in (window as unknown as Record<string, unknown>)) names.push(name);
+            } catch {
+              // ignore
+            }
+          }
+          // React attaches its root fiber container as a property on the DOM
+          // node it rendered into (e.g. `__reactContainer$<hash>`), not on
+          // `window` — scan the most likely root elements for it.
+          try {
+            const roots = [
+              document.getElementById("__next"),
+              document.getElementById("root"),
+              document.getElementById("app"),
+              document.body,
+            ].filter((el): el is HTMLElement => el !== null);
+            for (const root of roots) {
+              for (const key of Object.keys(root)) {
+                if (key.startsWith("__reactContainer$")) names.push(key);
+              }
+            }
+          } catch {
+            // ignore
+          }
+          let sw: boolean | undefined;
+          try {
+            if ("serviceWorker" in navigator) {
+              const regs = await navigator.serviceWorker.getRegistrations();
+              sw = regs.length > 0;
+            }
+          } catch {
+            // ignore — leave sw undefined (unmeasured, not false)
+          }
+          return { names, sw };
+        });
+        windowGlobalNames = probed.names;
+        serviceWorkerRegistered = probed.sw;
+      } catch {
+        // Best effort — an empty stack probe is still a valid (if unremarkable) result.
+      }
+      const requestUrls = requests.map((r) => r.url);
+      stackProbe = detectStack(renderedHtml, requestUrls, windowGlobalNames, serviceWorkerRegistered);
+    }
+
+    // Navigation probe (MPA vs SPA): MUST run LAST — it clicks a link and can
+    // navigate the page away, so nothing above may depend on the page's state
+    // surviving it.
+    if (isDiag) {
+      try {
+        navigationProbe = await probeNavigation(page, finalUrl);
+      } catch {
+        navigationProbe = { kind: "unknown", note: "la sonde de navigation a levé une exception" };
+      }
+    }
   } finally {
     // Teardown is the provider's business: closing the context here would close
     // the user's own default context (and all their tabs) in the "cdp" attach mode.
@@ -1271,7 +1391,7 @@ export const collect: CollectFn = async (
   let fonts: FontFace[] = [];
   let cssAuditHasSvgOrFontDataUri = false;
   let cssAuditHasAtImport = false;
-  try {
+  if (!isDiag) try {
     const inlineCss = inlineStyleBlocks(rawHtml);
     const externalCss = externalCssBodies.join("\n");
     fonts = [
@@ -1297,13 +1417,15 @@ export const collect: CollectFn = async (
     // Keep empty defaults
   }
 
-  // ── Step 5: Network probe ────────────────────────────────────────────────────
-  const network = await probeNetwork(finalUrl, altSvcHeader);
+  // ── Step 5: Network probe (skipped in diag: no TLS/IPv6/HTTP3 probing) ──────
+  const network = isDiag
+    ? { ...NEUTRAL_NETWORK_PROBE }
+    : await probeNetwork(finalUrl, altSvcHeader);
 
-  // ── Step 6: CrUX field data ──────────────────────────────────────────────────
+  // ── Step 6: CrUX field data (skipped in diag — no maturity scoring to feed) ──
   // CrUX indexes the landed-on URL, so `finalUrl` is the key that matches; the
   // inventory `url` and then the origin are tried as fallbacks.
-  const field = await fetchCruxWithFallback({ finalUrl, url }, opts.cruxApiKey);
+  const field = isDiag ? null : await fetchCruxWithFallback({ finalUrl, url }, opts.cruxApiKey);
 
   // ── Step 7: Assemble and validate ────────────────────────────────────────────
   const bundle = {
@@ -1334,6 +1456,9 @@ export const collect: CollectFn = async (
       videoInViewport,
       cookieAccepted,
     },
+    bot,
+    stack: stackProbe,
+    navigation: navigationProbe,
   };
 
   return EvidenceBundleSchema.parse(bundle);
