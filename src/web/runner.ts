@@ -43,6 +43,26 @@ import { AUDIENCE_COUNTRY, fetchOriginAudience, withRankFailure, withRanks, type
 import { cruxBqConfig, fetchCruxRanks, isRankFailure, rankFailureWarning, type CruxRankResult } from "../collector/crux-rank";
 import type { PageDiagnostic } from "../prospect";
 import { detectPlatform, fetchSetCookieNames } from "../collector/platform-probe";
+import { representativePages } from "./site-representative";
+
+/**
+ * DONE diag pages of a run, restricted to ONE per site — the home, else the
+ * first captured page (web/site-representative.ts). Audience and app web /
+ * CDN-WAF are site-level facts: computing them on every page cost fetches for
+ * the same answer, and the table shows them once anyway.
+ */
+async function representativeDonePages(runId: number) {
+  const pages = await prisma.runPage.findMany({
+    where: { runId, status: "DONE" },
+    orderBy: { id: "asc" },
+    select: { id: true, url: true, diagJson: true, page: { select: { siteId: true, kind: true } } },
+  });
+  const withDiag = pages.filter((p) => p.diagJson !== null);
+  const reps = new Set(
+    representativePages(withDiag.map((p) => ({ id: p.id, siteId: p.page.siteId, url: p.url, kind: p.page.kind }))).values(),
+  );
+  return withDiag.filter((p) => reps.has(p.id));
+}
 
 /**
  * How a page is graded, from its inventory kind. A CHINA page is scored on the
@@ -111,10 +131,7 @@ export async function enrichRunAudience(
     return { ok: false, reason: "Ni CRUX_API_KEY ni BigQuery (CRUX_BQ_CREDENTIALS) ne sont configurés." };
   }
 
-  const pages = await prisma.runPage.findMany({
-    where: { runId, status: "DONE" },
-    select: { id: true, url: true, diagJson: true },
-  });
+  const pages = await representativeDonePages(runId);
   const byOrigin = new Map<string, Promise<AudienceSummary | undefined>>();
   let enriched = 0;
   for (const p of pages) {
@@ -160,8 +177,9 @@ export async function enrichRunTechno(
   if (!run) return { ok: false, reason: "Run introuvable." };
   if (run.kind !== "diag") return { ok: false, reason: "L'analyse technique ne concerne que les runs de diagnostic." };
 
+  const reps = await representativeDonePages(runId);
   const pages = await prisma.runPage.findMany({
-    where: { runId, status: "DONE" },
+    where: { id: { in: reps.map((p) => p.id) } },
     select: { id: true, url: true, diagJson: true, evidenceJson: true },
   });
   const cookiesByOrigin = new Map<string, Promise<string[]>>();
@@ -605,6 +623,10 @@ async function executeRun(
     }
     return p;
   };
+  /** Diag only: the page of each site that carries CWV and audience (the home). */
+  const repBySite = representativePages(
+    run.runPages.map((rp) => ({ id: rp.id, siteId: rp.page.siteId, url: rp.url, kind: rp.page.kind })),
+  );
   /** Diag only: same once-per-origin memo for the audience (mobile share). */
   const audienceByOrigin = new Map<string, Promise<AudienceSummary | undefined>>();
   const originAudience = (url: string): Promise<AudienceSummary | undefined> => {
@@ -731,11 +753,15 @@ async function executeRun(
       // onto RunPage.diagJson. No topicsJson/overall/geo/china, no RunSiteScore.
       const diagnostic = diagnosePage(bundle, rp.page.label || rp.page.kind);
       // Keyed on the LANDED url: a bare domain redirecting to www. has no record.
-      const cwv = await originCwv(bundle.finalUrl || rp.url);
-      if (cwv !== undefined) diagnostic.cwv = cwv;
-      // Ranks are added at the end of the run, in one BigQuery query for all origins.
-      const audience = await originAudience(bundle.finalUrl || rp.url);
-      if (audience) diagnostic.audience = audience;
+      // CWV and audience are site-level: queried on the site's home only (see
+      // representativeDonePages). Ranks are added at the end of the run, in one
+      // BigQuery query for all origins.
+      if (repBySite.get(rp.page.siteId) === rp.id) {
+        const cwv = await originCwv(bundle.finalUrl || rp.url);
+        if (cwv !== undefined) diagnostic.cwv = cwv;
+        const audience = await originAudience(bundle.finalUrl || rp.url);
+        if (audience) diagnostic.audience = audience;
+      }
       await prisma.runPage.update({
         where: { id: rp.id },
         data: {

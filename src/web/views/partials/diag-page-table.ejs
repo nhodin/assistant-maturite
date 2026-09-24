@@ -33,6 +33,23 @@
     });
   })();
 
+  // CWV, Audience and app web / CDN-WAF are SITE-level facts: shown once, on the
+  // home row (else the first captured page — web/site-representative.ts). When
+  // the home itself lacks one (older run, failed query), another page of the
+  // same site lends it, so the site does not read as "unmeasured".
+  var eligible = pages.filter(function(rp){ return rp.status === 'DONE' && rp.diagJson; });
+  var repBySite = representativePages(eligible.map(function(rp){
+    return { id: rp.id, siteId: rp.page.siteId, url: rp.url, kind: rp.page.kind };
+  }));
+  var siteCwv = {}, siteAudience = {}, siteStack = {};
+  eligible.forEach(function(rp){
+    var d = rp.diagJson, k = rp.page.siteId, isRep = repBySite.get(k) === rp.id;
+    // cwv: undefined = not queried, null = CrUX has no data (a measured fact).
+    if (d.cwv !== undefined && (isRep || !(k in siteCwv))) siteCwv[k] = d.cwv;
+    if (d.audience && (isRep || !siteAudience[k])) siteAudience[k] = d.audience;
+    if (d.stack && (d.stack.platforms || d.stack.edge) && (isRep || !siteStack[k])) siteStack[k] = d.stack;
+  });
+
   function pctOf(m){ return Math.round(m.overlapRatio * 100) + '%'; }
   // The overlap ratio is CONTEXT, not a verdict — rendered neutral on purpose.
   // Colouring it would suggest a threshold it no longer has.
@@ -154,28 +171,32 @@
             <% } %>
           <% } else { %><span class="muted">&middot;</span><% } %>
         </td>
+        <% var isRep = d && repBySite.get(rp.page.siteId) === rp.id;
+           var cwv = isRep ? siteCwv[rp.page.siteId] : undefined; %>
         <td class="diag-cwv">
-          <% if (d && d.cwv) { %>
+          <% if (d && !isRep) { %><span class="muted" title="CWV de l'origine : affichés une fois, sur la home du site">&middot;</span>
+          <% } else if (cwv) { %>
             <%# One line per metric: stacked, the label column aligns and the three
                 values read at a glance instead of running along one long line. %>
-            <div title="CrUX <%= d.cwv.origin %> — p75 mobile (28 derniers jours)">
+            <div title="CrUX <%= cwv.origin %> — p75 mobile (28 derniers jours)">
               <% ['lcp', 'inp', 'cls'].forEach(function(k){
-                   var v = k === 'lcp' ? d.cwv.lcpMs : k === 'inp' ? d.cwv.inpMs : d.cwv.cls; %>
+                   var v = k === 'lcp' ? cwv.lcpMs : k === 'inp' ? cwv.inpMs : cwv.cls; %>
                 <div class="nowrap cwv-line">
                 <% if (v != null) { %>
-                  <span class="cwv-<%= cwvRating(k, v) %>" title="<%= cwvHint(k, v) %>"><span class="cwv-k"><%= k.toUpperCase() %></span> <%= cwvFmt(k, v) %></span><% var t = d.cwv.trend && d.cwv.trend[k]; if (t) { %><span class="cwv-trend cwv-trend-<%= t.direction %>" title="<%= trendHint(k, t) %>"><%= TREND_ARROW[t.direction] %></span><% } %>
+                  <span class="cwv-<%= cwvRating(k, v) %>" title="<%= cwvHint(k, v) %>"><span class="cwv-k"><%= k.toUpperCase() %></span> <%= cwvFmt(k, v) %></span><% var t = cwv.trend && cwv.trend[k]; if (t) { %><span class="cwv-trend cwv-trend-<%= t.direction %>" title="<%= trendHint(k, t) %>"><%= TREND_ARROW[t.direction] %></span><% } %>
                 <% } else { %>
                   <span class="muted" title="CrUX ne publie pas de <%= k.toUpperCase() %> pour cette origine"><span class="cwv-k"><%= k.toUpperCase() %></span> —</span>
                 <% } %>
                 </div>
               <% }) %>
             </div>
-          <% } else if (d && d.cwv === null) { %>
+          <% } else if (d && cwv === null) { %>
             <span class="muted" title="CrUX n'a pas de données terrain mobile pour cette origine (trafic insuffisant)">pas de données CrUX</span>
           <% } else { %><span class="muted" title="<%= d ? 'CrUX non interrogé (clé CRUX_API_KEY absente, ou run antérieur à cette colonne)' : '' %>">&middot;</span><% } %>
         </td>
         <td class="diag-audience">
-          <% var a = d && d.audience; if (a) { %>
+          <% var a = isRep ? siteAudience[rp.page.siteId] : null;
+             if (d && !isRep) { %><span class="muted" title="Audience de l'origine : affichée une fois, sur la home du site">&middot;</span><% } else if (a) { %>
             <%# The FR rank carries the tier colour: prospects are French sites, the
                 worldwide rank only situates them. undefined = BigQuery not
                 queried, null = out of the ranking that month. %>
@@ -226,7 +247,7 @@
         <% }) %>
         <td class="diag-techno">
           <% if (d) { %>
-            <%# Three lines: MPA/SPA (framework) · web application · CDN/WAF. An
+            <%# Up to three lines: MPA/SPA (framework) · web application · CDN/WAF. An
                 absent platforms/edge field means the capture predates the probe
                 ("non relevé"), an empty one that nothing was recognised. %>
             <div class="nowrap">
@@ -237,18 +258,24 @@
                 <span class="muted" title="<%= (d.stack.signals || []).join(' · ') %>">(<%= d.stack.frameworks.join(' + ') %>)</span>
               <% } else { %><span class="muted">(aucun framework)</span><% } %>
             </div>
-            <div class="nowrap" title="Application web / e-commerce<%= d.stack && d.stack.platformSignals && d.stack.platformSignals.length ? ' — ' + d.stack.platformSignals.join(' · ') : '' %>">
-              <% if (d.stack && d.stack.platforms && d.stack.platforms.length) { %>
-                <%= d.stack.platforms.join(' + ') %>
-              <% } else if (d.stack && d.stack.platforms) { %><span class="muted">app non identifiée</span>
+            <%# App web and CDN/WAF are site-level: on the site's representative row
+                only (the home — see the header of this file). MPA/SPA stays per page:
+                it is measured per page and does differ (a MPA home, a SPA PDP). %>
+            <% var st = isRep ? siteStack[rp.page.siteId] : null; %>
+            <% if (isRep) { %>
+            <div class="nowrap" title="Application web / e-commerce<%= st && st.platformSignals && st.platformSignals.length ? ' — ' + st.platformSignals.join(' · ') : '' %>">
+              <% if (st && st.platforms && st.platforms.length) { %>
+                <%= st.platforms.join(' + ') %>
+              <% } else if (st && st.platforms) { %><span class="muted">app non identifiée</span>
               <% } else { %><span class="muted">app non relevée</span><% } %>
             </div>
-            <div class="nowrap" title="CDN / WAF<%= d.stack && d.stack.edgeSignals && d.stack.edgeSignals.length ? ' — ' + d.stack.edgeSignals.join(' · ') : '' %>">
-              <% if (d.stack && d.stack.edge && d.stack.edge.length) { %>
-                <span class="muted"><%= d.stack.edge.join(' + ') %></span>
-              <% } else if (d.stack && d.stack.edge) { %><span class="muted">aucun CDN/WAF identifié</span>
+            <div class="nowrap" title="CDN / WAF<%= st && st.edgeSignals && st.edgeSignals.length ? ' — ' + st.edgeSignals.join(' · ') : '' %>">
+              <% if (st && st.edge && st.edge.length) { %>
+                <span class="muted"><%= st.edge.join(' + ') %></span>
+              <% } else if (st && st.edge) { %><span class="muted">aucun CDN/WAF identifié</span>
               <% } else { %><span class="muted">CDN/WAF non relevé</span><% } %>
             </div>
+            <% } %>
           <% } else { %><span class="muted">&middot;</span><% } %>
         </td>
         <td class="diag-action">
