@@ -351,3 +351,16 @@ th a.page-head:hover { text-decoration: underline; }
 
 /* Caveat under a verdict: visible, but never styled like a verdict itself. */
 .diag-warn { font-size: 10px; line-height: 1.2; margin-top: 3px; color: #a15c00; cursor: help; }
+
+/* CrUX p75 next to the Speed verdict, coloured with Google's CWV thresholds. */
+.diag-cwv { font-size: 11px; }
+.diag-cwv .cwv-k { display: inline-block; width: 26px; font-size: 10px; font-weight: 400; opacity: .75; }
+.diag-cwv .cwv-line + .cwv-line { margin-top: 1px; }
+.cwv-good { color: var(--ok); font-weight: 700; cursor: help; }
+.cwv-ni { color: var(--todo); font-weight: 700; cursor: help; }
+.cwv-poor { color: var(--ko); font-weight: 700; cursor: help; }
+/* ~3-month trend of each p75: arrow follows the value, colour the meaning. */
+.cwv-trend { margin-left: 2px; font-weight: 700; cursor: help; }
+.cwv-trend-better { color: var(--ok); }
+.cwv-trend-worse { color: var(--ko); }
+.cwv-trend-stable { color: #9e9e9e; }

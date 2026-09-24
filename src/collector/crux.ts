@@ -146,6 +146,86 @@ export async function fetchCruxWithFallback(
   return null;
 }
 
+const CRUX_HISTORY_ENDPOINT =
+  "https://chromeuxreport.googleapis.com/v1/records:queryHistoryRecord";
+
+/** One p75 series from the CrUX History API, oldest first, aligned on `dates`. */
+export interface CruxHistory {
+  /** `lastDate` of each weekly collection period (28-day window), ISO yyyy-mm-dd. */
+  dates: string[];
+  lcpMs: (number | null)[];
+  inpMs: (number | null)[];
+  cls: (number | null)[];
+}
+
+interface CruxHistoryMetric {
+  percentilesTimeseries?: { p75s?: (number | string | null)[] };
+}
+interface CruxDate { year: number; month: number; day: number }
+interface CruxHistoryResponse {
+  record?: {
+    metrics?: {
+      largest_contentful_paint?: CruxHistoryMetric;
+      interaction_to_next_paint?: CruxHistoryMetric;
+      cumulative_layout_shift?: CruxHistoryMetric;
+    };
+    collectionPeriods?: { lastDate?: CruxDate }[];
+  };
+}
+
+/** Pure parse of a `queryHistoryRecord` payload. Missing points are null. */
+export function parseCruxHistory(data: CruxHistoryResponse | null | undefined): CruxHistory | null {
+  const rec = data?.record;
+  if (!rec?.metrics || !rec.collectionPeriods?.length) return null;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const dates = rec.collectionPeriods.map((p) =>
+    p.lastDate ? `${p.lastDate.year}-${pad(p.lastDate.month)}-${pad(p.lastDate.day)}` : "",
+  );
+  const series = (m: CruxHistoryMetric | undefined): (number | null)[] =>
+    dates.map((_, i) => {
+      const raw = m?.percentilesTimeseries?.p75s?.[i];
+      if (raw === null || raw === undefined) return null;
+      const v = Number(raw);
+      return Number.isFinite(v) ? v : null;
+    });
+  return {
+    dates,
+    lcpMs: series(rec.metrics.largest_contentful_paint),
+    inpMs: series(rec.metrics.interaction_to_next_paint),
+    cls: series(rec.metrics.cumulative_layout_shift),
+  };
+}
+
+/**
+ * Weekly p75 history (default 25 periods ≈ 6 months) for a `url` or `origin`.
+ * Null without a key, on a non-OK response (404 = no history) or on error.
+ */
+export async function fetchCruxHistory(
+  key: { url?: string; origin?: string },
+  apiKey?: string,
+  formFactor: CruxFormFactor = "PHONE",
+): Promise<CruxHistory | null> {
+  if (!apiKey) return null;
+  if (!key.url && !key.origin) return null;
+  try {
+    const body: Record<string, unknown> = {
+      formFactor,
+      metrics: ["largest_contentful_paint", "interaction_to_next_paint", "cumulative_layout_shift"],
+    };
+    if (key.url) body.url = key.url;
+    else body.origin = key.origin;
+    const res = await fetch(`${CRUX_HISTORY_ENDPOINT}?key=${apiKey}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) return null;
+    return parseCruxHistory((await res.json()) as CruxHistoryResponse);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Fetch p75 CrUX field metrics for either a specific `url` or an `origin`, for
  * the given `formFactor` (defaults to PHONE/mobile). Returns null when no apiKey

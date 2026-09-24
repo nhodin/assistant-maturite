@@ -38,6 +38,7 @@ import type {
 } from "../core";
 import { isChinaKind } from "./categories";
 import { diagnosePage } from "../prospect";
+import { fetchOriginCwv, type CwvSummary } from "../prospect/cwv";
 
 /**
  * How a page is graded, from its inventory kind. A CHINA page is scored on the
@@ -419,6 +420,26 @@ async function executeRun(
   }
   /** Blocked pages per origin — feeds the per-origin retry budget below. */
   const blocksByOrigin = new Map<string, number>();
+  /**
+   * Diag only: CrUX mobile origin p75, queried ONCE per origin for the run (every
+   * page of a site shares the record). The promise is cached so parallel pages of
+   * the same origin wait on one request instead of each firing their own.
+   */
+  const cwvByOrigin = new Map<string, Promise<CwvSummary | null | undefined>>();
+  const originCwv = (url: string): Promise<CwvSummary | null | undefined> => {
+    let key: string;
+    try {
+      key = new URL(url).origin;
+    } catch {
+      return Promise.resolve(undefined);
+    }
+    let p = cwvByOrigin.get(key);
+    if (!p) {
+      p = fetchOriginCwv(url, process.env.CRUX_API_KEY);
+      cwvByOrigin.set(key, p);
+    }
+    return p;
+  };
 
   /**
    * One page of `site` is settled (captured or failed). When it was the last one,
@@ -532,6 +553,9 @@ async function executeRun(
       // No scoring: run the verdict engine and persist PageDiagnostic straight
       // onto RunPage.diagJson. No topicsJson/overall/geo/china, no RunSiteScore.
       const diagnostic = diagnosePage(bundle, rp.page.label || rp.page.kind);
+      // Keyed on the LANDED url: a bare domain redirecting to www. has no record.
+      const cwv = await originCwv(bundle.finalUrl || rp.url);
+      if (cwv !== undefined) diagnostic.cwv = cwv;
       await prisma.runPage.update({
         where: { id: rp.id },
         data: {

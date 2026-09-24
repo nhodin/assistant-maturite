@@ -52,6 +52,29 @@
       : "aucune image affichable avant JS : ni <img>/<picture> avec un src/srcset réel, ni fond CSS déclaré dans le HTML (un placeholder base64 ou un data-src seul ne compte pas : ils exigent du JS)";
   }
   function pathOf(u){ try { var x = new URL(u); return x.pathname + x.search; } catch (e) { return u; } }
+  // CrUX origin p75, mobile. Coloured with Google's thresholds (good / needs
+  // improvement / poor) — informational, it never enters the verdict.
+  var CWV_LABEL = { good: 'bon', ni: 'à améliorer', poor: 'mauvais' };
+  function cwvFmt(metric, v){
+    return metric === 'lcp' ? (v / 1000).toFixed(1) + ' s' : metric === 'inp' ? Math.round(v) + ' ms' : v.toFixed(2);
+  }
+  function cwvHint(metric, v){
+    var t = CWV_THRESHOLDS[metric];
+    var f = function(x){ return cwvFmt(metric, x); };
+    return metric.toUpperCase() + ' p75 mobile : ' + CWV_LABEL[cwvRating(metric, v)] +
+      ' (bon ≤ ' + f(t.good) + ', mauvais > ' + f(t.poor) + ')';
+  }
+  // Trend over ~3 months (CrUX History API). The arrow follows the VALUE (↓ =
+  // the p75 went down), the colour follows the MEANING (lower is better).
+  var TREND_ARROW = { better: '↓', worse: '↑', stable: '→' };
+  var TREND_LABEL = { better: 'amélioration', worse: 'dégradation', stable: 'stable' };
+  function fmtDay(s){ var p = (s || '').split('-'); return p.length === 3 ? p[2] + '/' + p[1] + '/' + p[0] : s; }
+  function trendHint(metric, t){
+    var pct = t.from ? Math.round((t.to - t.from) / t.from * 100) : 0;
+    return metric.toUpperCase() + ' — ' + TREND_LABEL[t.direction] + ' : ' +
+      cwvFmt(metric, t.from) + ' (période au ' + fmtDay(t.fromDate) + ') → ' +
+      cwvFmt(metric, t.to) + ' (au ' + fmtDay(t.toDate) + '), ' + (pct > 0 ? '+' : '') + pct + ' %';
+  }
 %>
 <p class="muted small legend-nojs">
   <strong>Contenu User</strong> et <strong>Contenu Googlebot</strong> mesurent le HTML tel que le
@@ -72,6 +95,7 @@
           to — and keeps the live view's RUNNING visible. %>
       <th>Site</th>
       <th title="EdgeSpeed — suit le SSR vu par un visiteur">Speed</th>
+      <th title="Core Web Vitals terrain (CrUX), p75 de l'origine sur mobile — informatif, n'entre pas dans le verdict">CWV</th>
       <th title="EdgeSEO — suit le SSR vu par un crawler">SEO</th>
       <th title="HTML servi à un visiteur, avant JS : recouvrement / mots, puis titre-H1 et images">Contenu User</th>
       <th title="Le même HTML redemandé avec un user-agent Googlebot, jugé sur les mêmes conditions">Contenu Googlebot</th>
@@ -115,6 +139,26 @@
               <div class="diag-warn" title="Navigation client-side : EdgeSpeed optimise le HTML servi par le serveur, donc le gain porte sur le premier chargement ; les navigations suivantes sont rendues par le JS et n'en bénéficient pas.">⚠ SPA</div>
             <% } %>
           <% } else { %><span class="muted">&middot;</span><% } %>
+        </td>
+        <td class="diag-cwv">
+          <% if (d && d.cwv) { %>
+            <%# One line per metric: stacked, the label column aligns and the three
+                values read at a glance instead of running along one long line. %>
+            <div title="CrUX <%= d.cwv.origin %> — p75 mobile (28 derniers jours)">
+              <% ['lcp', 'inp', 'cls'].forEach(function(k){
+                   var v = k === 'lcp' ? d.cwv.lcpMs : k === 'inp' ? d.cwv.inpMs : d.cwv.cls; %>
+                <div class="nowrap cwv-line">
+                <% if (v != null) { %>
+                  <span class="cwv-<%= cwvRating(k, v) %>" title="<%= cwvHint(k, v) %>"><span class="cwv-k"><%= k.toUpperCase() %></span> <%= cwvFmt(k, v) %></span><% var t = d.cwv.trend && d.cwv.trend[k]; if (t) { %><span class="cwv-trend cwv-trend-<%= t.direction %>" title="<%= trendHint(k, t) %>"><%= TREND_ARROW[t.direction] %></span><% } %>
+                <% } else { %>
+                  <span class="muted" title="CrUX ne publie pas de <%= k.toUpperCase() %> pour cette origine"><span class="cwv-k"><%= k.toUpperCase() %></span> —</span>
+                <% } %>
+                </div>
+              <% }) %>
+            </div>
+          <% } else if (d && d.cwv === null) { %>
+            <span class="muted" title="CrUX n'a pas de données terrain mobile pour cette origine (trafic insuffisant)">pas de données CrUX</span>
+          <% } else { %><span class="muted" title="<%= d ? 'CrUX non interrogé (clé CRUX_API_KEY absente, ou run antérieur à cette colonne)' : '' %>">&middot;</span><% } %>
         </td>
         <td>
           <% if (d) { %><span class="badge v-<%= d.seo %>"><%= d.seo === 'UNKNOWN' ? 'à confirmer' : d.seo %></span>
@@ -176,11 +220,11 @@
           instead of sending the operator to a separate page. hx-preserve keeps an
           open panel open across the live view's polling. %>
       <tr class="diag-slot">
-        <td colspan="7" id="diag-<%= rp.id %>" hx-preserve="true"></td>
+        <td colspan="8" id="diag-<%= rp.id %>" hx-preserve="true"></td>
       </tr>
       <% if (rp.error) { %>
         <tr class="note-row">
-          <td colspan="7" class="ev <%= rp.status === 'FAILED' ? 'ko' : 'muted' %>">
+          <td colspan="8" class="ev <%= rp.status === 'FAILED' ? 'ko' : 'muted' %>">
             <span class="note-for"><%= rp.page.site.name %> &mdash;</span> <%= rp.error %>
           </td>
         </tr>

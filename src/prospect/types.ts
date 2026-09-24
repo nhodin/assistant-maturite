@@ -12,6 +12,7 @@
  */
 import type { EvidenceBundle, NavigationProbe, StackProbe } from "../core";
 import type { SsrMetrics } from "./detect";
+import type { CwvSummary } from "./cwv";
 
 /** GO / NOGO, or UNKNOWN when a check could not be measured and awaits arbitration. */
 export type DiagVerdict = "GO" | "NOGO" | "UNKNOWN";
@@ -84,6 +85,12 @@ export interface PageDiagnostic {
   /** Informational, never part of the verdict. Absent when the probe did not run. */
   stack?: StackProbe;
   navigation?: NavigationProbe;
+  /**
+   * CrUX p75 of the page's ORIGIN, mobile — informational, never part of the
+   * verdict. Absent = not queried (no API key, run older than the field);
+   * null = CrUX has no field data for this origin.
+   */
+  cwv?: CwvSummary | null;
   flags: VigilanceFlag[];
 }
 
