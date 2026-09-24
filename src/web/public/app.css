@@ -271,6 +271,15 @@ th a.page-head:hover { text-decoration: underline; }
 .v-GO { background: #c8e6c9; color: #1b5e20; }
 .v-NOGO { background: #ffcdd2; color: #c62828; }
 .v-UNKNOWN { background: #fff3e0; color: #a15c00; }
+/* Project page of a diagnostic: GO/NOGO counters of the latest run, one card per axis. */
+.diag-tallies { display: flex; gap: 1rem; flex-wrap: wrap; }
+.diag-tally { flex: 1 1 260px; background: var(--panel); border: 1px solid var(--line);
+  border-radius: 10px; padding: .6rem 1rem .9rem; }
+.diag-tally h3 { margin: .2rem 0 .6rem; }
+.diag-tally-counts { display: flex; gap: .6rem; }
+.diag-tally-counts > div { flex: 1; border-radius: 8px; padding: .5rem; text-align: center; }
+.diag-tally-counts strong { display: block; font-size: 1.8rem; line-height: 1.1; }
+.diag-tally-counts span { font-size: 12px; font-weight: 600; }
 .diag-page { background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
   padding: .8rem 1rem; margin: 1rem 0; }
 .diag-page .url a { overflow-wrap: anywhere; }

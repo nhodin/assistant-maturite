@@ -20,6 +20,43 @@
   <div class="flash ok">Suivi repris : la collecte automatique reprend selon la fréquence configurée.</div>
 <% } %>
 
+<%
+  // GO / NOGO / à confirmer counters for one verdict axis of a diag run.
+  function tallyBadges(t){
+    return '<span class="badge v-GO" title="GO">GO ' + t.GO + '</span> ' +
+           '<span class="badge v-NOGO" title="NOGO">NOGO ' + t.NOGO + '</span>' +
+           (t.UNKNOWN ? ' <span class="badge v-UNKNOWN" title="À confirmer">? ' + t.UNKNOWN + '</span>' : '');
+  }
+%>
+<% if (isDiagProject) { %>
+<section>
+  <h2>Verdicts Speed / SEO</h2>
+  <% if (latestDiagRun) { var ls = diagSummaries[latestDiagRun.id]; %>
+    <p class="muted small">Dernier run terminé : <a href="/runs/<%= latestDiagRun.id %>">#<%= latestDiagRun.id %></a>
+      · <%= fmtDate(latestDiagRun.date) %> · <%= ls.diagnosed %> page(s) diagnostiquée(s)<% if (ls.notDiagnosed) { %>, <%= ls.notDiagnosed %> non diagnostiquée(s)<% } %></p>
+    <div class="diag-tallies">
+      <div class="diag-tally">
+        <h3>Speed <span class="muted small">(EdgeSpeed)</span></h3>
+        <div class="diag-tally-counts">
+          <div class="v-GO"><strong><%= ls.speed.GO %></strong><span>GO</span></div>
+          <div class="v-NOGO"><strong><%= ls.speed.NOGO %></strong><span>NOGO</span></div>
+          <% if (ls.speed.UNKNOWN) { %><div class="v-UNKNOWN"><strong><%= ls.speed.UNKNOWN %></strong><span>à confirmer</span></div><% } %>
+        </div>
+      </div>
+      <div class="diag-tally">
+        <h3>SEO <span class="muted small">(EdgeSEO)</span></h3>
+        <div class="diag-tally-counts">
+          <div class="v-GO"><strong><%= ls.seo.GO %></strong><span>GO</span></div>
+          <div class="v-NOGO"><strong><%= ls.seo.NOGO %></strong><span>NOGO</span></div>
+          <% if (ls.seo.UNKNOWN) { %><div class="v-UNKNOWN"><strong><%= ls.seo.UNKNOWN %></strong><span>à confirmer</span></div><% } %>
+        </div>
+      </div>
+    </div>
+  <% } else { %>
+    <p class="empty">Aucun run terminé pour le moment — lancez un run pour obtenir les verdicts Speed / SEO.</p>
+  <% } %>
+</section>
+<% } else { %>
 <section>
   <h2>Évolution des notes</h2>
   <% if (trend) { %>
@@ -62,6 +99,7 @@
     <p class="empty">Aucun run terminé pour le moment — lancez un run pour voir l’évolution des notes.</p>
   <% } %>
 </section>
+<% } %>
 
 <% if (project.mode === 'MONITORING') { %>
 <section>
@@ -223,17 +261,26 @@
   <section>
     <h2>Runs de ce projet</h2>
     <table class="grid">
-      <thead><tr><th>#</th><th>Statut</th><th>Source</th><th>Date</th></tr></thead>
+      <thead><tr><th>#</th><th>Statut</th><% if (isDiagProject) { %><th>Speed</th><th>SEO</th><% } else { %><th>Source</th><% } %><th>Date</th></tr></thead>
       <tbody>
-        <% project.runs.forEach(function(r){ %>
+        <% project.runs.forEach(function(r){ var ds = diagSummaries[r.id]; %>
           <tr>
             <td><a href="/runs/<%= r.id %>">#<%= r.id %></a></td>
             <td><span class="badge b-<%= r.status %>"><%= r.status %></span></td>
-            <td class="muted"><%= r.source === 'scheduled' ? 'Planifié' : 'Manuel' %></td>
+            <% if (isDiagProject) { %>
+              <% if (ds && ds.diagnosed) { %>
+                <td class="verdict-cell"><%- tallyBadges(ds.speed) %></td>
+                <td class="verdict-cell"><%- tallyBadges(ds.seo) %></td>
+              <% } else { %>
+                <td class="muted">—</td><td class="muted">—</td>
+              <% } %>
+            <% } else { %>
+              <td class="muted"><%= r.source === 'scheduled' ? 'Planifié' : 'Manuel' %></td>
+            <% } %>
             <td><%= fmtDate(r.createdAt) %></td>
           </tr>
         <% }) %>
-        <% if (!project.runs.length) { %><tr><td colspan="4" class="muted">Aucun run encore.</td></tr><% } %>
+        <% if (!project.runs.length) { %><tr><td colspan="<%= isDiagProject ? 5 : 4 %>" class="muted">Aucun run encore.</td></tr><% } %>
       </tbody>
     </table>
   </section>

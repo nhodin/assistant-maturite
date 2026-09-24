@@ -6,6 +6,7 @@ import { asProvider } from "../../collector/browser";
 import { runMonitoringCycle } from "../monitor";
 import { parseClientId, listClients } from "../clients";
 import { buildProjectTrend, type TrendRunInput, type TrendPageDef } from "../trend";
+import { summarizeDiagRun, type DiagRunSummary } from "../diag-summary";
 import { buildCruxTrends, type CruxSnapshotInput } from "../crux-trend";
 import { parseUrlPaste } from "../url-paste";
 
@@ -188,7 +189,9 @@ export async function projectRoutes(app: FastifyInstance) {
           orderBy: { createdAt: "desc" },
           include: {
             runSiteScores: { select: { overall: true } },
-            runPages: { select: { pageId: true, overall: true } },
+            runPages: {
+              select: { pageId: true, overall: true, status: true, diagJson: true },
+            },
           },
         },
       },
@@ -223,6 +226,16 @@ export async function projectRoutes(app: FastifyInstance) {
       })
       .reverse(); // chronological for the x-axis
     const trend = buildProjectTrend(trendRuns, pageDefs);
+
+    // A diagnostic scores nothing, so instead of the score chart the page shows
+    // GO/NOGO tallies for Speed and SEO — per run, keyed by run id.
+    const diagSummaries: Record<number, DiagRunSummary> = {};
+    if (isDiagProject(project)) {
+      for (const r of project.runs) diagSummaries[r.id] = summarizeDiagRun(r.runPages);
+    }
+    const latestDiagRun = isDiagProject(project)
+      ? (project.runs.find((r) => r.status === "DONE") ?? null)
+      : null;
 
     // Webperf monitoring: CrUX snapshots for the latest-values table + trend charts.
     // A device toggle (?ff=PHONE|DESKTOP) filters both to one form factor at a time.
@@ -299,6 +312,10 @@ export async function projectRoutes(app: FastifyInstance) {
       title: project.name,
       project,
       trend,
+      diagSummaries,
+      latestDiagRun: latestDiagRun
+        ? { id: latestDiagRun.id, date: latestDiagRun.finishedAt ?? latestDiagRun.createdAt }
+        : null,
       cruxTrends,
       cruxLatest,
       cruxFormFactors,
