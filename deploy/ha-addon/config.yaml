@@ -22,6 +22,7 @@ services:
 options:
   database_url: mysql://maturite:CHANGE_ME@core-mariadb:3306/maturite
   crux_api_key: ""
+  crux_bq_credentials: ""
   cloakbrowser_license_key: ""
   capture_concurrency: 2
   cloak_session_limit: 5
@@ -31,6 +32,7 @@ options:
 schema:
   database_url: password
   crux_api_key: password?
+  crux_bq_credentials: password?
   cloakbrowser_license_key: password?
   capture_concurrency: int(1,5)
   cloak_session_limit: int(1,200)

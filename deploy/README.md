@@ -67,6 +67,7 @@ Options du module :
 |---|---|
 | `database_url` | `mysql://maturite:<mdp>@core-mariadb:3306/maturite` |
 | `crux_api_key` | clé CrUX |
+| `crux_bq_credentials` | clé JSON du compte de service GCP (rang CrUX de la colonne Audience) — contenu du fichier, brut ou en base64 ; le projet facturé est son `project_id` |
 | `cloakbrowser_license_key` | clé Pro (`cb_…`) — le binaire Pro est téléchargé au 1er démarrage |
 | `capture_concurrency` | **2 max** sur l'i3-4010U (au-delà, TTFB/LCP lab se dégradent) |
 | `cloak_session_limit` | sessions de votre plan CloakBrowser |

@@ -18,6 +18,7 @@ if [[ -f "$OPTIONS" ]]; then
   setenv() { local v; v="$(opt "$2")"; [[ -n "$v" ]] && export "$1=$v" || true; }
   setenv DATABASE_URL              database_url
   setenv CRUX_API_KEY              crux_api_key
+  setenv CRUX_BQ_CREDENTIALS       crux_bq_credentials
   setenv CLOAKBROWSER_LICENSE_KEY  cloakbrowser_license_key
   setenv CAPTURE_CONCURRENCY       capture_concurrency
   setenv CLOAK_SESSION_LIMIT       cloak_session_limit

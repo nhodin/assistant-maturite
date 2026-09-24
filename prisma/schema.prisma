@@ -201,6 +201,9 @@ model Run {
   totalPages    Int       @default(0)
   donePages     Int       @default(0)
   error         String?   @db.Text
+  // Non-blocking problem worth showing on the run (e.g. the CrUX rank query hit
+  // its BigQuery quota): the run is complete, one informational column is not.
+  warning       String?   @db.Text
   startedAt     DateTime?
   finishedAt    DateTime?
   createdAt     DateTime  @default(now())

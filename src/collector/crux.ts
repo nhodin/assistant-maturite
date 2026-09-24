@@ -259,3 +259,53 @@ export async function fetchCruxMetrics(
     return null;
   }
 }
+
+/** Share of page loads per device class, from the CrUX `form_factors` metric (0–1 each). */
+export interface CruxFormFactors {
+  phone?: number;
+  desktop?: number;
+  tablet?: number;
+}
+
+interface CruxFormFactorsResponse {
+  record?: {
+    metrics?: { form_factors?: { fractions?: Record<string, number | string> } };
+  };
+}
+
+/** Pure parse of a `queryRecord` payload asked for `form_factors`. */
+export function parseCruxFormFactors(
+  data: CruxFormFactorsResponse | null | undefined,
+): CruxFormFactors | null {
+  const fractions = data?.record?.metrics?.form_factors?.fractions;
+  if (!fractions) return null;
+  const pick = (k: string): number | undefined => {
+    const v = Number(fractions[k]);
+    return Number.isFinite(v) ? v : undefined;
+  };
+  const out: CruxFormFactors = { phone: pick("phone"), desktop: pick("desktop"), tablet: pick("tablet") };
+  return out.phone === undefined && out.desktop === undefined && out.tablet === undefined ? null : out;
+}
+
+/**
+ * Device split of an origin's traffic. `form_factors` is only returned when the
+ * query carries NO formFactor (it is the split across them), hence a request of
+ * its own next to the PHONE p75 one. Null without a key, on 404 or on error.
+ */
+export async function fetchCruxFormFactors(
+  origin: string,
+  apiKey?: string,
+): Promise<CruxFormFactors | null> {
+  if (!apiKey) return null;
+  try {
+    const res = await fetch(`${CRUX_ENDPOINT}?key=${apiKey}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ origin, metrics: ["form_factors"] }),
+    });
+    if (!res.ok) return null;
+    return parseCruxFormFactors((await res.json()) as CruxFormFactorsResponse);
+  } catch {
+    return null;
+  }
+}

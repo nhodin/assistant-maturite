@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { prisma } from "../db";
-import { activeRun, resumeRun, recaptureSite } from "../runner";
+import { activeRun, enrichRunAudience, resumeRun, recaptureSite } from "../runner";
 import { parseClientId, listClients } from "../clients";
 import { renderCsv } from "../../engine/report";
 import {
@@ -14,7 +14,7 @@ import { buildConfigMap } from "../config-store";
 import { rebuildSiteScore } from "../site-score";
 import { TOPICS } from "../../topics";
 import type { PageScoringMode, SiteResult, TopicResult } from "../../core/types";
-import { isChinaKind } from "../categories";
+import { isChinaKind, PAGE_KINDS } from "../categories";
 import {
   applyManualDiagCheck,
   rescorePageDiagnostic,
@@ -56,6 +56,27 @@ function pageTopicsOf(
 
 function modeOf(rp: { mode: string }): PageScoringMode {
   return rp.mode === "china" ? "china" : "standard";
+}
+
+/**
+ * A run's pages in reading order: grouped by site (alphabetical), then HP → PLP →
+ * PDP → CHINA → OTHER within a site. Capture order (runPage id) interleaves the
+ * sites, which scattered one site's URLs across the run views' page lists.
+ */
+export function sortRunPagesBySite<
+  T extends { id: number; page: { kind: string; siteId: number; site: { name: string } } },
+>(runPages: T[]): T[] {
+  const kindRank = (k: string) => {
+    const i = (PAGE_KINDS as readonly string[]).indexOf(k);
+    return i === -1 ? PAGE_KINDS.length : i;
+  };
+  return [...runPages].sort(
+    (a, b) =>
+      a.page.site.name.localeCompare(b.page.site.name) ||
+      a.page.siteId - b.page.siteId ||
+      kindRank(a.page.kind) - kindRank(b.page.kind) ||
+      a.id - b.id,
+  );
 }
 
 /** The rules this run was graded by — never the current settings (see resumeRun). */
@@ -183,6 +204,7 @@ export async function runRoutes(app: FastifyInstance) {
       },
     });
     if (!run) return reply.code(404).send("Run not found");
+    run.runPages = sortRunPagesBySite(run.runPages);
 
     const ranking = [...run.runSiteScores].sort(
       (a, b) => (b.overall ?? -1) - (a.overall ?? -1),
@@ -260,6 +282,19 @@ export async function runRoutes(app: FastifyInstance) {
     return reply.redirect(`/runs/${id}`);
   });
 
+  // Diag: compute the Audience column (CrUX popularity) of a finished run without
+  // recapturing — the audience depends on the origin only. See runner.enrichRunAudience.
+  app.post("/runs/:id/audience", async (req, reply) => {
+    const id = Number((req.params as any).id);
+    const res = await enrichRunAudience(id);
+    const msg = !res.ok
+      ? res.reason
+      : res.warning
+        ? `Audience calculée sur ${res.pages} page(s), sans le rang (voir l'avertissement).`
+        : `Audience calculée sur ${res.pages} page(s).`;
+    return reply.redirect(`/runs/${id}?flash=${encodeURIComponent(msg)}`);
+  });
+
   // Per-site maturity results as CSV (same format as the engine report / out/*.csv).
   app.get("/runs/:id/export.csv", async (req, reply) => {
     const id = Number((req.params as any).id);
@@ -329,6 +364,7 @@ export async function runRoutes(app: FastifyInstance) {
       },
     });
     if (!run) return reply.code(404).send("");
+    run.runPages = sortRunPagesBySite(run.runPages);
     // Terminal, or RUNNING with nobody executing it (a run left over by a previous
     // server process): either way there is nothing more to poll — reload the page.
     if (run.status === "DONE" || run.status === "FAILED" || activeRun() !== run.id) {

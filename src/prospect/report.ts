@@ -10,6 +10,7 @@
  */
 import type { PageDiagnostic } from "./types";
 import { siteDiagnostic } from "./verdict";
+import { monthLabel } from "./audience";
 
 /** One captured page of a diag run, as the export reads it. */
 export interface DiagCsvPage {
@@ -39,6 +40,10 @@ const HEADER = [
   "Googlebot - images",
   "Navigation",
   "Stack",
+  "Rang CrUX FR",
+  "Rang CrUX monde",
+  "Part mobile",
+  "Mois CrUX",
   "Points de vigilance",
   "Arbitrage",
   "Evidence user",
@@ -82,6 +87,25 @@ function metricCells(diag: PageDiagnostic, id: "ssr.user" | "ssr.bot"): string[]
   ];
 }
 
+/**
+ * Rank as the raw bucket bound (5000 = top 5k) so a spreadsheet sorts it;
+ * "hors classement" when the origin is out of that month's ranking, empty when
+ * the rank was never queried.
+ */
+function audienceCells(diag: PageDiagnostic): string[] {
+  const a = diag.audience;
+  if (!a) return ["", "", "", ""];
+  const rank = (r: number | null | undefined): string =>
+    r === undefined ? "" : r === null ? "hors classement" : String(r);
+  const month = a.monthCountry ?? a.monthGlobal;
+  return [
+    rank(a.rankCountry),
+    rank(a.rankGlobal),
+    a.mobileShare != null ? `${Math.round(a.mobileShare * 100)}%` : "",
+    month ? monthLabel(month) : "",
+  ];
+}
+
 function evidenceOf(diag: PageDiagnostic, id: "ssr.user" | "ssr.bot"): string {
   const check = (diag.checks ?? []).find((c) => c.id === id);
   if (!check) return "";
@@ -116,7 +140,7 @@ export function renderDiagCsv(pages: DiagCsvPage[]): string {
       // An uncaptured page still gets a row: its absence from the export would
       // read as "this page is fine", which is the opposite of what happened.
       rows.push(
-        [p.site, p.url, p.status, "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "non capturée", "", ""]
+        [p.site, p.url, p.status, ...Array(HEADER.length - 6).fill(""), "non capturée", "", ""]
           .map(cell)
           .join(";"),
       );
@@ -136,6 +160,7 @@ export function renderDiagCsv(pages: DiagCsvPage[]): string {
         ...metricCells(d, "ssr.bot"),
         d.navigation?.kind === "unknown" ? "?" : (d.navigation?.kind?.toUpperCase() ?? ""),
         (d.stack?.frameworks ?? []).join(" + "),
+        ...audienceCells(d),
         (d.flags ?? []).map((f) => f.label).join(" | "),
         arbitrage(d),
         evidenceOf(d, "ssr.user"),

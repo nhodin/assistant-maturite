@@ -70,7 +70,7 @@ describe("renderDiagCsv", () => {
     const cols = row(renderDiagCsv([{ site: "a.fr", url: "https://a.fr/p", status: "DONE", diag: blocked }]), 1).split(";")
     expect(cols[11]).toBe("bloqué")
     expect(cols[12]).toBe("")
-    expect(cols[18]).toBe("à confirmer")
+    expect(cols[22]).toBe("à confirmer")
   })
 
   it("spells the presumption out next to the evidence it qualifies", () => {

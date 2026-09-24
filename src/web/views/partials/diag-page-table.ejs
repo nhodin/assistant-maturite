@@ -64,6 +64,15 @@
     return metric.toUpperCase() + ' p75 mobile : ' + CWV_LABEL[cwvRating(metric, v)] +
       ' (bon ≤ ' + f(t.good) + ', mauvais > ' + f(t.poor) + ')';
   }
+  // CrUX popularity (BigQuery dataset). Tier on the FR rank — informational.
+  var AUD_LABEL = { high: 'forte', mid: 'moyenne', low: 'faible' };
+  var RANK_FAILURE_LABEL = { quota: 'quota dépassé', cap: 'plafond atteint', auth: 'accès refusé', other: 'indisponible' };
+  function audienceHint(a){
+    return 'Audience ' + AUD_LABEL[audienceTier(a.rankCountry)] + ' (forte ≤ top ' +
+      AUDIENCE_TIERS.high / 1000 + 'k FR, moyenne ≤ top ' + AUDIENCE_TIERS.mid / 1000 + 'k FR) — ' +
+      "tranche de rang CrUX, pas un rang exact ; trafic Chrome uniquement" +
+      (a.monthCountry ? ' — CrUX ' + monthLabel(a.monthCountry) : '');
+  }
   // Trend over ~3 months (CrUX History API). The arrow follows the VALUE (↓ =
   // the p75 went down), the colour follows the MEANING (lower is better).
   var TREND_ARROW = { better: '↓', worse: '↑', stable: '→' };
@@ -96,6 +105,7 @@
       <th>Site</th>
       <th title="EdgeSpeed — suit le SSR vu par un visiteur">Speed</th>
       <th title="Core Web Vitals terrain (CrUX), p75 de l'origine sur mobile — informatif, n'entre pas dans le verdict">CWV</th>
+      <th title="Popularité CrUX de l'origine : rang France et mondial (tranches), part du trafic mobile — informatif, n'entre pas dans le verdict">Audience</th>
       <th title="EdgeSEO — suit le SSR vu par un crawler">SEO</th>
       <th title="HTML servi à un visiteur, avant JS : recouvrement / mots, puis titre-H1 et images">Contenu User</th>
       <th title="Le même HTML redemandé avec un user-agent Googlebot, jugé sur les mêmes conditions">Contenu Googlebot</th>
@@ -109,16 +119,20 @@
     </tr>
   </thead>
   <tbody>
+    <% var prevSite = null; %>
     <% pages.forEach(function(rp){
+         var first = rp.page.siteId !== prevSite; prevSite = rp.page.siteId;
          var done = rp.status === 'DONE';
          var d = done ? rp.diagJson : null;
          var checks = (d && d.checks) || [];
          var cUser = checks.find(function(c){ return c.id === 'ssr.user'; });
          var cBot  = checks.find(function(c){ return c.id === 'ssr.bot'; });
     %>
-      <tr>
+      <%# Pages arrive grouped by site (routes/runs.ts:sortRunPagesBySite): the
+          name is written once per group, the URL on every row. %>
+      <tr class="<%= first ? 'site-start' : 'site-cont' %>">
         <td title="<%= rp.url %>">
-          <%= rp.page.site.name %>
+          <% if (first) { %><%= rp.page.site.name %><% } %>
           <% if (divergentSites[rp.page.siteId] && !seenSite[rp.page.siteId]) { seenSite[rp.page.siteId] = true; %>
             <span class="badge b-diag-divergent" title="Les pages de ce site n'ont pas toutes le même verdict">divergent</span>
           <% } %>
@@ -159,6 +173,24 @@
           <% } else if (d && d.cwv === null) { %>
             <span class="muted" title="CrUX n'a pas de données terrain mobile pour cette origine (trafic insuffisant)">pas de données CrUX</span>
           <% } else { %><span class="muted" title="<%= d ? 'CrUX non interrogé (clé CRUX_API_KEY absente, ou run antérieur à cette colonne)' : '' %>">&middot;</span><% } %>
+        </td>
+        <td class="diag-audience">
+          <% var a = d && d.audience; if (a) { %>
+            <%# The FR rank carries the tier colour: prospects are French sites, the
+                worldwide rank only situates them. undefined = BigQuery not
+                queried, null = out of the ranking that month. %>
+            <% if (a.rankCountry !== undefined) { %>
+              <div class="nowrap"><span class="aud-<%= audienceTier(a.rankCountry) %>" title="<%= audienceHint(a) %>"><%= a.rankCountry != null ? rankLabel(a.rankCountry) + ' FR' : 'hors top FR' %></span></div>
+              <div class="nowrap muted" title="Rang CrUX mondial<%= a.monthGlobal ? ' — CrUX ' + monthLabel(a.monthGlobal) : '' %>"><%= a.rankGlobal != null ? rankLabel(a.rankGlobal) + ' monde' : 'hors top monde' %></div>
+            <% } else if (a.rankUnavailable) { %>
+              <div class="diag-warn" title="La requête BigQuery du rang a échoué pour ce run — voir l'avertissement en haut du run. Le reste du diagnostic n'est pas affecté.">⚠ rang : <%= RANK_FAILURE_LABEL[a.rankUnavailable] %></div>
+            <% } else { %>
+              <div class="muted" title="Rang non interrogé (BigQuery non configuré — CRUX_BQ_CREDENTIALS ou CRUX_BQ_PROJECT —, requête en échec, ou run antérieur à cette colonne)">rang &middot;</div>
+            <% } %>
+            <% if (a.mobileShare != null) { %>
+              <div class="nowrap muted" title="Part des chargements de page sur mobile (CrUX, 28 derniers jours)"><%= Math.round(a.mobileShare * 100) %> % mobile</div>
+            <% } %>
+          <% } else { %><span class="muted" title="<%= d ? 'Audience non interrogée (ni CRUX_API_KEY ni BigQuery configurés, ou run antérieur à cette colonne)' : '' %>">&middot;</span><% } %>
         </td>
         <td>
           <% if (d) { %><span class="badge v-<%= d.seo %>"><%= d.seo === 'UNKNOWN' ? 'à confirmer' : d.seo %></span>
@@ -220,11 +252,11 @@
           instead of sending the operator to a separate page. hx-preserve keeps an
           open panel open across the live view's polling. %>
       <tr class="diag-slot">
-        <td colspan="8" id="diag-<%= rp.id %>" hx-preserve="true"></td>
+        <td colspan="9" id="diag-<%= rp.id %>" hx-preserve="true"></td>
       </tr>
       <% if (rp.error) { %>
         <tr class="note-row">
-          <td colspan="8" class="ev <%= rp.status === 'FAILED' ? 'ko' : 'muted' %>">
+          <td colspan="9" class="ev <%= rp.status === 'FAILED' ? 'ko' : 'muted' %>">
             <span class="note-for"><%= rp.page.site.name %> &mdash;</span> <%= rp.error %>
           </td>
         </tr>

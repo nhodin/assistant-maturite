@@ -22,6 +22,13 @@
       <% } %>
     </form>
   <% } %>
+  <%# Audience (CrUX popularity) depends on the origin only: computable on a
+      stored run without recapturing a single page. %>
+  <% if (!isLive && isDiagRun) { %>
+    <form method="post" action="/runs/<%= run.id %>/audience">
+      <button class="btn" type="submit" title="Calcule (ou rafraîchit) la colonne Audience — rang CrUX FR/monde et part mobile — sans recapturer les pages">📊 Calculer l'audience</button>
+    </form>
+  <% } %>
 </div>
 <% if (flash) { %><div class="empty err"><%= flash %></div><% } %>
 <p class="muted">
@@ -29,6 +36,8 @@
   <%= fmtDate(run.startedAt) %> → <%= fmtDate(run.finishedAt) %>
 </p>
 <% if (run.error) { %><div class="empty err"><%= run.error %></div><% } %>
+<%# Non-blocking: the run is complete, one informational column is not. %>
+<% if (run.warning) { %><div class="flash warn"><%= run.warning %></div><% } %>
 
 <% if (isLive) { %>
   <%- include('partials/run-progress', { run }) %>
@@ -144,9 +153,12 @@
   <table class="grid small">
     <thead><tr><th>Site</th><th>Type</th><th>URL</th><th>Statut</th></tr></thead>
     <tbody>
-      <% run.runPages.forEach(function(rp){ %>
-        <tr>
-          <td><a href="/runs/<%= run.id %>/sites/<%= rp.page.siteId %>"><%= rp.page.site.name %></a></td>
+      <%# Pages arrive grouped by site (routes/runs.ts:sortRunPagesBySite): the
+          name is written once per group, and a rule separates one site from the next. %>
+      <% var prevSite = null; %>
+      <% run.runPages.forEach(function(rp){ var first = rp.page.siteId !== prevSite; prevSite = rp.page.siteId; %>
+        <tr class="<%= first ? 'site-start' : 'site-cont' %>">
+          <td><% if (first) { %><a href="/runs/<%= run.id %>/sites/<%= rp.page.siteId %>"><%= rp.page.site.name %></a><% } %></td>
           <td><span class="badge<%= rp.page.kind === 'CHINA' ? ' b-china' : '' %>"><%= rp.page.kind %></span></td>
           <td class="url"><%= rp.url %></td>
           <td><span class="badge b-<%= rp.status %>"><%= rp.status %></span></td>

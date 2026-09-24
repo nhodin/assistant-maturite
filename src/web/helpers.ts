@@ -2,6 +2,7 @@
 import { categoryLabel, CATEGORY_LABELS, CATEGORIES, PAGE_KINDS } from "./categories";
 import { SSR_MIN_WORDS } from "../prospect/detect";
 import { CWV_THRESHOLDS, cwvRating } from "../prospect/cwv";
+import { AUDIENCE_TIERS, audienceTier, monthLabel, rankLabel } from "../prospect/audience";
 
 /** CSS class bucket for a 0–100 score (or null/N-A). */
 export function scoreClass(score: number | null | undefined): string {
@@ -36,6 +37,11 @@ export const viewHelpers = {
   // Same reason: the diag table colours the CrUX p75 with the code's thresholds.
   CWV_THRESHOLDS,
   cwvRating,
+  // Audience column: tier thresholds and labels come from the code, same reason.
+  AUDIENCE_TIERS,
+  audienceTier,
+  rankLabel,
+  monthLabel,
   categoryLabel,
   CATEGORY_LABELS,
   CATEGORIES,

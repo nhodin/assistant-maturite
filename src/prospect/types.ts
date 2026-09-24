@@ -13,6 +13,7 @@
 import type { EvidenceBundle, NavigationProbe, StackProbe } from "../core";
 import type { SsrMetrics } from "./detect";
 import type { CwvSummary } from "./cwv";
+import type { AudienceSummary } from "./audience";
 
 /** GO / NOGO, or UNKNOWN when a check could not be measured and awaits arbitration. */
 export type DiagVerdict = "GO" | "NOGO" | "UNKNOWN";
@@ -91,6 +92,12 @@ export interface PageDiagnostic {
    * null = CrUX has no field data for this origin.
    */
   cwv?: CwvSummary | null;
+  /**
+   * CrUX popularity of the page's ORIGIN (rank France + worldwide, mobile share)
+   * — informational, never part of the verdict. Absent = not queried (no CrUX /
+   * BigQuery configuration, run older than the field).
+   */
+  audience?: AudienceSummary;
   flags: VigilanceFlag[];
 }
 

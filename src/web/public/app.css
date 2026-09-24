@@ -62,6 +62,12 @@ tr.note-row td.ev.ko { box-shadow: inset 3px 0 0 var(--ko); }
 tr.crit-slot td:empty { padding: 0; border-bottom: none; }
 tr:has(+ tr.note-row) td,
 tr:has(+ tr.crit-slot + tr.note-row) td { border-bottom: none; }
+/* Page lists of a run are grouped by site: a strong rule opens each site, and
+   the rows that follow it inside the same site are only lightly separated. */
+table.grid tbody tr.site-start:not(:first-child) td { border-top: 2px solid #c9d3e0; }
+table.grid tr:has(+ tr.site-cont) td,
+table.grid tr:has(+ tr.diag-slot + tr.site-cont) td,
+table.grid tr:has(+ tr.crit-slot + tr.site-cont) td { border-bottom-color: #f0f3f7; }
 
 .score { display: inline-block; min-width: 34px; text-align: center; padding: .15rem .4rem;
   border-radius: 6px; font-weight: 700; }
@@ -364,3 +370,10 @@ th a.page-head:hover { text-decoration: underline; }
 .cwv-trend-better { color: var(--ok); }
 .cwv-trend-worse { color: var(--ko); }
 .cwv-trend-stable { color: #9e9e9e; }
+
+/* CrUX popularity next to the CWV: the FR rank tier reads as commercial weight
+   (strong audience = green), the worldwide rank and mobile share stay muted. */
+.diag-audience { font-size: 11px; }
+.aud-high { color: var(--ok); font-weight: 700; cursor: help; }
+.aud-mid { color: var(--todo); font-weight: 700; cursor: help; }
+.aud-low { color: #9e9e9e; font-weight: 700; cursor: help; }

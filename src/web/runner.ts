@@ -39,6 +39,9 @@ import type {
 import { isChinaKind } from "./categories";
 import { diagnosePage } from "../prospect";
 import { fetchOriginCwv, type CwvSummary } from "../prospect/cwv";
+import { AUDIENCE_COUNTRY, fetchOriginAudience, withRankFailure, withRanks, type AudienceSummary } from "../prospect/audience";
+import { cruxBqConfig, fetchCruxRanks, isRankFailure, rankFailureWarning, type CruxRankResult } from "../collector/crux-rank";
+import type { PageDiagnostic } from "../prospect";
 
 /**
  * How a page is graded, from its inventory kind. A CHINA page is scored on the
@@ -46,6 +49,98 @@ import { fetchOriginCwv, type CwvSummary } from "../prospect/cwv";
  */
 function modeOfKind(kind: string): PageScoringMode {
   return isChinaKind(kind) ? "china" : "standard";
+}
+
+/**
+ * Diag only: add the CrUX popularity rank to every captured page of the run, in
+ * ONE BigQuery query for all their origins (the query cost is the table scan,
+ * not the number of origins). Runs over EVERY DONE page, not only this pass's:
+ * a resumed run then reads all its pages at the same dataset month.
+ *
+ * NEVER blocks the run: a failed query (quota exhausted, cost cap, access
+ * refused…) marks the pages "rank unavailable" with the reason and returns a
+ * warning for the run; the diagnostic itself is complete either way. Returns
+ * null when there is nothing to warn about (success, or not configured).
+ */
+async function attachCruxRanks(runId: number): Promise<string | null> {
+  try {
+    const pages = await prisma.runPage.findMany({
+      where: { runId, status: "DONE" },
+      select: { id: true, diagJson: true },
+    });
+    const withAudience = pages
+      .map((p) => ({ id: p.id, diag: p.diagJson as unknown as PageDiagnostic | null }))
+      .filter((p): p is { id: number; diag: PageDiagnostic & { audience: AudienceSummary } } => !!p.diag?.audience);
+    if (withAudience.length === 0) return null;
+    const ranks = await fetchCruxRanks(
+      withAudience.map((p) => p.diag.audience.origin),
+      { country: AUDIENCE_COUNTRY },
+    );
+    if (!ranks) return null;
+    const failure = isRankFailure(ranks) ? ranks : null;
+    for (const p of withAudience) {
+      const audience = failure ? withRankFailure(p.diag.audience, failure) : withRanks(p.diag.audience, ranks as CruxRankResult);
+      const diag: PageDiagnostic = { ...p.diag, audience };
+      await prisma.runPage.update({ where: { id: p.id }, data: { diagJson: diag as unknown as object } });
+    }
+    return failure ? rankFailureWarning(failure) : null;
+  } catch (err) {
+    // A DB hiccup here must not turn a finished diagnostic into a crashed run.
+    console.error(`Run #${runId}: CrUX rank attachment failed:`, err);
+    return "Colonne Audience : le rang CrUX n'a pas pu être enregistré pour ce run. Le diagnostic est complet par ailleurs.";
+  }
+}
+
+/**
+ * Compute (or refresh) the Audience column of an EXISTING diag run, without
+ * recapturing anything: the audience depends on the origin only, and the landed-on
+ * origin is already stored (CWV origin, else the slimmed evidence's finalUrl,
+ * else the inventory URL). Mobile share per origin, then the one rank query —
+ * same code path as the end of a run, same "never blocks" rule.
+ */
+export async function enrichRunAudience(
+  runId: number,
+): Promise<{ ok: true; pages: number; warning: string | null } | { ok: false; reason: string }> {
+  if (activeRunId === runId) return { ok: false, reason: "Ce run est en cours : l'audience sera calculée à sa fin." };
+  const run = await prisma.run.findUnique({ where: { id: runId }, select: { kind: true } });
+  if (!run) return { ok: false, reason: "Run introuvable." };
+  if (run.kind !== "diag") return { ok: false, reason: "L'audience ne concerne que les runs de diagnostic." };
+  const rankConfigured = !!cruxBqConfig();
+  if (!process.env.CRUX_API_KEY && !rankConfigured) {
+    return { ok: false, reason: "Ni CRUX_API_KEY ni BigQuery (CRUX_BQ_CREDENTIALS) ne sont configurés." };
+  }
+
+  const pages = await prisma.runPage.findMany({
+    where: { runId, status: "DONE" },
+    select: { id: true, url: true, diagJson: true },
+  });
+  const byOrigin = new Map<string, Promise<AudienceSummary | undefined>>();
+  let enriched = 0;
+  for (const p of pages) {
+    const diag = p.diagJson as unknown as PageDiagnostic | null;
+    if (!diag) continue;
+    let landed = diag.audience?.origin ?? diag.cwv?.origin;
+    if (!landed) {
+      const ev = await prisma.runPage.findUnique({ where: { id: p.id }, select: { evidenceJson: true } });
+      landed = (ev?.evidenceJson as { finalUrl?: string } | null)?.finalUrl || p.url;
+    }
+    const key = originOf(landed);
+    let pending = byOrigin.get(key);
+    if (!pending) {
+      pending = fetchOriginAudience(landed, process.env.CRUX_API_KEY, rankConfigured);
+      byOrigin.set(key, pending);
+    }
+    const audience = await pending;
+    if (!audience) continue;
+    await prisma.runPage.update({
+      where: { id: p.id },
+      data: { diagJson: { ...diag, audience } as unknown as object },
+    });
+    enriched++;
+  }
+  const warning = await attachCruxRanks(runId);
+  await prisma.run.update({ where: { id: runId }, data: { warning } });
+  return { ok: true, pages: enriched, warning };
 }
 
 /** Scheme + host + port — the unit a WAF rate-limits on, and so the unit we bucket by. */
@@ -440,6 +535,17 @@ async function executeRun(
     }
     return p;
   };
+  /** Diag only: same once-per-origin memo for the audience (mobile share). */
+  const audienceByOrigin = new Map<string, Promise<AudienceSummary | undefined>>();
+  const originAudience = (url: string): Promise<AudienceSummary | undefined> => {
+    const key = originOf(url);
+    let p = audienceByOrigin.get(key);
+    if (!p) {
+      p = fetchOriginAudience(url, process.env.CRUX_API_KEY, !!cruxBqConfig());
+      audienceByOrigin.set(key, p);
+    }
+    return p;
+  };
 
   /**
    * One page of `site` is settled (captured or failed). When it was the last one,
@@ -556,6 +662,9 @@ async function executeRun(
       // Keyed on the LANDED url: a bare domain redirecting to www. has no record.
       const cwv = await originCwv(bundle.finalUrl || rp.url);
       if (cwv !== undefined) diagnostic.cwv = cwv;
+      // Ranks are added at the end of the run, in one BigQuery query for all origins.
+      const audience = await originAudience(bundle.finalUrl || rp.url);
+      if (audience) diagnostic.audience = audience;
       await prisma.runPage.update({
         where: { id: rp.id },
         data: {
@@ -639,6 +748,8 @@ async function executeRun(
     slots,
   );
 
+  const rankWarning = isDiag ? await attachCruxRanks(runId) : null;
+
   // Truth comes from the DB, not from this process: on a resume the sites scored
   // by the earlier attempt count too. A diag run writes no RunSiteScore at all
   // (it scores nothing), so its success is judged from DONE pages instead.
@@ -659,6 +770,8 @@ async function executeRun(
           : missed > 0
             ? `${missed} page(s) non capturée(s) — « Reprendre » ne recapturera que celles-là.`
             : null,
+      // Rewritten on every pass: a resume whose rank query succeeds clears it.
+      warning: rankWarning,
     },
   });
 }
