@@ -48,7 +48,13 @@ Write-Host "Add-on $version assembled in $out"
 
 if ($Destination) {
   $target = Join-Path $Destination "maturity_analyzer"
-  if (Test-Path $target) { Remove-Item -Recurse -Force $target }
-  Copy-Item -Recurse $out $target
+  # Mirror rather than delete + copy: on the Samba share a recursive delete
+  # returns before the server has finished it, and the copy then trips on a
+  # directory still present ("Il existe deja un element avec le nom specifie").
+  # /MIR also removes files that no longer exist in $out.
+  robocopy $out $target /MIR /R:2 /W:2 /NFL /NDL /NJH /NP | Out-Host
+  # robocopy exit codes: 0-7 = success (files copied/extra removed), 8+ = failure.
+  if ($LASTEXITCODE -ge 8) { throw "robocopy failed with exit code $LASTEXITCODE" }
+  $global:LASTEXITCODE = 0
   Write-Host "Copied to $target"
 }
