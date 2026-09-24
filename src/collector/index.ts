@@ -280,6 +280,10 @@ export function fetchRawHtmlWithEarlyHints(
       const lib = parsed.protocol === "http:" ? http : https;
       const req = lib.request(currentUrl, {
         method: "GET",
+        // Node's default is 16 KB of response headers; stokke.com sends more
+        // (cookies, CSP) and the fetch died with "Header overflow" — read as a
+        // crawler block when it was our own client giving up. Browsers allow far more.
+        maxHeaderSize: 256 * 1024,
         headers: {
           "user-agent": userAgent,
           "accept-encoding": rawFetchAcceptEncoding(),
@@ -637,6 +641,7 @@ export const collect: CollectFn = async (
   // ── Step 1: Raw HTML fetch (pre-JS, outside browser) ────────────────────────
   let rawHtml = "";
   let rawStatus = 0;
+  let browserDoc: { status: number; html: string; htmlBytes: number } | null = null;
   let mainResponseHeaders: Record<string, string> = {};
   let finalUrl = url;
   let altSvcHeader: string | null = null;
@@ -922,6 +927,18 @@ export const collect: CollectFn = async (
     }
 
     // ── Navigate ───────────────────────────────────────────────────────────────
+    // Keep the main frame's latest navigation response: after a challenge clears,
+    // the last one is the real document, as the browser received it (pre-JS).
+    let lastNavResponse: import("playwright").Response | null = null;
+    page.on("response", (resp) => {
+      try {
+        if (resp.request().isNavigationRequest() && resp.frame() === page.mainFrame()) {
+          lastNavResponse = resp;
+        }
+      } catch {
+        // detached frame — not the main document
+      }
+    });
     try {
       await page.goto(url, { waitUntil: "load", timeout: timeoutMs });
     } catch {
@@ -952,6 +969,18 @@ export const collect: CollectFn = async (
       }
     } catch {
       // Best effort — never abort a capture over the challenge probe itself.
+    }
+
+    // Read it now, before cookie clicks or the interaction probe can navigate
+    // again. Redirect responses carry no body and are skipped.
+    const navResponse = lastNavResponse as import("playwright").Response | null;
+    if (navResponse && (navResponse.status() < 300 || navResponse.status() >= 400)) {
+      try {
+        const html = await navResponse.text();
+        browserDoc = { status: navResponse.status(), html, htmlBytes: Buffer.byteLength(html, "utf-8") };
+      } catch {
+        // Body evicted or unavailable — the diagnostic falls back to rawHtml.
+      }
     }
 
     // ── Accept cookies ─────────────────────────────────────────────────────────
@@ -1442,6 +1471,7 @@ export const collect: CollectFn = async (
     renderedHtml,
     htmlBytes: Buffer.byteLength(rawHtml, "utf-8"),
     rawStatus,
+    browserDoc,
     mainResponseHeaders,
     head,
     requests,

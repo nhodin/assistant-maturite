@@ -9,6 +9,12 @@
     le HTML servi aux visiteurs), celle pour un <strong>crawler</strong> décide
     d'EdgeSEO (qui agit sur le HTML servi aux robots).
   </p>
+  <p class="muted">
+    Côté visiteur, deux documents sont comparés : celui de la requête directe et celui
+    reçu par le navigateur. Un site peut les servir différemment (interstitiel pour
+    l'un, page pour l'autre) : le verdict retient le meilleur des deux, et le détail
+    précise lequel.
+  </p>
   <p class="muted">Le HTML servi doit réunir les quatre conditions :</p>
   <%
     // The threshold comes from prospect/detect.ts through viewHelpers, so this

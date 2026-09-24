@@ -157,6 +157,7 @@ export function slimEvidence(b: EvidenceBundle, keepDocuments = false): object {
       rawHtml: b.rawHtml.slice(0, DIAG_DOC_MAX),
       renderedHtml: b.renderedHtml.slice(0, DIAG_DOC_MAX),
       bot: b.bot ? { ...b.bot, html: b.bot.html.slice(0, DIAG_DOC_MAX) } : null,
+      browserDoc: b.browserDoc ? { ...b.browserDoc, html: b.browserDoc.html.slice(0, DIAG_DOC_MAX) } : null,
       // Request bodies/headers say nothing about SSR; the URLs are kept for the
       // stack fingerprint, everything else goes.
       requests: b.requests.map((r) => ({
@@ -180,6 +181,7 @@ export function slimEvidence(b: EvidenceBundle, keepDocuments = false): object {
     // never measure the stub below.
     rawHtml: b.rawHtml.slice(0, 2000),
     renderedHtml: "",
+    browserDoc: null,
     requests: b.requests.map((r) => ({
       url: r.url,
       resourceType: r.resourceType,

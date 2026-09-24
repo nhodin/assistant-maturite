@@ -34,6 +34,7 @@ export const CHALLENGE_TITLE_PATTERNS: RegExp[] = [
 
 /** DOM markers, for interstitials whose <title> is the site's own. */
 const CHALLENGE_SELECTORS = [
+  "#sec-if-cpt-container", // Akamai behavioural challenge
   "#challenge-running",
   "#cf-challenge-running",
   "#challenge-form",
@@ -93,6 +94,13 @@ const BLOCK_BODY_SIGNATURES: RegExp[] = [
   /incapsula incident id/i,
   /px-captcha|perimeterx/i, // PerimeterX / HUMAN
   /\/_sec\/cp_challenge\//i, // Akamai Bot Manager challenge assets
+  // Akamai Bot Manager interstitial (run 46: zarahome, pullandbear, stradivarius,
+  // massimodutti) — 2 KB, title "&nbsp;", meta-refresh to "?bm-verify=…".
+  /[?&]bm-verify=/i,
+  /triggerInterstitialChallenge/,
+  // Akamai behavioural challenge (run 46: marriott, tagheuer) — "Powered and
+  // protected by Akamai", no title at all.
+  /sec-if-cpt-container/i,
 ];
 
 /**
@@ -169,13 +177,14 @@ function unavailablePage(html: string): boolean {
     html.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i)?.[1]?.replace(/<[^>]+>/g, " ") ?? "",
   ].join(" ");
   if (UNAVAILABLE_WORDINGS.some((re) => re.test(headline))) return true;
-  if (!UNAVAILABLE_WORDINGS.some((re) => re.test(html))) return false;
-  const text = html
+  // VISIBLE text only: zarahome.com ships an i18n JSON in a <script> holding
+  // "pageNotAvailableTitle":"Page unavailable", over a client-side body with few
+  // words — matched on the raw HTML, that read as a maintenance page.
+  const visible = html
     .replace(/<(script|style|noscript|template)\b[\s\S]*?<\/\1>/gi, " ")
-    .replace(/<[^>]+>/g, " ")
-    .split(/\s+/)
-    .filter(Boolean);
-  return text.length < NOTICE_MAX_WORDS;
+    .replace(/<[^>]+>/g, " ");
+  if (!UNAVAILABLE_WORDINGS.some((re) => re.test(visible))) return false;
+  return visible.split(/\s+/).filter(Boolean).length < NOTICE_MAX_WORDS;
 }
 
 /**
@@ -204,7 +213,9 @@ export function challengeSignature(html: string): string | null {
   if (/cf-browser|challenge-platform/i.test(hit.source)) return "interstitiel Cloudflare";
   if (/incapsula/i.test(hit.source)) return "interstitiel Imperva/Incapsula";
   if (/perimeterx|px-captcha/i.test(hit.source)) return "interstitiel PerimeterX";
-  if (/cp_challenge/i.test(hit.source)) return "interstitiel Akamai Bot Manager";
+  if (/cp_challenge|bm-verify|InterstitialChallenge|sec-if-cpt/i.test(hit.source)) {
+    return "interstitiel Akamai Bot Manager";
+  }
   return "interstitiel anti-bot";
 }
 

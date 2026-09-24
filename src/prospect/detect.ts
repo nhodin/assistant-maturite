@@ -8,7 +8,7 @@
  */
 import { header, headSlice, bodySlice, visibleText, parseTags, stripHtmlComments } from "../topics/util";
 import { CDN_HEADERS } from "../topics/cdn";
-import { isChallengeHtml } from "../collector/challenge";
+import { blockSignature } from "../collector/challenge";
 import type { EvidenceBundle, HeaderMap } from "../core";
 
 /* ── Calibrated thresholds ─────────────────────────────────────────────────
@@ -102,7 +102,9 @@ function titleAnchor(html: string): string | null {
   const head = stripHtmlComments(headSlice(html));
   const m = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(head);
   if (!m) return null;
-  const text = m[1].replace(/\s+/g, " ").trim();
+  // Decoded first: Akamai's interstitial is titled "&nbsp;", which is blank, not
+  // a page identity (run 46, the four Inditex sites).
+  const text = decodeEntities(m[1]).replace(/\s+/g, " ").trim();
   if (!text || GENERIC_TITLES.test(text)) return null;
   return text;
 }
@@ -111,17 +113,21 @@ function ogTitleAnchor(html: string): string | null {
   const metas = parseTags(headSlice(html), "meta");
   for (const meta of metas) {
     const prop = (meta.attrs["property"] ?? meta.attrs["name"] ?? "").toLowerCase();
-    const content = (meta.attrs["content"] ?? "").trim();
+    const content = decodeEntities(meta.attrs["content"] ?? "").trim();
     if (prop === "og:title" && content) return content;
   }
   return null;
 }
 
 function h1Anchor(html: string): string | null {
-  const clean = stripHtmlComments(html);
+  // Only an h1 the parser would render: stellantisandyou.com carries
+  // "<h1 …>Bienvenue chez Stellantis &You</h1>" inside a JSON string in a
+  // <script>, over a body with 0 words. <noscript> is out for the same reason it
+  // is out of the word count.
+  const clean = stripHtmlComments(html).replace(/<(script|style|template|noscript)\b[\s\S]*?<\/\1>/gi, " ");
   const m = /<h1\b[^>]*>([\s\S]*?)<\/h1>/i.exec(clean);
   if (!m) return null;
-  const text = visibleText(m[1]).trim();
+  const text = decodeEntities(visibleText(m[1])).replace(/\s+/g, " ").trim();
   return text ? text : null;
 }
 
@@ -276,9 +282,22 @@ function inlineCssBackgrounds(html: string): Set<string> {
  * Criterion 3 — images: at least one `<img>` with a real `src`/`srcset` (a base64
  * placeholder or a `data-src`-only image does NOT count — both need JS to resolve).
  */
+/**
+ * A tracking pixel, not content: 1×1 declared size, hidden inline, or a known
+ * beacon path. ysl.com's only "image without JS" was Akamai's
+ * `/akam/13/pixel_…` with `visibility: hidden`.
+ */
+function isTrackingPixel(attrs: Record<string, string>): boolean {
+  const w = Number(attrs["width"]);
+  const h = Number(attrs["height"]);
+  if (w > 0 && w <= 1 && h > 0 && h <= 1) return true;
+  if (/(visibility\s*:\s*hidden|display\s*:\s*none)/i.test(attrs["style"] ?? "")) return true;
+  return /\/akam\/\d+\/pixel|\/pixel(\.gif)?\?|facebook\.com\/tr\b|\/collect\?/i.test(attrs["src"] ?? "");
+}
+
 export function hasRealImage(html: string): ImagePresenceResult {
   const isReal = (img: { attrs: Record<string, string> }) =>
-    isRealImageSrc(img.attrs["src"]) || isRealImageSrc(img.attrs["srcset"]);
+    !isTrackingPixel(img.attrs) && (isRealImageSrc(img.attrs["src"]) || isRealImageSrc(img.attrs["srcset"]));
   let count = parseTags(html, "img").filter(isReal).length;
   // A <picture> resolves its image from its <source srcset>, with no JS: the
   // browser's own source selection fills the inner <img>, which may carry no src
@@ -399,6 +418,72 @@ export function evaluateSsr(html: string, renderedHtml: string): SsrEvaluation {
   };
 }
 
+/* ── Which document the VISITOR was served ────────────────────────────────── */
+
+export interface VisitorEvaluation {
+  /** "fetch" = the collector's direct Node request; "browser" = the browser's own navigation. */
+  source: "fetch" | "browser";
+  html: string;
+  result: SsrEvaluation;
+}
+
+export interface VisitorSelection {
+  /** The document the visitor verdict is measured on; null when every one was refused. */
+  chosen: VisitorEvaluation | null;
+  /** Why each set-aside document was refused, in French, for the evidence. */
+  refused: string[];
+  /** The clean documents that were measured, for the evidence when they disagree. */
+  measured: VisitorEvaluation[];
+}
+
+/** Below this, a document is an empty body (evicted, reset), not a page. */
+const MIN_DOC_BYTES = 200;
+
+/** Reason a candidate document is not the page, or null when it is usable. */
+function refusalOf(html: string, status: number | undefined, who: string): string | null {
+  const sig = blockSignature(html);
+  if (status !== undefined && status >= 400) return `${who} : HTTP ${status}${sig ? ` (${sig})` : ""}`;
+  if (sig) return `${who} : ${sig}`;
+  return null;
+}
+
+/**
+ * Pick the visitor document to measure SSR on.
+ *
+ * Two candidates: the collector's direct request (`rawHtml`) and the document the
+ * browser itself received (`browserDoc`). They should be the same page, and on
+ * most sites they are — but a WAF or an edge may answer them differently. Run 46:
+ * Node got an Akamai interstitial on four Inditex sites and marriott.com while the
+ * browser got the page; homeexchange.fr served Node 28 words and the browser 633.
+ * Either way the visitor DOES get the content, so a refused or poorer direct
+ * fetch must not make a NOGO.
+ *
+ * Refused documents (4xx/5xx, a block page) are set aside; of the rest, the one
+ * that passes wins (the direct fetch first when both do), else the richer one.
+ */
+export function selectVisitorDocument(e: EvidenceBundle): VisitorSelection {
+  const candidates: { source: VisitorEvaluation["source"]; html: string; status?: number; who: string }[] = [
+    { source: "fetch", html: e.rawHtml, status: e.rawStatus, who: "fetch direct" },
+  ];
+  if (e.browserDoc && e.browserDoc.html.trim().length >= MIN_DOC_BYTES) {
+    candidates.push({ source: "browser", html: e.browserDoc.html, status: e.browserDoc.status, who: "navigateur" });
+  }
+  const refused: string[] = [];
+  const measured: VisitorEvaluation[] = [];
+  for (const c of candidates) {
+    const why = refusalOf(c.html, c.status, c.who);
+    if (why) refused.push(why);
+    else measured.push({ source: c.source, html: c.html, result: evaluateSsr(c.html, e.renderedHtml) });
+  }
+  const chosen =
+    measured.find((m) => m.result.passed) ??
+    measured.reduce<VisitorEvaluation | null>(
+      (best, m) => (best === null || m.result.metrics.rawWords > best.result.metrics.rawWords ? m : best),
+      null,
+    );
+  return { chosen, refused, measured };
+}
+
 /* ── Dynamic rendering (SSR for crawlers only) ────────────────────────────── */
 
 /** Hydration-payload markers a modern framework leaves in the HTML it ships to a real browser. */
@@ -460,9 +545,10 @@ export function detectDynamicRendering(e: EvidenceBundle): DynamicRenderingResul
   // and against a visitor document that is the page rather than a block page —
   // a blocked visitor fetch looks exactly like "empty for users, full for bots".
   if (bot.blocked) return { detected: false };
-  if (isChallengeHtml(e.rawHtml)) return { detected: false };
+  const visitor = selectVisitorDocument(e).chosen;
+  if (visitor === null) return { detected: false };
 
-  const userSsr = evaluateSsr(e.rawHtml, e.renderedHtml);
+  const userSsr = visitor.result;
   const botSsr = evaluateSsr(bot.html, e.renderedHtml);
 
   // THE ASYMMETRY IS THE SIGNAL: the crawler gets rendered content, the visitor
@@ -474,7 +560,7 @@ export function detectDynamicRendering(e: EvidenceBundle): DynamicRenderingResul
   // and went undetected because it ships no such marker. They are now
   // CORROBORATING details, named in the evidence when present.
   if (!userSsr.passed && botSsr.passed) {
-    const userMarker = hasHydrationMarker(e.rawHtml) ?? hasHydrationMarker(e.renderedHtml);
+    const userMarker = hasHydrationMarker(visitor.html) ?? hasHydrationMarker(e.renderedHtml);
     const botHasMarker = hasHydrationMarker(bot.html) !== null;
     const botAppScripts = parseTags(bot.html, "script").filter(
       (s) => (s.attrs["src"] ?? "").trim() !== "",
@@ -547,6 +633,24 @@ function cdnFrontFlag(headers: HeaderMap): VigilanceFlagFact | null {
   return null;
 }
 
+/**
+ * The site already runs behind Fasterize (run 46: homeexchange.fr answers with
+ * `x-fstrz`, `x-fstrz-page-type`, `server-timing: …desc="fstrz"`). Worth saying
+ * first: the prospect is a customer, and the HTML measured is already the
+ * optimised one.
+ */
+function fasterizeFlag(headers: HeaderMap): VigilanceFlagFact | null {
+  const key = Object.keys(headers).find((k) => /^x-fstrz/i.test(k));
+  const timing = header(headers, "server-timing");
+  const viaTiming = timing && /desc="?fstrz/i.test(timing);
+  if (!key && !viaTiming) return null;
+  return {
+    id: "fasterize.client",
+    label: "Déjà client Fasterize",
+    detail: key ? `en-tête ${key}: ${headers[key]}` : `server-timing: ${timing}`,
+  };
+}
+
 function serviceWorkerFlag(e: EvidenceBundle): VigilanceFlagFact | null {
   if (e.stack?.serviceWorker !== true) return null;
   return {
@@ -563,6 +667,7 @@ function serviceWorkerFlag(e: EvidenceBundle): VigilanceFlagFact | null {
  */
 export function vigilanceFlags(e: EvidenceBundle): VigilanceFlagFact[] {
   const flags: (VigilanceFlagFact | null)[] = [
+    fasterizeFlag(e.mainResponseHeaders),
     cspStrictFlag(e.mainResponseHeaders),
     setCookieFlag(e.mainResponseHeaders),
     cdnFrontFlag(e.mainResponseHeaders),

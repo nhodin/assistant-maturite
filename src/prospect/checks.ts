@@ -7,8 +7,12 @@
  */
 import type { EvidenceBundle } from "../core";
 import type { DiagCheck, VigilanceFlag } from "./types";
-import { evaluateSsr, detectDynamicRendering as detectDynamicRenderingFacts, vigilanceFlags } from "./detect";
-import { blockSignature } from "../collector/challenge";
+import {
+  evaluateSsr,
+  selectVisitorDocument,
+  detectDynamicRendering as detectDynamicRenderingFacts,
+  vigilanceFlags,
+} from "./detect";
 
 /**
  * Is the page's main content in the HTML served to a normal visitor, before JS?
@@ -21,41 +25,35 @@ import { blockSignature } from "../collector/challenge";
  * unmeasurable check is « à confirmer », never a verdict.
  */
 export function ssrUserCheck(e: EvidenceBundle): DiagCheck {
-  // A 4xx/5xx document is a refusal whatever it looks like: sarenza.com's 403 is
-  // a full branded page with a header, a footer and a title, and nothing in the
-  // markup alone says "this is not the site". The crawler side has judged on the
-  // status from the start; the visitor side must too.
-  if (e.rawStatus !== undefined && e.rawStatus >= 400) {
-    const sig = blockSignature(e.rawHtml);
+  // Refused documents are set aside — a 4xx/5xx whatever it looks like (sarenza's
+  // 403 is a full branded page), or a block page — and the visitor is judged on
+  // the better of the clean ones: the direct fetch or the browser's own document.
+  const { chosen, refused, measured } = selectVisitorDocument(e);
+  if (chosen === null) {
     return {
       id: "ssr.user",
       label: "SSR — utilisateur",
       passed: false,
       unknown: true,
       evidence:
-        `le document servi au visiteur a répondu HTTP ${e.rawStatus}${sig ? ` (${sig})` : ""} — ` +
-        `ce n'est pas la page, le SSR n'a pas pu être mesuré, à confirmer manuellement`,
-    };
-  }
-  const blocked = blockSignature(e.rawHtml);
-  if (blocked) {
-    return {
-      id: "ssr.user",
-      label: "SSR — utilisateur",
-      passed: false,
-      unknown: true,
-      evidence:
-        `le document servi n'est pas la page mais une page de blocage (${blocked}) — ` +
+        `le document servi au visiteur n'est pas la page (${refused.join(" ; ")}) — ` +
         `le SSR n'a pas pu être mesuré, à confirmer manuellement`,
     };
   }
-  const result = evaluateSsr(e.rawHtml, e.renderedHtml);
+  // Say where the measured document came from when it is not the usual one.
+  const other = measured.find((m) => m !== chosen);
+  const origin =
+    chosen.source !== "browser"
+      ? ""
+      : other
+        ? `document reçu par le navigateur (le fetch direct n'a reçu que ${other.result.metrics.rawWords} mots) — `
+        : `document reçu par le navigateur (${refused.join(" ; ")}) — `;
   return {
     id: "ssr.user",
     label: "SSR — utilisateur",
-    passed: result.passed,
-    evidence: result.evidence,
-    metrics: result.metrics,
+    passed: chosen.result.passed,
+    evidence: origin + chosen.result.evidence,
+    metrics: chosen.result.metrics,
   };
 }
 
@@ -76,10 +74,9 @@ export function ssrUserCheck(e: EvidenceBundle): DiagCheck {
  * saying nothing.
  */
 function botPresumption(e: EvidenceBundle): string | null {
-  if (e.rawStatus !== undefined && e.rawStatus >= 400) return null; // refused too
-  if (blockSignature(e.rawHtml)) return null; // visitor document is a block page too
-  const user = evaluateSsr(e.rawHtml, e.renderedHtml);
-  if (!user.passed) return null;
+  const visitor = selectVisitorDocument(e).chosen; // null: the visitor was refused too
+  if (visitor === null || !visitor.result.passed) return null;
+  const user = visitor.result;
   return (
     `le HTML servi au visiteur est rendu côté serveur ` +
     `(${user.metrics.rawWords} mots, ancrage et images présents) ; un site qui sert le SSR ` +

@@ -259,6 +259,21 @@ export const EvidenceBundleSchema = z.object({
    * that body must not be measured as the site. Optional: older bundles lack it.
    */
   rawStatus: z.number().optional(),
+  /**
+   * The main document as the BROWSER received it (body of its last main-frame
+   * navigation response, read once any challenge has cleared) — still pre-JS.
+   *
+   * `rawHtml` comes from a separate Node request, and a site does not always
+   * answer it like it answers a browser: run 46 got Akamai interstitials on
+   * Inditex and marriott.com, and homeexchange.fr served Node 28 words where the
+   * browser got 633. The diagnostic judges the visitor on the better of the two
+   * clean documents. Null when no navigation response was readable; optional so
+   * older bundles still parse.
+   */
+  browserDoc: z
+    .object({ status: z.number(), html: z.string(), htmlBytes: z.number() })
+    .nullable()
+    .optional(),
   /** Serialized DOM AFTER JS execution. */
   renderedHtml: z.string(),
   /** Response headers of the main HTML document (lowercased keys). */
