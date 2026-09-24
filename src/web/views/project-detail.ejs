@@ -16,6 +16,8 @@
   <div class="flash warn">Un run est déjà en cours — réessayez une fois qu'il est terminé.</div>
 <% } else if (flash === 'paused') { %>
   <div class="flash warn">Suivi en pause : la collecte automatique ne se déclenchera plus.</div>
+<% } else if (typeof flash === 'string' && /^pages_added_\d+$/.test(flash)) { var nAdded = Number(flash.slice(12)); %>
+  <div class="flash <%= nAdded ? 'ok' : 'warn' %>"><%= nAdded ? nAdded + ' page' + (nAdded > 1 ? 's ajoutées' : ' ajoutée') + ' au projet.' : 'Aucune nouvelle page : toutes les URLs étaient déjà dans le projet.' %></div>
 <% } else if (flash === 'resumed') { %>
   <div class="flash ok">Suivi repris : la collecte automatique reprend selon la fréquence configurée.</div>
 <% } %>
@@ -256,6 +258,36 @@
         <% }) %>
       </tbody>
     </table>
+
+    <% if (isDiagProject) { %>
+    <details class="add-urls"<%= project.pages.length ? '' : ' open' %>>
+      <summary><strong>+ Ajouter des URLs</strong></summary>
+      <form method="post" action="/projects/<%= project.id %>/diag/pages">
+        <p class="muted small">
+          Une URL par ligne, mêmes règles qu'à la création : groupement par domaine
+          enregistrable, query strings conservées, sites/pages existants réutilisés.
+          Les URLs déjà présentes dans le projet sont ignorées.
+        </p>
+        <div class="form-row">
+          <textarea name="urls" rows="8" style="flex:1;font-family:monospace;resize:vertical"
+            placeholder="https://www.exemple.fr/&#10;https://www.exemple.fr/produit?id=42"
+            required
+            hx-post="/projects/diag/preview" hx-trigger="input changed delay:400ms"
+            hx-target="#add-urls-preview" hx-include="closest form"></textarea>
+        </div>
+        <label class="chk">
+          <input type="checkbox" name="includeHomepages"
+            hx-post="/projects/diag/preview" hx-trigger="change"
+            hx-target="#add-urls-preview" hx-include="closest form">
+          Ajouter aussi la home de chaque domaine
+        </label>
+        <div id="add-urls-preview"></div>
+        <div class="form-row" style="margin-top:.5rem">
+          <button type="submit" class="btn-primary">Ajouter au projet</button>
+        </div>
+      </form>
+    </details>
+    <% } %>
   </section>
 
   <section>

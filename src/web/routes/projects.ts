@@ -39,6 +39,34 @@ function parseFormFactor(v: unknown): CruxFormFactor {
   return v === "DESKTOP" ? "DESKTOP" : "PHONE";
 }
 
+/**
+ * Find-or-create the sites (category Other) and pages (kind OTHER — never
+ * guessed as HP/PLP/PDP) of a parsed URL paste, under `clientId`. Idempotent:
+ * existing site/page rows are reused. Returns the page ids in paste order.
+ */
+async function upsertDiagPages(
+  result: ReturnType<typeof parseUrlPaste>,
+  clientId: number | null,
+): Promise<number[]> {
+  const pageIds: number[] = [];
+  for (const s of result.sites) {
+    let site = await prisma.site.findFirst({ where: { name: s.site, clientId } });
+    if (!site) {
+      site = await prisma.site.create({
+        data: { name: s.site, category: "Other", clientId },
+      });
+    }
+    for (const url of s.pages) {
+      let page = await prisma.page.findFirst({ where: { siteId: site.id, url } });
+      if (!page) {
+        page = await prisma.page.create({ data: { siteId: site.id, url, kind: "OTHER" } });
+      }
+      pageIds.push(page.id);
+    }
+  }
+  return pageIds;
+}
+
 function toIdArray(v: unknown): number[] {
   if (v === undefined || v === null) return [];
   const arr = Array.isArray(v) ? v : [v];
@@ -124,22 +152,7 @@ export async function projectRoutes(app: FastifyInstance) {
       return reply.redirect(`/projects/new?${qs.toString()}`);
     }
 
-    const pageIds: number[] = [];
-    for (const s of result.sites) {
-      let site = await prisma.site.findFirst({ where: { name: s.site, clientId } });
-      if (!site) {
-        site = await prisma.site.create({
-          data: { name: s.site, category: "Other", clientId },
-        });
-      }
-      for (const url of s.pages) {
-        let page = await prisma.page.findFirst({ where: { siteId: site.id, url } });
-        if (!page) {
-          page = await prisma.page.create({ data: { siteId: site.id, url, kind: "OTHER" } });
-        }
-        pageIds.push(page.id);
-      }
-    }
+    const pageIds = await upsertDiagPages(result, clientId);
 
     const project = await prisma.project.create({
       data: {
@@ -152,6 +165,35 @@ export async function projectRoutes(app: FastifyInstance) {
       },
     });
     return reply.redirect(`/projects/${project.id}`);
+  });
+
+  // Add URLs to an existing diagnostic project — same paste, same parsing and
+  // same site/page reuse as the creation above. Sites are looked up under the
+  // PROJECT's client, and pages already in the project are skipped.
+  app.post("/projects/:id/diag/pages", async (req, reply) => {
+    const id = Number((req.params as any).id);
+    const b = req.body as any;
+    const project = await prisma.project.findUnique({
+      where: { id },
+      include: { pages: { select: { pageId: true } } },
+    });
+    if (!project) return reply.redirect("/projects");
+    if (!isDiagProject(project)) return reply.redirect(`/projects/${id}`);
+
+    const includeHomepages = b?.includeHomepages === "on" || b?.includeHomepages === "true";
+    const result = parseUrlPaste(String(b?.urls ?? ""), { includeHomepages });
+    if (result.sites.length === 0) return reply.redirect(`/projects/${id}`);
+
+    const pageIds = await upsertDiagPages(result, project.clientId);
+    const existing = new Set(project.pages.map((pp) => pp.pageId));
+    const toAdd = [...new Set(pageIds)].filter((pageId) => !existing.has(pageId));
+    if (toAdd.length) {
+      await prisma.projectPage.createMany({
+        data: toAdd.map((pageId) => ({ projectId: id, pageId })),
+        skipDuplicates: true,
+      });
+    }
+    return reply.redirect(`/projects/${id}?flash=pages_added_${toAdd.length}`);
   });
 
   app.post("/projects", async (req, reply) => {

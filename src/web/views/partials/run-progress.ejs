@@ -44,9 +44,10 @@
         </tr>
       </thead>
       <tbody>
-        <% pages.forEach(function(rp){ var done = rp.status === 'DONE'; %>
-          <tr>
-            <td title="<%= rp.url %>"><%= rp.page.site.name %></td>
+        <% var prevSite = null; %>
+        <% pages.forEach(function(rp){ var done = rp.status === 'DONE'; var first = rp.page.siteId !== prevSite; prevSite = rp.page.siteId; %>
+          <tr class="<%= first ? 'site-start' : 'site-cont' %>">
+            <td title="<%= rp.url %>"><% if (first) { %><%= rp.page.site.name %><% } %></td>
             <td><span class="badge<%= rp.page.kind === 'CHINA' ? ' b-china' : '' %>"><%= rp.page.kind %></span></td>
             <td><span class="badge b-<%= rp.status %>"><%= rp.status %></span></td>
             <% PCOLS.forEach(function(c){ var t = done ? pgTopic(rp.topicsJson, c.id) : undefined; %>
