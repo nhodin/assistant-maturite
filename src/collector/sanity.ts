@@ -26,6 +26,8 @@ export interface CaptureHealth {
   reason: string | null;
   /** Set only when ok === false. Drives the run executor's retry policy. */
   kind?: CaptureFailureKind;
+  /** One short line for the UI (e.g. "HTTP 403 sur le document"), set only when ok === false. */
+  summary?: string;
 }
 
 /**
@@ -98,6 +100,7 @@ export function assessCaptureHealth(bundle: EvidenceBundle): CaptureHealth {
     return {
       ok: false,
       kind: "unusable",
+      summary: "HTML brut vide",
       reason:
         `Empty raw HTML: the raw-HTML fetch failed or returned a near-empty document ` +
         `(${bundle.rawHtml.trim().length} non-whitespace bytes, < 500) — likely bot-blocked or ` +
@@ -109,6 +112,7 @@ export function assessCaptureHealth(bundle: EvidenceBundle): CaptureHealth {
     return {
       ok: false,
       kind: "unusable",
+      summary: "aucun header de réponse",
       reason:
         `No response headers: the raw-HTML fetch captured 0 main-document response headers — likely ` +
         `bot-blocked or reset at the HTTP layer, so header-based criteria (cache/TTL, CDN, ` +
@@ -139,6 +143,7 @@ export function assessCaptureHealth(bundle: EvidenceBundle): CaptureHealth {
     return {
       ok: false,
       kind: BLOCK_STATUSES.has(blockedDoc.status) ? "blocked" : "unusable",
+      summary: `HTTP ${blockedDoc.status} sur le document`,
       reason:
         `Blocked mid-capture: the document request to ${blockedDoc.url} returned HTTP ${blockedDoc.status} ` +
         `during the "${blockedDoc.phase ?? "load"}" phase (a real document response is never 4xx/5xx) — ` +
@@ -152,6 +157,7 @@ export function assessCaptureHealth(bundle: EvidenceBundle): CaptureHealth {
     return {
       ok: false,
       kind: "blocked",
+      summary: `page de blocage « ${title} »`,
       reason:
         `Blocked page: <title> is "${title}", which matches the known error/bot-challenge wording ` +
         `/${badTitlePattern.source}/ — capture hit a block/error page instead of the real site.`,
@@ -169,6 +175,7 @@ export function assessCaptureHealth(bundle: EvidenceBundle): CaptureHealth {
     return {
       ok: false,
       kind: "blocked",
+      summary: "images/CSS jamais chargées (challenge ?)",
       reason:
         `Blocked assets: raw HTML references ${imgTagCount} <img> tag(s) but the browser captured 0 image ` +
         `and 0 stylesheet requests (only ${bundle.requests.length} network requests total: ` +

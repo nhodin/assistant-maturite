@@ -196,8 +196,9 @@ kiabi.com. **Restart `npm run web` after changing detection code.**
     origin has blocked that many captures in the run — the LV measurement above is why.
   - **Scoring caveat**: a warm profile may already hold the site's consent cookie, so
     consent-gated third parties can load without the banner being clicked. A page rescued
-    by the escalated attempt is `DONE` with a note in `RunPage.error` saying so — Topic 4
-    evidence from such a capture is weaker than from a standard one.
+    by the escalated attempt is simply `DONE` with no note (operator's call, 2026-09: a
+    passed capture is what matters) — keep in mind that its Topic 4 evidence is weaker
+    than a standard capture's; the first failure is only in the server log.
 - **`vitest.config.ts` pins `include` to `tests/**/*.test.ts`** — the `cdp` launch mode's
   persistent profile (`data/chrome-profile/`) contains Chrome extensions that ship their own
   `.spec.js` files, which the default glob happily collected and failed on.
@@ -271,9 +272,10 @@ kiabi.com. **Restart `npm run web` after changing detection code.**
   challenge title, or real `<img>` markup with zero image/stylesheet requests actually captured)
   instead of silently scoring it, and returns a `kind` (`"blocked"` | `"unusable"`) that drives
   the retry above. The run executor retries once with the SAME provider in `"escalated"` mode;
-  if that rescues the page the `RunPage` is `DONE` with a note in `error` (first failure +
-  warm-profile caveat), and if both attempts fail it's `FAILED` with both reasons. Only the
-  healthy bundle (if any) feeds scoring.
+  if that rescues the page the `RunPage` is `DONE` with `error` null, and if both attempts
+  fail it's `FAILED` with ONE short line in `error` built from `CaptureHealth.summary`
+  (e.g. « Bloqué : HTTP 403 sur le document ») — the long `reason` goes to the server log
+  (`console.warn`), never to the UI. Only the healthy bundle (if any) feeds scoring.
 - **No more POC-mode controls** (resolved 2026-07 — see `../CLAUDE.md` topics 7/8/9 for the
   criteria these back):
   - **Registrable domain** (`topics/util.ts:registrableDomain`) uses `tldts` (Public Suffix

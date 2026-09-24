@@ -194,7 +194,7 @@
         </td>
         <td>
           <% if (d) { %><span class="badge v-<%= d.seo %>"><%= d.seo === 'UNKNOWN' ? 'à confirmer' : d.seo %></span>
-             <% if (d.dynamicRendering) { %><span class="badge b-diag" title="<%= d.dynamicRenderingEvidence || '' %>">dyn. rendering</span><% } %>
+             <% if (d.dynamicRendering) { %><div class="diag-dyn"><span class="badge b-diag" title="<%= d.dynamicRenderingEvidence || '' %>">dyn.<br>rendering</span></div><% } %>
           <% } else { %><span class="muted">&middot;</span><% } %>
         </td>
         <%# One cell per population, same two lines in both. %>
@@ -215,7 +215,7 @@
               </div>
               <div class="nowrap diag-conditions">
                 <span class="<%= anchorOk(m) ? 'ok' : 'ko' %>" title="<%= anchorHint(m) %>">titre / H1</span>
-                <span class="muted">&mdash;</span>
+                <br>
                 <span class="<%= m.imageCount > 0 ? 'ok' : 'ko' %>" title="<%= imagesHint(m) %>"><%= m.imageCount %> image<%= m.imageCount > 1 ? 's' : '' %> sans JS</span>
                 <%# Every value above carries its own tooltip; this mark is what tells
                     the reader they exist, and holds the full evidence sentence. %>

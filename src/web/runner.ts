@@ -183,9 +183,17 @@ type CaptureAttempt =
   | {
       ok: false;
       reason: string;
+      /** One short line for the UI; `reason` keeps the full diagnosis for the server log. */
+      summary: string;
       bundle: EvidenceBundle | null;
       kind: CaptureFailureKind;
     };
+
+/** First line of a thrown error, trimmed — a stack trace has no place in the UI. */
+function shortError(err: unknown): string {
+  const line = (err instanceof Error ? err.message : String(err)).split("\n")[0].trim();
+  return line.length > 120 ? `${line.slice(0, 117)}…` : line;
+}
 
 /** One capture + health-check attempt, at one stealth level. Never throws. */
 async function tryCapture(
@@ -210,13 +218,20 @@ async function tryCapture(
     });
   } catch (err) {
     // A throw is a technical failure (launch/navigation/timeout), never a WAF verdict.
-    return { ok: false, reason: String(err).slice(0, 500), bundle: null, kind: "unusable" };
+    return {
+      ok: false,
+      reason: String(err).slice(0, 500),
+      summary: shortError(err),
+      bundle: null,
+      kind: "unusable",
+    };
   }
   const health = assessCaptureHealth(bundle);
   if (!health.ok) {
     return {
       ok: false,
       reason: health.reason ?? "Capture rejected",
+      summary: health.summary ?? "capture rejetée",
       bundle,
       kind: health.kind ?? "unusable",
     };
@@ -596,19 +611,19 @@ async function executeRun(
       captureProfile,
     );
     let mode: CaptureMode = "standard";
-    let firstFailure: string | null = null;
+    let firstSummary: string | null = null;
+    let noRetry = false;
 
     if (!attempt.ok) {
-      firstFailure = `[standard] ${attempt.reason}`;
+      firstSummary = attempt.summary;
+      console.warn(`[run ${runId}] ${rp.url} [standard] ${attempt.reason}`);
       const origin = originOf(rp.url);
       const spent = blocksByOrigin.get(origin) ?? 0;
 
       if (attempt.kind === "blocked" && spent >= ORIGIN_BLOCK_BUDGET) {
-        firstFailure +=
-          ` | [no retry] the escalated attempt was itself blocked on ${spent} page(s) of ` +
-          `${origin} in this run — this WAF has made up its mind about the client, and ` +
-          `another headed session would only harden it further. Recapture the brand later, ` +
-          `from another exit IP or with an already-warm profile.`;
+        // The WAF has made up its mind about this client: another headed session
+        // would only harden it. Recapture the brand later, from another exit IP.
+        noRetry = true;
       } else {
         // Coming straight back after a block just hands the WAF another data point.
         if (attempt.kind === "blocked") await sleep(BLOCK_COOLDOWN_MS);
@@ -631,9 +646,17 @@ async function executeRun(
 
     if (!bundle) {
       const failed = attempt as Extract<CaptureAttempt, { ok: false }>;
+      if (mode === "escalated") {
+        console.warn(`[run ${runId}] ${rp.url} [escalated] ${failed.reason}`);
+      }
+      // One short line: the full diagnosis is in the server log.
+      const label = failed.kind === "blocked" ? "Bloqué" : "Échec";
+      const detail =
+        mode === "escalated" && failed.summary !== firstSummary
+          ? `${firstSummary}, puis ${failed.summary} au retry`
+          : failed.summary;
       const pageError =
-        `Capture failed [${browser}/${failed.kind}] ${firstFailure}` +
-        (mode === "escalated" ? ` | [escalated] ${failed.reason}` : "");
+        `${label} : ${detail}` + (noRetry ? " (pas de retry, origine déjà bloquée)" : "");
       await prisma.runPage.update({
         where: { id: rp.id },
         data: {
@@ -647,13 +670,6 @@ async function executeRun(
       return;
     }
 
-    const rescueNote =
-      mode === "escalated"
-        ? `Rescued by the escalated retry (headed + humanize/careful + warm per-origin ` +
-          `profile) after ${firstFailure}. That profile may already carry the site's ` +
-          `consent cookie, so consent-gated third parties can load without the banner ` +
-          `being clicked — Third parties evidence is weaker here than on a standard capture.`
-        : null;
 
     if (isDiag) {
       // No scoring: run the verdict engine and persist PageDiagnostic straight
@@ -669,7 +685,7 @@ async function executeRun(
         where: { id: rp.id },
         data: {
           status: "DONE",
-          error: rescueNote?.slice(0, 2000) ?? null,
+          error: null,
           evidenceJson: slimEvidence(bundle, isDiag),
           diagJson: diagnostic as unknown as object,
         },
@@ -693,7 +709,7 @@ async function executeRun(
         mode: scoringMode,
         // Only an escalated capture has a story to tell: it says WHY the standard
         // attempt failed, and warns that a warm profile weakens Topic 4 evidence.
-        error: rescueNote?.slice(0, 2000) ?? null,
+        error: null,
         evidenceJson: slimEvidence(bundle, isDiag),
         overall: pageResult.overall,
         geo: pageResult.geo,

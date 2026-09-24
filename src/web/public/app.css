@@ -273,6 +273,9 @@ th a.page-head:hover { text-decoration: underline; }
 
 /* ── Prospect diagnostic — run views (GO/NOGO/à confirmer verdicts) ────────── */
 .b-diag { background: #e1f0ff; color: #0d47a1; }
+/* Under the SEO verdict, one word per line: keeps the column narrow. */
+.diag-dyn { margin-top: .25rem; }
+.diag-dyn .badge { text-align: center; line-height: 1.25; }
 .b-diag-divergent { background: #fff3e0; color: #a15c00; }
 .v-GO { background: #c8e6c9; color: #1b5e20; }
 .v-NOGO { background: #ffcdd2; color: #c62828; }
