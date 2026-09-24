@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { prisma } from "../db";
-import { activeRun, enrichRunAudience, resumeRun, recaptureSite } from "../runner";
+import { activeRun, enrichRunAudience, enrichRunTechno, resumeRun, recaptureSite } from "../runner";
 import { parseClientId, listClients } from "../clients";
 import { renderCsv } from "../../engine/report";
 import {
@@ -292,6 +292,18 @@ export async function runRoutes(app: FastifyInstance) {
       : res.warning
         ? `Audience calculée sur ${res.pages} page(s), sans le rang (voir l'avertissement).`
         : `Audience calculée sur ${res.pages} page(s).`;
+    return reply.redirect(`/runs/${id}?flash=${encodeURIComponent(msg)}`);
+  });
+
+  // Diag: compute the web-application + CDN/WAF lines of the Techno column on a
+  // finished run from its stored evidence. See runner.enrichRunTechno.
+  app.post("/runs/:id/techno", async (req, reply) => {
+    const id = Number((req.params as any).id);
+    const res = await enrichRunTechno(id);
+    const msg = !res.ok
+      ? res.reason
+      : `Analyse technique (app web, CDN/WAF) faite sur ${res.pages} page(s)` +
+        (res.skipped ? `, ${res.skipped} sans evidence stockée ignorée(s).` : ".");
     return reply.redirect(`/runs/${id}?flash=${encodeURIComponent(msg)}`);
   });
 

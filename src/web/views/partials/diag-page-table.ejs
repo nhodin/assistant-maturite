@@ -111,7 +111,7 @@
       <th title="Le même HTML redemandé avec un user-agent Googlebot, jugé sur les mêmes conditions">Contenu Googlebot</th>
       <%# Navigation and stack are one fact about the same thing — how the site is
           built — and neither enters the verdict, so they share a column. %>
-      <th title="Navigation (MPA/SPA) et framework détecté — informatifs, n'entrent pas dans le verdict">Techno</th>
+      <th title="Navigation MPA/SPA (framework), application web / e-commerce, CDN/WAF — informatifs, n'entrent pas dans le verdict">Techno</th>
       <%# Pinned to the right edge (position: sticky) so it stays on screen when the
           table scrolls horizontally — a plain trailing column sat past the edge and
           was never seen. %>
@@ -226,15 +226,28 @@
         <% }) %>
         <td class="diag-techno">
           <% if (d) { %>
-            <div>
+            <%# Three lines: MPA/SPA (framework) · web application · CDN/WAF. An
+                absent platforms/edge field means the capture predates the probe
+                ("non relevé"), an empty one that nothing was recognised. %>
+            <div class="nowrap">
               <% if (d.navigation) { %>
                 <span class="badge" title="<%= d.navigation.kind === 'spa' ? 'SPA — routing client-side' : d.navigation.kind === 'mpa' ? 'MPA — rechargement complet du document' : 'navigation indéterminée' %><%= d.navigation.note ? ' : ' + d.navigation.note : (d.navigation.landedUrl ? ' (→ ' + d.navigation.landedUrl + ')' : '') %>"><%= d.navigation.kind === 'unknown' ? '?' : d.navigation.kind.toUpperCase() %></span>
               <% } else { %><span class="muted">&middot;</span><% } %>
-            </div>
-            <div class="nowrap">
               <% if (d.stack && d.stack.frameworks && d.stack.frameworks.length) { %>
-                <span class="muted" title="<%= (d.stack.signals || []).join(' · ') %>"><%= d.stack.frameworks.join(' + ') %></span>
-              <% } else { %><span class="muted">aucun framework</span><% } %>
+                <span class="muted" title="<%= (d.stack.signals || []).join(' · ') %>">(<%= d.stack.frameworks.join(' + ') %>)</span>
+              <% } else { %><span class="muted">(aucun framework)</span><% } %>
+            </div>
+            <div class="nowrap" title="Application web / e-commerce<%= d.stack && d.stack.platformSignals && d.stack.platformSignals.length ? ' — ' + d.stack.platformSignals.join(' · ') : '' %>">
+              <% if (d.stack && d.stack.platforms && d.stack.platforms.length) { %>
+                <%= d.stack.platforms.join(' + ') %>
+              <% } else if (d.stack && d.stack.platforms) { %><span class="muted">app non identifiée</span>
+              <% } else { %><span class="muted">app non relevée</span><% } %>
+            </div>
+            <div class="nowrap" title="CDN / WAF<%= d.stack && d.stack.edgeSignals && d.stack.edgeSignals.length ? ' — ' + d.stack.edgeSignals.join(' · ') : '' %>">
+              <% if (d.stack && d.stack.edge && d.stack.edge.length) { %>
+                <span class="muted"><%= d.stack.edge.join(' + ') %></span>
+              <% } else if (d.stack && d.stack.edge) { %><span class="muted">aucun CDN/WAF identifié</span>
+              <% } else { %><span class="muted">CDN/WAF non relevé</span><% } %>
             </div>
           <% } else { %><span class="muted">&middot;</span><% } %>
         </td>

@@ -28,6 +28,8 @@ import { applyThrottling, captureThrottlingFromEnv } from "./throttling";
 import { waitForChallengeToSettle, isChallengeHtml } from "./challenge";
 import { fetchBotHtml, rescueBotFetch } from "./bot-fetch";
 import { detectStack } from "./stack-probe";
+import { detectPlatform, PLATFORM_WINDOW_GLOBALS } from "./platform-probe";
+import { host, registrableDomain } from "../topics/util";
 import { probeNavigation } from "./nav-probe";
 
 export { assessCaptureHealth, type CaptureHealth } from "./sanity";
@@ -1346,8 +1348,9 @@ export const collect: CollectFn = async (
       let windowGlobalNames: string[] = [];
       let serviceWorkerRegistered: boolean | undefined;
       try {
-        const probed = await page.evaluate(async () => {
+        const probed = await page.evaluate(async (platformGlobals: string[]) => {
           const candidates = [
+            ...platformGlobals,
             "__NEXT_DATA__",
             "__NUXT__",
             "__sveltekit",
@@ -1392,7 +1395,7 @@ export const collect: CollectFn = async (
             // ignore — leave sw undefined (unmeasured, not false)
           }
           return { names, sw };
-        });
+        }, PLATFORM_WINDOW_GLOBALS);
         windowGlobalNames = probed.names;
         serviceWorkerRegistered = probed.sw;
       } catch {
@@ -1400,6 +1403,27 @@ export const collect: CollectFn = async (
       }
       const requestUrls = requests.map((r) => r.url);
       stackProbe = detectStack(renderedHtml, requestUrls, windowGlobalNames, serviceWorkerRegistered);
+      // Web application + CDN/WAF. Cookies are filtered to the page's own
+      // registrable domain: a vendor's bot cookie set on ITS domain says nothing
+      // about what protects this site.
+      let cookieNames: string[] = [];
+      try {
+        const pageSite = registrableDomain(host(finalUrl));
+        cookieNames = (await context.cookies())
+          .filter((c) => registrableDomain(c.domain.replace(/^./, "")) === pageSite)
+          .map((c) => c.name);
+      } catch {
+        // Best effort — headers and URLs still carry most signals.
+      }
+      const platformProbe = detectPlatform({
+        pageUrl: finalUrl,
+        renderedHtml,
+        requestUrls,
+        headers: mainResponseHeaders,
+        cookieNames,
+        windowGlobals: windowGlobalNames,
+      });
+      stackProbe = { ...stackProbe, ...platformProbe };
     }
 
     // Navigation probe (MPA vs SPA): MUST run LAST — it clicks a link and can

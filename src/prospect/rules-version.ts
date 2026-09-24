@@ -29,6 +29,7 @@ const RULE_MODULES = [
   "collector/challenge.ts",
   "collector/bot-fetch.ts",
   "collector/stack-probe.ts",
+  "collector/platform-probe.ts",
   "collector/nav-probe.ts",
 ];
 

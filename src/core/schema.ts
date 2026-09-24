@@ -215,6 +215,16 @@ export const StackProbeSchema = z.object({
   signals: z.array(z.string()),
   /** A service worker is registered on the page (possible conflict at the edge). */
   serviceWorker: z.boolean().optional(),
+  /**
+   * Web application serving the page (e-commerce platform / CMS), e.g.
+   * ["Salesforce Commerce Cloud"] — see collector/platform-probe.ts. Optional:
+   * absent on evidence captured before that probe existed (unmeasured, not "none").
+   */
+  platforms: z.array(z.string()).optional(),
+  platformSignals: z.array(z.string()).optional(),
+  /** CDN / WAF in front of the page, e.g. ["Akamai Bot Manager", "Akamai"]. Same backcompat rule. */
+  edge: z.array(z.string()).optional(),
+  edgeSignals: z.array(z.string()).optional(),
 });
 
 /** MPA vs SPA, decided by clicking an internal link. Informational. */

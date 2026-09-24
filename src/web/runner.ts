@@ -42,6 +42,7 @@ import { fetchOriginCwv, type CwvSummary } from "../prospect/cwv";
 import { AUDIENCE_COUNTRY, fetchOriginAudience, withRankFailure, withRanks, type AudienceSummary } from "../prospect/audience";
 import { cruxBqConfig, fetchCruxRanks, isRankFailure, rankFailureWarning, type CruxRankResult } from "../collector/crux-rank";
 import type { PageDiagnostic } from "../prospect";
+import { detectPlatform, fetchSetCookieNames } from "../collector/platform-probe";
 
 /**
  * How a page is graded, from its inventory kind. A CHINA page is scored on the
@@ -141,6 +142,60 @@ export async function enrichRunAudience(
   const warning = await attachCruxRanks(runId);
   await prisma.run.update({ where: { id: runId }, data: { warning } });
   return { ok: true, pages: enriched, warning };
+}
+
+/**
+ * Compute (or refresh) the web-application + CDN/WAF fields of an EXISTING diag
+ * run without recapturing: the stored diag evidence keeps the document headers,
+ * every request URL and a rendered-HTML excerpt, which carry most signatures.
+ * Cookies are not stored, so one lightweight GET per origin supplies the
+ * first-party `Set-Cookie` names (bot-manager and platform session cookies).
+ * Only `diagJson.stack` is touched — the verdict is informational-free.
+ */
+export async function enrichRunTechno(
+  runId: number,
+): Promise<{ ok: true; pages: number; skipped: number } | { ok: false; reason: string }> {
+  if (activeRunId === runId) return { ok: false, reason: "Ce run est en cours : l'analyse technique est faite pendant la capture." };
+  const run = await prisma.run.findUnique({ where: { id: runId }, select: { kind: true } });
+  if (!run) return { ok: false, reason: "Run introuvable." };
+  if (run.kind !== "diag") return { ok: false, reason: "L'analyse technique ne concerne que les runs de diagnostic." };
+
+  const pages = await prisma.runPage.findMany({
+    where: { runId, status: "DONE" },
+    select: { id: true, url: true, diagJson: true, evidenceJson: true },
+  });
+  const cookiesByOrigin = new Map<string, Promise<string[]>>();
+  let enriched = 0;
+  let skipped = 0;
+  for (const p of pages) {
+    const diag = p.diagJson as unknown as PageDiagnostic | null;
+    const ev = p.evidenceJson as unknown as Partial<EvidenceBundle> | null;
+    if (!diag || !ev) {
+      skipped++;
+      continue;
+    }
+    const pageUrl = ev.finalUrl || p.url;
+    const key = originOf(pageUrl);
+    let pending = cookiesByOrigin.get(key);
+    if (!pending) {
+      pending = fetchSetCookieNames(pageUrl);
+      cookiesByOrigin.set(key, pending);
+    }
+    const probe = detectPlatform({
+      pageUrl,
+      renderedHtml: ev.renderedHtml || ev.rawHtml || "",
+      requestUrls: (ev.requests ?? []).map((r) => r.url),
+      headers: ev.mainResponseHeaders ?? {},
+      cookieNames: await pending,
+    });
+    const stack = { ...(diag.stack ?? { frameworks: [], signals: [] }), ...probe };
+    await prisma.runPage.update({
+      where: { id: p.id },
+      data: { diagJson: { ...diag, stack } as unknown as object },
+    });
+    enriched++;
+  }
+  return { ok: true, pages: enriched, skipped };
 }
 
 /** Scheme + host + port — the unit a WAF rate-limits on, and so the unit we bucket by. */

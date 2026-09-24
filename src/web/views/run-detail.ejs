@@ -28,6 +28,11 @@
     <form method="post" action="/runs/<%= run.id %>/audience">
       <button class="btn" type="submit" title="Calcule (ou rafraîchit) la colonne Audience — rang CrUX FR/monde et part mobile — sans recapturer les pages">📊 Calculer l'audience</button>
     </form>
+    <%# Same idea for the Techno column: app web + CDN/WAF from the stored
+        evidence, plus one light GET per origin for the cookies. %>
+    <form method="post" action="/runs/<%= run.id %>/techno">
+      <button class="btn" type="submit" title="Identifie (ou rafraîchit) l'application web / e-commerce et le CDN/WAF depuis l'evidence stockée, sans recapturer les pages">🧩 Analyse technique</button>
+    </form>
   <% } %>
 </div>
 <% if (flash) { %><div class="empty err"><%= flash %></div><% } %>

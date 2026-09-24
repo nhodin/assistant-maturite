@@ -71,6 +71,16 @@
             <li>Stack JS : <%= d.stack.frameworks && d.stack.frameworks.length ? d.stack.frameworks.join(', ') : 'aucune détectée' %>
               <% if (d.stack.serviceWorker) { %> · service worker enregistré<% } %>
             </li>
+            <% if (d.stack.platforms) { %>
+              <li>App web : <%= d.stack.platforms.length ? d.stack.platforms.join(', ') : 'non identifiée' %>
+                <% if (d.stack.platformSignals && d.stack.platformSignals.length) { %><br><span class="muted small"><%= d.stack.platformSignals.join(' · ') %></span><% } %>
+              </li>
+            <% } %>
+            <% if (d.stack.edge) { %>
+              <li>CDN/WAF : <%= d.stack.edge.length ? d.stack.edge.join(', ') : 'aucun identifié' %>
+                <% if (d.stack.edgeSignals && d.stack.edgeSignals.length) { %><br><span class="muted small"><%= d.stack.edgeSignals.join(' · ') %></span><% } %>
+              </li>
+            <% } %>
           <% } %>
           <% if (d.navigation) { %>
             <li>Navigation : <%= d.navigation.kind === 'spa' ? 'SPA (routing client-side)' : d.navigation.kind === 'mpa' ? 'MPA (rechargement complet)' : 'indéterminé' %>
