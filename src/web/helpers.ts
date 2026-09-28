@@ -4,6 +4,7 @@ import { SSR_MIN_WORDS } from "../prospect/detect";
 import { CWV_THRESHOLDS, cwvRating } from "../prospect/cwv";
 import { AUDIENCE_TIERS, audienceTier, monthLabel, rankLabel } from "../prospect/audience";
 import { representativePages } from "./site-representative";
+import { discoveryStartUrl, isHomeLikeUrl } from "../discovery/rank";
 
 /** CSS class bucket for a 0–100 score (or null/N-A). */
 export function scoreClass(score: number | null | undefined): string {
@@ -45,6 +46,9 @@ export const viewHelpers = {
   monthLabel,
   // Diag table: Audience and app web / CDN-WAF are shown once per site.
   representativePages,
+  // Diag URL paste preview: which URL is a home, and where a PDP/PLP search starts.
+  isHomeLikeUrl,
+  discoveryStartUrl,
   categoryLabel,
   CATEGORY_LABELS,
   CATEGORIES,

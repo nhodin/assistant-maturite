@@ -18,8 +18,10 @@ import { projectRoutes } from "./routes/projects";
 import { runRoutes } from "./routes/runs";
 import { settingsRoutes } from "./routes/settings";
 import { diagnosticsRoutes } from "./routes/diagnostics";
+import { discoveryRoutes } from "./routes/discovery";
 import { startScheduler } from "./monitor";
 import { recoverStaleRuns } from "./runner";
+import { recoverStaleDiscoveries } from "./discovery-runner";
 import { startCloakWarmUp } from "../collector/cloak-binary";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -46,6 +48,7 @@ async function main() {
   await app.register(runRoutes);
   await app.register(settingsRoutes);
   await app.register(diagnosticsRoutes);
+  await app.register(discoveryRoutes);
 
   // A run only exists inside a server process, so anything still RUNNING in the
   // DB at boot died with the previous one. Mark it as such before serving, so the
@@ -53,6 +56,11 @@ async function main() {
   const recovered = await recoverStaleRuns();
   if (recovered > 0) {
     console.log(`  ${recovered} run(s) interrompu(s) récupéré(s) — reprise possible depuis /runs`);
+  }
+  // Same for a PDP/PLP search: it lived in the previous process.
+  const staleSearches = await recoverStaleDiscoveries();
+  if (staleSearches > 0) {
+    console.log(`  ${staleSearches} recherche(s) de PDP/PLP interrompue(s) — à relancer depuis le projet`);
   }
 
   // Download the stealth Chromium once, here, rather than letting N parallel

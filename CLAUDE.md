@@ -32,6 +32,10 @@ src/
   topics/      # One module per topic (01..12). Each Control is a PURE function of an
                # EvidenceBundle → { passed, evidence }. util.ts = shared helpers.
   engine/      # Loads config, runs controls, aggregates per-site, exports MD/CSV.
+  discovery/   # Diag projects: finds ONE PDP (+ optional PLP) per site from its home —
+               # home links, sitemaps, listings opened; each candidate OPENED and confirmed
+               # by its own markup. HTTP first, CloakBrowser for the rest of the site once
+               # refused. No DB (web/discovery-runner.ts persists PageCandidate rows).
   cli/         # index.ts = full audit over data/WEBSITES.csv; collect.ts = debug one URL;
                # rescore.ts = re-score saved evidence without re-capturing.
   web/         # Fastify app: server.ts, routes/*, views/* (EJS), public/app.css,
@@ -562,7 +566,8 @@ kiabi.com. **Restart `npm run web` after changing detection code.**
 China page) · `Project → ProjectPage` (page selection;
 Project has `mode` STANDARD/MONITORING + monitor frequency/next-due) · `Run → RunPage`
 (per-page capture + slim evidence; Run has `source` manual/scheduled) + `RunSiteScore`
-(aggregated per-site, ranked) · `CruxSnapshot` (per-project CrUX p75 samples, scope
+(aggregated per-site, ranked) · `PageCandidate` (diag projects: a PDP/PLP proposed per
+site, SEARCHING → PROPOSED/NOT_FOUND → ACCEPTED/REJECTED; only ACCEPTED becomes a page) · `CruxSnapshot` (per-project CrUX p75 samples, scope
 ORIGIN or PAGE) · `ControlConfig` (enable/points/naForced, edited in Settings).
 Categories: Beauty, Fragrances, WatchesJewelry, WineSpirits, SR, Other.
 
@@ -577,6 +582,8 @@ npm run db:push                           # create/sync MySQL tables (+ prisma g
 npm run db:seed-inventory                 # optional: seed sites/pages from data/WEBSITES.csv
 # 1 site + 1 HP page per domain of a CSV column, all added to a project (idempotent)
 npm run db:seed-domains -- --client Fasterize --project "Tests prods" --csv data/sites-prod-fasterize.csv
+# PLP/PDP review CSV for a project's sites (same engine as the diag « Pages à valider » block)
+npm run discover:pages -- --project "Tests prods" [--no-browser]
 
 # Web app (UI + persistence)
 npm run web                               # → http://localhost:5173
@@ -584,7 +591,7 @@ npm run db:studio                         # Prisma Studio (inspect DB)
 
 # Quality
 npm run typecheck                         # tsc --noEmit
-npm test                                  # vitest (905 tests)
+npm test                                  # vitest (947 tests)
 
 # CLI (no DB, writes out/ reports)
 npm run audit -- --browser cloak          # full audit over data/WEBSITES.csv

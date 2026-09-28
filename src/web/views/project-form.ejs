@@ -55,6 +55,27 @@
     Ajouter aussi la home de chaque domaine (si elle n'y est pas déjà)
   </label>
 
+  <fieldset class="discover-pick">
+    <legend>Pages à trouver automatiquement, pour chaque site</legend>
+    <label class="chk">
+      <input type="checkbox" name="discoverPdp" checked
+        hx-post="/projects/diag/preview" hx-trigger="change"
+        hx-target="#url-paste-preview" hx-include="closest form">
+      Une <strong>PDP</strong> (fiche produit)
+    </label>
+    <label class="chk">
+      <input type="checkbox" name="discoverPlp"
+        hx-post="/projects/diag/preview" hx-trigger="change"
+        hx-target="#url-paste-preview" hx-include="closest form">
+      Une <strong>PLP</strong> (liste de produits)
+    </label>
+    <p class="muted small">
+      La recherche part de la home de chaque site et tourne en arrière-plan une fois le
+      projet créé. Les URLs trouvées sont <strong>proposées</strong> sur la page du projet :
+      rien n'est diagnostiqué avant votre validation.
+    </p>
+  </fieldset>
+
   <h3>Aperçu</h3>
   <div id="url-paste-preview">
     <div class="preview-box"><p class="muted">Collez des URLs ci-dessus pour voir l'aperçu.</p></div>

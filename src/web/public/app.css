@@ -381,3 +381,25 @@ th a.page-head:hover { text-decoration: underline; }
 .aud-high { color: var(--ok); font-weight: 700; cursor: help; }
 .aud-mid { color: var(--todo); font-weight: 700; cursor: help; }
 .aud-low { color: #9e9e9e; font-weight: 700; cursor: help; }
+
+/* PDP/PLP proposals of a diagnostic project (partials/page-candidates.ejs) */
+.spinner.xs { display: inline-block; width: 12px; height: 12px; border-width: 2px; vertical-align: -2px; }
+.cand-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+.cand-head p { margin: 0; }
+.cand-table { width: 100%; }
+.cand-table td { vertical-align: top; }
+.cand-state { white-space: nowrap; }
+.cand-main { width: 100%; }
+.cand-form { display: flex; align-items: center; gap: .35rem; flex-wrap: wrap; }
+.cand-form input[type=url] { flex: 1; min-width: 16rem; font-family: monospace; font-size: 12px; }
+.cand-alts { margin-top: .2rem; font-size: 12px; }
+.cand-alts ul { list-style: none; margin: .2rem 0; padding: 0; }
+.cand-alts li { display: flex; align-items: center; gap: .4rem; }
+.cand-alts .url { max-width: none; }
+form.inline { display: inline; }
+.discover-form { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; margin-top: .6rem; font-size: 13px; }
+.flash.small { font-size: 12px; }
+.discover-pick { border: 1px solid var(--line); border-radius: 8px; padding: .4rem .8rem; margin: .6rem 0; }
+.discover-pick legend { font-size: 13px; font-weight: 600; padding: 0 .3rem; }
+.discover-pick .chk { margin-right: 1.2rem; }
+.url-inline { overflow-wrap: anywhere; }

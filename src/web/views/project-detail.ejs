@@ -20,6 +20,18 @@
   <div class="flash <%= nAdded ? 'ok' : 'warn' %>"><%= nAdded ? nAdded + ' page' + (nAdded > 1 ? 's ajoutées' : ' ajoutée') + ' au projet.' : 'Aucune nouvelle page : toutes les URLs étaient déjà dans le projet.' %></div>
 <% } else if (flash === 'resumed') { %>
   <div class="flash ok">Suivi repris : la collecte automatique reprend selon la fréquence configurée.</div>
+<% } else if (typeof flash === 'string' && /^discovery_started_\d+$/.test(flash)) { var nSearch = Number(flash.slice(18)); %>
+  <div class="flash ok">Recherche lancée sur <%= nSearch %> site<%= nSearch > 1 ? 's' : '' %> : les propositions apparaissent ci-dessous au fil de l'eau.</div>
+<% } else if (flash === 'discovery_none') { %>
+  <div class="flash warn">Rien à rechercher : chaque site a déjà cette page, validée ou en cours de recherche.</div>
+<% } else if (flash === 'discovery_nokind') { %>
+  <div class="flash warn">Cochez PDP et/ou PLP pour lancer une recherche.</div>
+<% } else if (flash === 'candidate_accepted') { %>
+  <div class="flash ok">Page validée et ajoutée au projet.</div>
+<% } else if (typeof flash === 'string' && /^candidates_accepted_\d+$/.test(flash)) { var nAcc = Number(flash.slice(20)); %>
+  <div class="flash ok"><%= nAcc %> page<%= nAcc > 1 ? 's validées et ajoutées' : ' validée et ajoutée' %> au projet.</div>
+<% } else if (typeof flash === 'string' && flash.indexOf('candidate_error:') === 0) { %>
+  <div class="flash warn"><%= flash.slice(16) %></div>
 <% } %>
 
 <%
@@ -219,10 +231,32 @@
 </section>
 <% } %>
 
+<% if (isDiagProject) { var cands = (typeof candidates !== 'undefined' && candidates) ? candidates : []; %>
+<section id="candidates">
+  <h2>Pages à valider <span class="muted small">— une PDP (et une PLP) par site, trouvées à partir de la home</span></h2>
+  <%- include('partials/page-candidates', { project: project, candidates: cands }) %>
+  <form method="post" action="/projects/<%= project.id %>/discover" class="discover-form">
+    <span>🔎 Rechercher pour les sites qui n'en ont pas encore :</span>
+    <label class="chk"><input type="checkbox" name="discoverPdp" checked> PDP</label>
+    <label class="chk"><input type="checkbox" name="discoverPlp"> PLP</label>
+    <button type="submit" class="btn sm">Lancer la recherche</button>
+  </form>
+  <p class="muted small">Une proposition n'est diagnostiquée qu'une fois <strong>validée</strong>.
+    « Confirmée » : la page a été ouverte et se déclare comme telle (produit balisé, ou liste de produits).
+    « Probable » : elle n'a pas pu être vérifiée — ouvrez-la avant de valider. « Introuvable » : collez l'URL vous-même, ou ignorez.</p>
+</section>
+<% } %>
+
 <div class="two-col">
   <section>
     <h2>Lancer un run</h2>
-    <form method="post" action="/projects/<%= project.id %>/run" class="run-form">
+    <% var pendingCands = (isDiagProject && typeof candidatesPending === 'number') ? candidatesPending : 0; %>
+    <% if (pendingCands) { %>
+      <div class="flash warn small">⚠ <%= pendingCands %> proposition<%= pendingCands > 1 ? 's' : '' %> de page non traitée<%= pendingCands > 1 ? 's' : '' %>
+        (<a href="#candidates">à valider ou ignorer</a>) : tant qu'elles ne sont pas validées, ces pages ne seront pas diagnostiquées.</div>
+    <% } %>
+    <form method="post" action="/projects/<%= project.id %>/run" class="run-form"<% if (pendingCands) { %>
+      onsubmit="return confirm('<%= pendingCands %> proposition(s) de page non traitée(s) : elles ne seront pas diagnostiquées. Lancer quand même ?')"<% } %>>
       <label>Navigateur
         <select name="browser">
           <option value="cloak">CloakBrowser (anti-bot, recommandé)</option>

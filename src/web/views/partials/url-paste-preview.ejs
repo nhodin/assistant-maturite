@@ -1,6 +1,12 @@
 <%
   var r = (typeof result !== 'undefined' && result) ? result : { sites: [], rejected: [], duplicates: [], counts: { urls: 0, sites: 0, rejected: 0, duplicates: 0 } };
   var dups = r.duplicates || [];
+  // PDP/PLP search asked for on the creation form (empty elsewhere).
+  var kinds = (typeof discoveryKinds !== 'undefined' && discoveryKinds) ? discoveryKinds : [];
+  // Helpers reach EJS through viewHelpers, loaded at boot while views reload per
+  // request: a server started before they existed must still render the preview.
+  var startOf = typeof discoveryStartUrl === 'function' ? discoveryStartUrl : function(){ return null; };
+  var isHome = typeof isHomeLikeUrl === 'function' ? isHomeLikeUrl : function(){ return false; };
 %>
 <div class="preview-box">
   <p class="preview-summary">
@@ -15,10 +21,13 @@
         <li>
           <strong><%= s.site %></strong>
           <span class="muted">— <%= s.pages.length %> page<%= s.pages.length > 1 ? 's' : '' %></span>
+          <% var start = kinds.length ? startOf(s.pages) : null; if (start) { %>
+            <div class="muted small">+ <%= kinds.join(' + ') %> à rechercher depuis <span class="url-inline"><%= start %></span></div>
+          <% } %>
           <details>
             <summary>voir les URLs</summary>
             <ul class="preview-urls">
-              <% s.pages.forEach(function(u){ %><li class="url"><%= u %></li><% }) %>
+              <% s.pages.forEach(function(u){ %><li class="url"><% if (isHome(u)) { %><span class="badge">HP</span> <% } %><%= u %></li><% }) %>
             </ul>
           </details>
         </li>

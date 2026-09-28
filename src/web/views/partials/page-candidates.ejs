@@ -1,0 +1,93 @@
+<%#
+  PDP/PLP proposals of a diagnostic project (docs/DIAGNOSTIC.md, « Découverte des
+  PDP / PLP »). Polled by HTMX while a search runs; every action is a plain form
+  post answered by a redirect, since accepting changes the page list too.
+  The URL inputs carry hx-preserve so a poll never wipes what the operator typed.
+%>
+<%
+  var cands = (typeof candidates !== 'undefined' && candidates) ? candidates : [];
+  var searching = cands.filter(function(c){ return c.status === 'SEARCHING'; }).length;
+  var toSettle = cands.filter(function(c){ return c.status === 'PROPOSED' || c.status === 'NOT_FOUND'; }).length;
+  var confirmed = cands.filter(function(c){ return c.status === 'PROPOSED' && c.confidence === 'confirmed'; }).length;
+  var accepted = cands.filter(function(c){ return c.status === 'ACCEPTED'; }).length;
+  function alts(c){ return Array.isArray(c.alternatives) ? c.alternatives : []; }
+  function kindLabel(k){ return k === 'PLP' ? 'la PLP' : 'la PDP'; }
+  var base = '/projects/' + project.id + '/candidates/';
+  var prevSite = null;
+%>
+<div id="page-candidates"<% if (searching) { %> hx-get="/projects/<%= project.id %>/candidates" hx-trigger="load delay:3s" hx-swap="outerHTML"<% } %>>
+<% if (!cands.length) { %>
+  <p class="muted small">Aucune recherche de PDP/PLP pour ce projet.</p>
+<% } else { %>
+  <div class="cand-head">
+    <p class="muted small">
+      <% if (searching) { %><span class="spinner xs"></span> <strong><%= searching %></strong> recherche<%= searching > 1 ? 's' : '' %> en cours · <% } %>
+      <strong><%= toSettle %></strong> à traiter · <strong><%= accepted %></strong> validée<%= accepted > 1 ? 's' : '' %>
+    </p>
+    <% if (confirmed) { %>
+      <form method="post" action="<%= base %>accept-confirmed">
+        <button type="submit" class="btn sm btn-primary">✓ Valider les <%= confirmed %> confirmée<%= confirmed > 1 ? 's' : '' %></button>
+      </form>
+    <% } %>
+  </div>
+  <table class="grid small cand-table">
+    <thead><tr><th>Site</th><th>Type</th><th>État</th><th>URL</th></tr></thead>
+    <tbody>
+    <% cands.forEach(function(c){ var first = c.siteId !== prevSite; prevSite = c.siteId; var a = alts(c); %>
+      <tr class="<%= first ? 'site-start' : 'site-cont' %>">
+        <td><% if (first) { %><strong><%= c.site.name %></strong><% } %></td>
+        <td><span class="badge"><%= c.kind %></span></td>
+        <td class="cand-state">
+          <% if (c.status === 'SEARCHING') { %><span class="spinner xs"></span> recherche…
+          <% } else if (c.status === 'PROPOSED' && c.confidence === 'confirmed') { %><span class="badge v-GO" title="La page a été ouverte et se déclare comme telle">✓ confirmée</span>
+          <% } else if (c.status === 'PROPOSED') { %><span class="badge v-UNKNOWN" title="Pas pu être vérifiée : regardez-la avant de valider">~ probable</span>
+          <% } else if (c.status === 'NOT_FOUND') { %><span class="badge v-NOGO">introuvable</span>
+          <% } else if (c.status === 'ACCEPTED') { %><span class="badge b-DONE">validée</span>
+          <% } else { %><span class="badge b-PENDING">ignorée</span><% } %>
+          <% if (c.via === 'browser') { %><div class="muted" title="HTTP refusé ou navigation en JS : la recherche est passée par le navigateur">🌐 navigateur</div><% } %>
+        </td>
+        <td class="cand-main">
+          <% if (c.status === 'SEARCHING') { %>
+            <span class="muted">depuis <%= c.startUrl %></span>
+          <% } else if (c.status === 'PROPOSED' || c.status === 'NOT_FOUND') { %>
+            <form method="post" action="<%= base + c.id %>/accept" class="cand-form">
+              <input type="url" name="url" id="cand-url-<%= c.id %>" hx-preserve="true"
+                value="<%= c.url || '' %>" required list="cand-alt-<%= c.id %>"
+                placeholder="Collez l'URL de <%= kindLabel(c.kind) %>">
+              <datalist id="cand-alt-<%= c.id %>"><% a.forEach(function(u){ %><option value="<%= u %>"><% }) %></datalist>
+              <% if (c.url) { %><a href="<%= c.url %>" target="_blank" rel="noopener noreferrer" title="Ouvrir dans un nouvel onglet">↗</a><% } %>
+              <button type="submit" class="btn sm btn-primary"><%= c.status === 'NOT_FOUND' ? '＋ Ajouter' : '✓ Valider' %></button>
+              <button type="submit" class="btn sm" formaction="<%= base + c.id %>/reject" formnovalidate title="Ne pas diagnostiquer de <%= c.kind %> pour ce site">✗ Ignorer</button>
+              <button type="submit" class="btn sm" formaction="<%= base + c.id %>/retry" formnovalidate title="Relancer la recherche pour ce site">↻</button>
+            </form>
+            <div class="ev muted"><% if (c.source) { %><%= c.source %> · <% } %><%= c.note || '' %></div>
+            <% if (a.length) { %>
+              <details class="cand-alts">
+                <summary><%= c.status === 'NOT_FOUND' ? 'Pistes écartées' : 'Autres pistes' %> (<%= a.length %>)</summary>
+                <ul>
+                  <% a.forEach(function(u){ %>
+                    <li>
+                      <button type="button" class="btn sm" data-url="<%= u %>"
+                        onclick="document.getElementById('cand-url-<%= c.id %>').value=this.dataset.url">utiliser</button>
+                      <a href="<%= u %>" target="_blank" rel="noopener noreferrer" class="url"><%= u %></a>
+                    </li>
+                  <% }) %>
+                </ul>
+              </details>
+            <% } %>
+          <% } else if (c.status === 'ACCEPTED') { %>
+            <a href="<%= c.url %>" target="_blank" rel="noopener noreferrer" class="url"><%= c.url %></a>
+            <% if (c.source) { %><span class="muted"> · <%= c.source %></span><% } %>
+          <% } else { %>
+            <span class="muted"><%= c.url || '—' %></span>
+            <form method="post" action="<%= base + c.id %>/retry" class="inline">
+              <button type="submit" class="btn sm" title="Relancer la recherche pour ce site">↻ Relancer</button>
+            </form>
+          <% } %>
+        </td>
+      </tr>
+    <% }) %>
+    </tbody>
+  </table>
+<% } %>
+</div>

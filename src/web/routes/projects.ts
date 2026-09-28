@@ -9,6 +9,8 @@ import { buildProjectTrend, type TrendRunInput, type TrendPageDef } from "../tre
 import { summarizeDiagRun, type DiagRunSummary } from "../diag-summary";
 import { buildCruxTrends, type CruxSnapshotInput } from "../crux-trend";
 import { findCanonicalMatch, parseUrlPaste } from "../url-paste";
+import { pastedPageKind, pendingCandidates, startDiscovery, type DiscoveryTarget } from "../discovery-runner";
+import { discoveryStartUrl, type DiscoveryKind } from "../../discovery";
 
 function parseMode(v: unknown): ProjectMode {
   return v === "MONITORING" ? "MONITORING" : "STANDARD";
@@ -16,16 +18,10 @@ function parseMode(v: unknown): ProjectMode {
 
 /**
  * Whether a project is a "diagnostic Speed/SEO" project (created by pasting a
- * URL list — see ../url-paste.ts and docs/DIAGNOSTIC.md) rather than a
- * maturity one. There is no dedicated Project field for this: a diagnostic
- * project's pages are ALWAYS created with kind OTHER (deliberately — the spec
- * says not to guess HP/PLP/PDP), so a project made ENTIRELY of OTHER pages is
- * read as a diagnostic one. Used only to decide a started Run's `kind`.
- */
-/**
- * A project is a prospect diagnostic when it SAYS so. Deliberately not inferred
- * from its pages: a maturity project whose pages are all kind OTHER would
- * otherwise run as a diagnostic and silently lose its scoring.
+ * URL list — see ../url-paste.ts and docs/DIAGNOSTIC.md) rather than a maturity
+ * one. A project is a prospect diagnostic when it SAYS so. Deliberately not
+ * inferred from its pages: a maturity project whose pages are all kind OTHER
+ * would otherwise run as a diagnostic and silently lose its scoring.
  */
 export function isDiagProject(project: { mode: string }): boolean {
   return project.mode === "DIAGNOSTIC";
@@ -40,18 +36,22 @@ function parseFormFactor(v: unknown): CruxFormFactor {
 }
 
 /**
- * Find-or-create the sites (category Other) and pages (kind OTHER — never
- * guessed as HP/PLP/PDP) of a parsed URL paste, under `clientId`. Idempotent:
- * existing site/page rows are reused, a page being matched on its CANONICAL URL
- * (see canonicalUrlKey) — `http://shop.fr/a/` reuses the stored
- * `https://shop.fr/a` rather than creating its twin. Returns the page ids in
- * paste order.
+ * Find-or-create the sites (category Other) and pages of a parsed URL paste, under
+ * `clientId`. A home (the root, or a locale root like `/fr-fr/`) is stored as
+ * HP; any other pasted URL as OTHER — a PDP or PLP is never guessed from its URL,
+ * it comes from a VALIDATED discovery candidate (../discovery-runner.ts).
+ * Idempotent: existing site/page rows are reused, a page being matched on its
+ * CANONICAL URL (see canonicalUrlKey) — `http://shop.fr/a/` reuses the stored
+ * `https://shop.fr/a` rather than creating its twin; a reused OTHER page that is a
+ * home is relabelled HP. Returns the page ids in paste order, and each site with
+ * its pasted URLs (where a PDP/PLP search starts from).
  */
 async function upsertDiagPages(
   result: ReturnType<typeof parseUrlPaste>,
   clientId: number | null,
-): Promise<number[]> {
+): Promise<{ pageIds: number[]; sites: Array<{ siteId: number; urls: string[] }> }> {
   const pageIds: number[] = [];
+  const sites: Array<{ siteId: number; urls: string[] }> = [];
   for (const s of result.sites) {
     let site = await prisma.site.findFirst({ where: { name: s.site, clientId } });
     if (!site) {
@@ -62,22 +62,48 @@ async function upsertDiagPages(
     // Oldest first: a site already holding two spellings resolves to the older row.
     const stored = await prisma.page.findMany({
       where: { siteId: site.id },
-      select: { id: true, url: true },
+      select: { id: true, url: true, kind: true },
       orderBy: { id: "asc" },
     });
     for (const url of s.pages) {
+      const kind = pastedPageKind(url);
       let page = findCanonicalMatch(stored, url);
       if (!page) {
         page = await prisma.page.create({
-          data: { siteId: site.id, url, kind: "OTHER" },
-          select: { id: true, url: true },
+          data: { siteId: site.id, url, kind },
+          select: { id: true, url: true, kind: true },
         });
         stored.push(page);
+      } else if (page.kind === "OTHER" && kind === "HP") {
+        await prisma.page.update({ where: { id: page.id }, data: { kind } });
+        page.kind = kind;
       }
       pageIds.push(page.id);
     }
+    sites.push({ siteId: site.id, urls: s.pages });
   }
-  return pageIds;
+  return { pageIds, sites };
+}
+
+/** The PDP/PLP searches a diagnostic form asks for (its two checkboxes). */
+export function discoveryKindsOf(b: Record<string, unknown> | undefined): DiscoveryKind[] {
+  const on = (v: unknown) => v === "on" || v === "true";
+  const kinds: DiscoveryKind[] = [];
+  if (on(b?.discoverPdp)) kinds.push("PDP");
+  if (on(b?.discoverPlp)) kinds.push("PLP");
+  return kinds;
+}
+
+/** One search per site of a paste, from its home (see discoveryStartUrl). */
+function pasteDiscoveryTargets(
+  sites: Array<{ siteId: number; urls: string[] }>,
+  kinds: DiscoveryKind[],
+): DiscoveryTarget[] {
+  if (!kinds.length) return [];
+  return sites.flatMap((s) => {
+    const startUrl = discoveryStartUrl(s.urls);
+    return startUrl ? [{ siteId: s.siteId, startUrl, kinds }] : [];
+  });
 }
 
 function toIdArray(v: unknown): number[] {
@@ -143,7 +169,7 @@ export async function projectRoutes(app: FastifyInstance) {
     const result = parseUrlPaste(String(b?.urls ?? ""), {
       includeHomepages: b?.includeHomepages === "on" || b?.includeHomepages === "true",
     });
-    return reply.view("partials/url-paste-preview", { result });
+    return reply.view("partials/url-paste-preview", { result, discoveryKinds: discoveryKindsOf(b) });
   });
 
   // Create a "diagnostic Speed/SEO" project from a pasted URL list: sites and
@@ -165,7 +191,7 @@ export async function projectRoutes(app: FastifyInstance) {
       return reply.redirect(`/projects/new?${qs.toString()}`);
     }
 
-    const pageIds = await upsertDiagPages(result, clientId);
+    const { pageIds, sites } = await upsertDiagPages(result, clientId);
 
     const project = await prisma.project.create({
       data: {
@@ -174,9 +200,12 @@ export async function projectRoutes(app: FastifyInstance) {
         clientId,
         // A diagnostic project says what it is; the run kind is read from here.
         mode: "DIAGNOSTIC",
-        pages: { create: pageIds.map((pageId) => ({ pageId })) },
+        pages: { create: [...new Set(pageIds)].map((pageId) => ({ pageId })) },
       },
     });
+    // The PDP/PLP search runs in the background; the project page shows its
+    // proposals as they come, for the operator to validate.
+    await startDiscovery(project.id, pasteDiscoveryTargets(sites, discoveryKindsOf(b)));
     return reply.redirect(`/projects/${project.id}`);
   });
 
@@ -197,7 +226,7 @@ export async function projectRoutes(app: FastifyInstance) {
     const result = parseUrlPaste(String(b?.urls ?? ""), { includeHomepages });
     if (result.sites.length === 0) return reply.redirect(`/projects/${id}`);
 
-    const pageIds = await upsertDiagPages(result, project.clientId);
+    const { pageIds } = await upsertDiagPages(result, project.clientId);
     const existing = new Set(project.pages.map((pp) => pp.pageId));
     const toAdd = [...new Set(pageIds)].filter((pageId) => !existing.has(pageId));
     if (toAdd.length) {
@@ -240,6 +269,10 @@ export async function projectRoutes(app: FastifyInstance) {
       include: {
         client: true,
         pages: { include: { page: { include: { site: true } } } },
+        pageCandidates: {
+          include: { site: { select: { name: true } } },
+          orderBy: [{ siteId: "asc" }, { kind: "asc" }],
+        },
         runs: {
           orderBy: { createdAt: "desc" },
           include: {
@@ -375,6 +408,8 @@ export async function projectRoutes(app: FastifyInstance) {
       cruxLatest,
       cruxFormFactors,
       selectedFF,
+      candidates: project.pageCandidates,
+      candidatesPending: pendingCandidates(project.pageCandidates),
       flash: (req.query as any)?.flash ?? null,
     });
   });

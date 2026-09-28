@@ -95,8 +95,9 @@ model Site {
   client   Client? @relation(fields: [clientId], references: [id], onDelete: SetNull)
   clientId Int?
 
-  pages         Page[]
-  runSiteScores RunSiteScore[]
+  pages          Page[]
+  runSiteScores  RunSiteScore[]
+  pageCandidates PageCandidate[]
 
   @@index([clientId])
 }
@@ -111,9 +112,10 @@ model Page {
   url       String   @db.Text
   createdAt DateTime @default(now())
 
-  projectPages  ProjectPage[]
-  runPages      RunPage[]
-  cruxSnapshots CruxSnapshot[]
+  projectPages   ProjectPage[]
+  runPages       RunPage[]
+  cruxSnapshots  CruxSnapshot[]
+  pageCandidates PageCandidate[]
 
   @@index([siteId])
 }
@@ -137,9 +139,10 @@ model Project {
   monitorLastAt    DateTime? // when the last cycle actually executed
   monitorPaused    Boolean          @default(false) // paused → the scheduler skips this project
 
-  pages         ProjectPage[]
-  runs          Run[]
-  cruxSnapshots CruxSnapshot[]
+  pages          ProjectPage[]
+  runs           Run[]
+  cruxSnapshots  CruxSnapshot[]
+  pageCandidates PageCandidate[]
 
   @@index([clientId])
 }
@@ -148,25 +151,65 @@ model Project {
 /// One row per (origin | page URL) per collection cycle. Only inserted when CrUX
 /// returned data (no all-null rows).
 model CruxSnapshot {
-  id          Int       @id @default(autoincrement())
-  project     Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  id          Int            @id @default(autoincrement())
+  project     Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
   projectId   Int
   scope       CruxScope
   // Device form factor this sample was collected for (mobile vs desktop).
   // Defaults to PHONE so pre-existing rows (all mobile) stay valid without a data migration.
   formFactor  CruxFormFactor @default(PHONE)
   // For PAGE scope, the page this sample belongs to. Null for ORIGIN scope.
-  page        Page?     @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  page        Page?          @relation(fields: [pageId], references: [id], onDelete: Cascade)
   pageId      Int?
-  urlKey      String    @db.Text // the origin or page URL queried
+  urlKey      String         @db.Text // the origin or page URL queried
   lcpMs       Int?
   ttfbMs      Int?
   inpMs       Int?
   cls         Float?
   fcpMs       Int?
-  collectedAt DateTime  @default(now())
+  collectedAt DateTime       @default(now())
 
   @@index([projectId, collectedAt])
+  @@index([pageId])
+}
+
+/// Where a discovered PDP/PLP proposal stands (diagnostic projects — see
+/// docs/DIAGNOSTIC.md, « Découverte des PDP / PLP »).
+enum CandidateStatus {
+  SEARCHING // discovery in progress
+  PROPOSED // a URL is proposed, awaiting the operator
+  NOT_FOUND // nothing proposed — the note says why
+  ACCEPTED // validated: the page exists and belongs to the project
+  REJECTED // dismissed by the operator
+}
+
+/// A PDP or PLP proposed for one site of a diagnostic project, awaiting the
+/// operator. ONE per (project, site, kind): a new search replaces it. Only an
+/// ACCEPTED candidate becomes a page of the project — an unvalidated proposal is
+/// never diagnosed.
+model PageCandidate {
+  id           Int             @id @default(autoincrement())
+  project      Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId    Int
+  site         Site            @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  siteId       Int
+  kind         PageKind // PDP | PLP
+  startUrl     String          @db.Text // the home the search started from
+  status       CandidateStatus @default(SEARCHING)
+  url          String?         @db.Text // proposed URL (null while searching / when not found)
+  confidence   String? // "confirmed" | "probable"
+  source       String? // where the URL came from (sitemap, PLP link…), in French
+  via          String? // "http" | "browser"
+  note         String?         @db.Text // what was checked, or why nothing was found
+  alternatives Json? // string[] — other URLs the operator may pick
+  page         Page?           @relation(fields: [pageId], references: [id], onDelete: SetNull)
+  pageId       Int? // the page created or reused on ACCEPTED
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  @@unique([projectId, siteId, kind])
+  @@index([projectId])
+  @@index([siteId])
   @@index([pageId])
 }
 
@@ -244,16 +287,16 @@ model RunPage {
 
 /// Aggregated per-site result for a run (used for ranking + detail).
 model RunSiteScore {
-  id         Int      @id @default(autoincrement())
-  run        Run      @relation(fields: [runId], references: [id], onDelete: Cascade)
-  runId      Int
-  site       Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
-  siteId     Int
-  category   Category
-  overall    Int?
-  geo        Int?
+  id              Int      @id @default(autoincrement())
+  run             Run      @relation(fields: [runId], references: [id], onDelete: Cascade)
+  runId           Int
+  site            Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  siteId          Int
+  category        Category
+  overall         Int?
+  geo             Int?
   // Topic 12, measured on the CHINA pages only (null when the site has none).
-  china      Int?
+  china           Int?
   // Synthesis of the CHINA pages: average of topics 1-10, each reduced to its
   // first criterion. Null when the site has no China page.
   chinaOverall    Int?
