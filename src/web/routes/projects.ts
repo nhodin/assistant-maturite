@@ -8,7 +8,7 @@ import { parseClientId, listClients } from "../clients";
 import { buildProjectTrend, type TrendRunInput, type TrendPageDef } from "../trend";
 import { summarizeDiagRun, type DiagRunSummary } from "../diag-summary";
 import { buildCruxTrends, type CruxSnapshotInput } from "../crux-trend";
-import { parseUrlPaste } from "../url-paste";
+import { findCanonicalMatch, parseUrlPaste } from "../url-paste";
 
 function parseMode(v: unknown): ProjectMode {
   return v === "MONITORING" ? "MONITORING" : "STANDARD";
@@ -42,7 +42,10 @@ function parseFormFactor(v: unknown): CruxFormFactor {
 /**
  * Find-or-create the sites (category Other) and pages (kind OTHER — never
  * guessed as HP/PLP/PDP) of a parsed URL paste, under `clientId`. Idempotent:
- * existing site/page rows are reused. Returns the page ids in paste order.
+ * existing site/page rows are reused, a page being matched on its CANONICAL URL
+ * (see canonicalUrlKey) — `http://shop.fr/a/` reuses the stored
+ * `https://shop.fr/a` rather than creating its twin. Returns the page ids in
+ * paste order.
  */
 async function upsertDiagPages(
   result: ReturnType<typeof parseUrlPaste>,
@@ -56,10 +59,20 @@ async function upsertDiagPages(
         data: { name: s.site, category: "Other", clientId },
       });
     }
+    // Oldest first: a site already holding two spellings resolves to the older row.
+    const stored = await prisma.page.findMany({
+      where: { siteId: site.id },
+      select: { id: true, url: true },
+      orderBy: { id: "asc" },
+    });
     for (const url of s.pages) {
-      let page = await prisma.page.findFirst({ where: { siteId: site.id, url } });
+      let page = findCanonicalMatch(stored, url);
       if (!page) {
-        page = await prisma.page.create({ data: { siteId: site.id, url, kind: "OTHER" } });
+        page = await prisma.page.create({
+          data: { siteId: site.id, url, kind: "OTHER" },
+          select: { id: true, url: true },
+        });
+        stored.push(page);
       }
       pageIds.push(page.id);
     }

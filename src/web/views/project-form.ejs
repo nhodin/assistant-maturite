@@ -36,8 +36,10 @@
     Une URL par ligne. Les sites et pages sont créés automatiquement, groupés par
     <strong>domaine enregistrable</strong> (<code>fr.shop-orchestra.com</code> → <code>shop-orchestra.com</code>,
     <code>travisperkins.co.uk</code> reste entier) ; les query strings (<code>?l=11</code>…) sont conservées.
-    Lignes vides ignorées, doublons exacts fusionnés, URLs non-http(s) rejetées et listées ci-dessous.
-    Recoller la même liste plus tard est sans risque : les sites/pages déjà créés sont réutilisés.
+    Lignes vides ignorées, URLs non-http(s) rejetées et listées ci-dessous. Les doublons sont
+    fusionnés même écrits autrement : schéma (<code>http</code>/<code>https</code>), casse de l'hôte
+    et barre finale ne comptent pas. Recoller la même liste plus tard est sans risque : les
+    sites/pages déjà créés sont réutilisés, selon la même règle.
   </p>
   <div class="form-row">
     <textarea name="urls" id="diagUrls" rows="12" style="flex:1;font-family:monospace;resize:vertical"
@@ -50,7 +52,7 @@
     <input type="checkbox" name="includeHomepages"
       hx-post="/projects/diag/preview" hx-trigger="change"
       hx-target="#url-paste-preview" hx-include="closest form">
-    Ajouter aussi la home de chaque domaine
+    Ajouter aussi la home de chaque domaine (si elle n'y est pas déjà)
   </label>
 
   <h3>Aperçu</h3>

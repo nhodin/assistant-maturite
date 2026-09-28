@@ -1,11 +1,13 @@
 <%
-  var r = (typeof result !== 'undefined' && result) ? result : { sites: [], rejected: [], counts: { urls: 0, sites: 0, rejected: 0 } };
+  var r = (typeof result !== 'undefined' && result) ? result : { sites: [], rejected: [], duplicates: [], counts: { urls: 0, sites: 0, rejected: 0, duplicates: 0 } };
+  var dups = r.duplicates || [];
 %>
 <div class="preview-box">
   <p class="preview-summary">
     <strong><%= r.counts.urls %></strong> URL<%= r.counts.urls > 1 ? 's' : '' %> →
     <strong><%= r.counts.sites %></strong> site<%= r.counts.sites > 1 ? 's' : '' %>,
-    <strong><%= r.counts.rejected %></strong> rejet<%= r.counts.rejected > 1 ? 's' : '' %>
+    <strong><%= r.counts.rejected %></strong> rejet<%= r.counts.rejected > 1 ? 's' : '' %><% if (dups.length) { %>,
+    <strong><%= dups.length %></strong> doublon<%= dups.length > 1 ? 's' : '' %> fusionné<%= dups.length > 1 ? 's' : '' %><% } %>
   </p>
   <% if (r.sites.length) { %>
     <ul class="preview-sites">
@@ -22,6 +24,14 @@
         </li>
       <% }) %>
     </ul>
+  <% } %>
+  <% if (dups.length) { %>
+    <details class="preview-dups">
+      <summary>Doublons fusionnés (même page écrite autrement)</summary>
+      <ul class="preview-urls">
+        <% dups.forEach(function(d){ %><li class="url"><code><%= d.line %></code> = <%= d.duplicateOf %></li><% }) %>
+      </ul>
+    </details>
   <% } %>
   <% if (r.rejected.length) { %>
     <p class="warn">URLs rejetées (ignorées) :</p>

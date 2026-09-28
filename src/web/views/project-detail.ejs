@@ -266,7 +266,8 @@
         <p class="muted small">
           Une URL par ligne, mêmes règles qu'à la création : groupement par domaine
           enregistrable, query strings conservées, sites/pages existants réutilisés.
-          Les URLs déjà présentes dans le projet sont ignorées.
+          Les URLs déjà présentes dans le projet sont ignorées, même écrites autrement
+          (<code>http</code>/<code>https</code>, casse de l'hôte, barre finale).
         </p>
         <div class="form-row">
           <textarea name="urls" rows="8" style="flex:1;font-family:monospace;resize:vertical"
@@ -279,7 +280,7 @@
           <input type="checkbox" name="includeHomepages"
             hx-post="/projects/diag/preview" hx-trigger="change"
             hx-target="#add-urls-preview" hx-include="closest form">
-          Ajouter aussi la home de chaque domaine
+          Ajouter aussi la home de chaque domaine (si elle n'y est pas déjà)
         </label>
         <div id="add-urls-preview"></div>
         <div class="form-row" style="margin-top:.5rem">

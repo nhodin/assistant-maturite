@@ -270,6 +270,7 @@ th a.page-head:hover { text-decoration: underline; }
 .preview-urls { margin: .2rem 0 .3rem 1rem; padding: 0; list-style: none; }
 .preview-urls li.url { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
 .preview-rejects { margin: .2rem 0; padding: 0 0 0 1.1rem; font-size: 12px; color: var(--ko); }
+.preview-dups { margin: .3rem 0; font-size: 12px; }
 
 /* ── Prospect diagnostic — run views (GO/NOGO/à confirmer verdicts) ────────── */
 .b-diag { background: #e1f0ff; color: #0d47a1; }
