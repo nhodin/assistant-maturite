@@ -248,8 +248,46 @@ function bumpBlocked(counts: Map<string, number>, origin: string): number {
   return next;
 }
 
-const sleep = (ms: number): Promise<void> =>
-  new Promise((resolve) => setTimeout(resolve, ms));
+/** Wait `ms`, or less if `signal` aborts first (a stop must not sit out a cooldown). */
+const sleep = (ms: number, signal?: AbortSignal): Promise<void> =>
+  new Promise((resolve) => {
+    if (signal?.aborted) return resolve();
+    const done = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", done);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    signal?.addEventListener("abort", done, { once: true });
+  });
+
+/**
+ * Capture `buckets` with at most `slots` in flight, each bucket sequentially (see
+ * groupByOrigin). Once `signal` aborts, the pages already in capture run to their
+ * end — a capture is never cut mid-flight, its result is as good as any other —
+ * but no further page starts. Returns the pages that never started, in order.
+ */
+export async function captureBuckets<T>(
+  buckets: T[][],
+  slots: number,
+  capture: (item: T) => Promise<void>,
+  signal: AbortSignal,
+): Promise<T[]> {
+  const skipped = buckets.map(() => [] as T[]);
+  await runPool(
+    buckets.map((bucket, b) => async () => {
+      for (const item of bucket) {
+        if (signal.aborted) {
+          skipped[b]!.push(item);
+          continue;
+        }
+        await capture(item);
+      }
+    }),
+    slots,
+  );
+  return skipped.flat();
+}
 
 type CaptureAttempt =
   | { ok: true; bundle: EvidenceBundle }
@@ -382,9 +420,31 @@ export function slimEvidence(b: EvidenceBundle, keepDocuments = false): object {
 }
 
 let activeRunId: number | null = null;
+/** Stop signal of the active run; created and dropped with it (see launch). */
+let activeStop: AbortController | null = null;
 
 export function activeRun(): number | null {
   return activeRunId;
+}
+
+/**
+ * Ask the active run to stop. The pages in capture finish normally (under a
+ * minute: no escalated retry is started after the stop), the ones behind them
+ * never start, and the run ends FAILED with the reason — resumable with
+ * « Reprendre », which recaptures exactly the pages that are not DONE.
+ * Idempotent while the run drains.
+ */
+export function stopRun(runId: number): { stopping: boolean; reason?: string } {
+  if (activeRunId !== runId || !activeStop) {
+    return { stopping: false, reason: "Ce run n'est pas en cours d'exécution." };
+  }
+  activeStop.abort();
+  return { stopping: true };
+}
+
+/** Whether `runId` is the active run AND has been asked to stop (it is draining). */
+export function isStopping(runId: number): boolean {
+  return activeRunId === runId && !!activeStop?.signal.aborted;
 }
 
 /**
@@ -462,7 +522,9 @@ function launch(
     return { started: false, reason: `A run is already in progress (#${activeRunId})` };
   }
   activeRunId = runId;
-  executeRun(runId, opts)
+  const stop = new AbortController();
+  activeStop = stop;
+  executeRun(runId, opts, stop.signal)
     .catch(async (err) => {
       console.error(`Run #${runId} crashed:`, err);
       // The executor died outside a page's own error handling. Without this the
@@ -480,6 +542,7 @@ function launch(
     })
     .finally(() => {
       activeRunId = null;
+      activeStop = null;
     });
   return { started: true };
 }
@@ -515,7 +578,8 @@ export function recaptureSite(
 
 async function executeRun(
   runId: number,
-  opts: { resume?: boolean; siteId?: number } = {},
+  opts: { resume?: boolean; siteId?: number },
+  stop: AbortSignal,
 ): Promise<void> {
   const run = await prisma.run.findUnique({
     where: { id: runId },
@@ -690,6 +754,7 @@ async function executeRun(
     let mode: CaptureMode = "standard";
     let firstSummary: string | null = null;
     let noRetry = false;
+    let retryCancelled = false;
 
     if (!attempt.ok) {
       firstSummary = attempt.summary;
@@ -697,13 +762,21 @@ async function executeRun(
       const origin = originOf(rp.url);
       const spent = blocksByOrigin.get(origin) ?? 0;
 
-      if (attempt.kind === "blocked" && spent >= ORIGIN_BLOCK_BUDGET) {
+      // Coming straight back after a block just hands the WAF another data point.
+      // The cooldown gives way to a stop, so a stopped run drains in one capture.
+      if (!stop.aborted && attempt.kind === "blocked" && spent < ORIGIN_BLOCK_BUDGET) {
+        await sleep(BLOCK_COOLDOWN_MS, stop);
+      }
+
+      if (stop.aborted) {
+        // A stop lets the capture in flight finish, not a second one: the page stays
+        // failed and « Reprendre » will take it again.
+        retryCancelled = true;
+      } else if (attempt.kind === "blocked" && spent >= ORIGIN_BLOCK_BUDGET) {
         // The WAF has made up its mind about this client: another headed session
         // would only harden it. Recapture the brand later, from another exit IP.
         noRetry = true;
       } else {
-        // Coming straight back after a block just hands the WAF another data point.
-        if (attempt.kind === "blocked") await sleep(BLOCK_COOLDOWN_MS);
         mode = "escalated";
         attempt = await tryCapture(
           rp.url,
@@ -733,7 +806,9 @@ async function executeRun(
           ? `${firstSummary}, puis ${failed.summary} au retry`
           : failed.summary;
       const pageError =
-        `${label} : ${detail}` + (noRetry ? " (pas de retry, origine déjà bloquée)" : "");
+        `${label} : ${detail}` +
+        (noRetry ? " (pas de retry, origine déjà bloquée)" : "") +
+        (retryCancelled ? " (pas de retry, run arrêté)" : "");
       await prisma.runPage.update({
         where: { id: rp.id },
         data: {
@@ -832,18 +907,37 @@ async function executeRun(
         : ""),
   );
 
-  await runPool(
-    buckets.map((bucket) => async () => {
-      for (const rp of bucket) {
-        // The pool must survive a page whose own error handling failed (a DB write,
-        // typically) — otherwise one page would abort the sibling origins too.
-        await capturePage(rp).catch((err) =>
-          console.error(`Run #${runId}: page #${rp.id} (${rp.url}) crashed:`, err),
-        );
-      }
-    }),
+  const skipped = await captureBuckets(
+    buckets,
     slots,
+    // The pool must survive a page whose own error handling failed (a DB write,
+    // typically) — otherwise one page would abort the sibling origins too.
+    (rp) =>
+      capturePage(rp).catch((err) =>
+        console.error(`Run #${runId}: page #${rp.id} (${rp.url}) crashed:`, err),
+      ),
+    stop,
   );
+
+  if (skipped.length > 0) {
+    // Stopped by the operator. The skipped pages stay PENDING (never attempted) and
+    // their sites unaggregated, exactly as after a server stop: « Reprendre » takes
+    // every page that is not DONE and aggregates the sites as they complete. The
+    // end-of-run CrUX rank query is left to that resume, which would pay it again.
+    const captured = await prisma.runPage.count({ where: { runId, status: "DONE" } });
+    console.log(`Run #${runId}: stopped — ${skipped.length} page(s) not started.`);
+    await prisma.run.update({
+      where: { id: runId },
+      data: {
+        status: "FAILED",
+        finishedAt: new Date(),
+        error:
+          `Arrêté à la demande (${captured}/${run.runPages.length} pages capturées). ` +
+          `« Reprendre » recapturera uniquement les pages manquantes.`,
+      },
+    });
+    return;
+  }
 
   const rankWarning = isDiag ? await attachCruxRanks(runId) : null;
 

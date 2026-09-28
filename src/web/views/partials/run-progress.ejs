@@ -8,6 +8,7 @@
   var running = pages.filter(function(p){ return p.status === 'RUNNING'; });
   // A diag run has no topic scores: the maturity matrix would be 10 columns of dots.
   var isDiagRun = run.kind === 'diag';
+  var isStopping = typeof stopping !== 'undefined' && stopping;
 %>
 <div id="run-progress"
      hx-get="/runs/<%= run.id %>/status" hx-trigger="load delay:2s" hx-swap="outerHTML">
@@ -15,8 +16,13 @@
   <div class="progress-box">
     <div class="spinner"></div>
     <div>
-      <strong>Capture en cours…</strong>
-      <span class="muted"><%= run.donePages %> / <%= run.totalPages %> pages</span>
+      <% if (isStopping) { %>
+        <strong>Arrêt en cours…</strong>
+        <span class="muted"><%= run.donePages %> / <%= run.totalPages %> pages — les pages en cours de capture se terminent, les suivantes ne partiront pas.</span>
+      <% } else { %>
+        <strong>Capture en cours…</strong>
+        <span class="muted"><%= run.donePages %> / <%= run.totalPages %> pages</span>
+      <% } %>
       <% if (running.length) { %>
         <div class="muted url">→ <%= running[0].url %></div>
       <% } %>

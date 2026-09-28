@@ -6,12 +6,25 @@
     {id:6,ab:'JS'},{id:7,ab:'CSS'},{id:8,ab:'CP'},{id:9,ab:'Fnt'},{id:10,ab:'CDN'}
   ];
   function tScore(topics, id){ var t=(topics||[]).find(function(x){return x.topicId===id}); return t? t.score : undefined; }
+  // Guarded: a server started before the stop button existed passes no `stopping`.
+  var isStopping = typeof stopping !== 'undefined' && !!stopping;
 %>
 
 <p><a href="/runs">← Runs</a></p>
 <div class="head-row">
   <h1>Run #<%= run.id %></h1>
   <span class="badge b-<%= run.status %>"><%= run.status %></span>
+  <%# Stop = the pages in capture finish, the next ones never start; the run then
+      reads FAILED with « Reprendre » below, like after a server stop. %>
+  <% if (isLive) { %>
+    <form method="post" action="/runs/<%= run.id %>/stop">
+      <% if (isStopping) { %>
+        <button class="btn" type="submit" disabled>⏹ Arrêt en cours…</button>
+      <% } else { %>
+        <button class="btn" type="submit" title="Les pages en cours de capture se terminent, les suivantes ne partent pas. Le run reste reprenable.">⏹ Arrêter</button>
+      <% } %>
+    </form>
+  <% } %>
   <% if (!isLive && pendingPages > 0) { %>
     <form method="post" action="/runs/<%= run.id %>/resume">
       <% if (run.status === 'DONE') { %>
@@ -45,7 +58,7 @@
 <% if (run.warning) { %><div class="flash warn"><%= run.warning %></div><% } %>
 
 <% if (isLive) { %>
-  <%- include('partials/run-progress', { run }) %>
+  <%- include('partials/run-progress', { run, stopping: isStopping }) %>
 <% } else { %>
   <% if (pendingPages > 0 && run.runPages.length) { %>
     <p class="muted">

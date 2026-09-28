@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { prisma } from "../db";
-import { activeRun, enrichRunAudience, enrichRunTechno, resumeRun, recaptureSite } from "../runner";
+import { activeRun, enrichRunAudience, enrichRunTechno, isStopping, resumeRun, recaptureSite, stopRun } from "../runner";
 import { parseClientId, listClients } from "../clients";
 import { renderCsv } from "../../engine/report";
 import {
@@ -259,6 +259,7 @@ export async function runRoutes(app: FastifyInstance) {
       // A run is live only if THIS process is executing it; a RUNNING row that is
       // not the active run is a leftover from a previous server (see recoverStaleRuns).
       isLive: activeRun() === run.id,
+      stopping: isStopping(run.id),
       pendingPages: run.runPages.filter((rp) => rp.status !== "DONE").length,
       flash: (req.query as any)?.flash ?? null,
     });
@@ -278,6 +279,17 @@ export async function runRoutes(app: FastifyInstance) {
     const res = resumeRun(id);
     if (!res.started) {
       return reply.redirect(`/runs/${id}?flash=${encodeURIComponent(res.reason ?? "Reprise impossible")}`);
+    }
+    return reply.redirect(`/runs/${id}`);
+  });
+
+  // Stop the active run: the pages in capture finish, the others never start, and
+  // the run stays resumable. See runner.stopRun.
+  app.post("/runs/:id/stop", async (req, reply) => {
+    const id = Number((req.params as any).id);
+    const res = stopRun(id);
+    if (!res.stopping) {
+      return reply.redirect(`/runs/${id}?flash=${encodeURIComponent(res.reason ?? "Arrêt impossible")}`);
     }
     return reply.redirect(`/runs/${id}`);
   });
@@ -383,7 +395,7 @@ export async function runRoutes(app: FastifyInstance) {
       reply.header("HX-Refresh", "true");
       return reply.send("");
     }
-    return reply.view("partials/run-progress", { run });
+    return reply.view("partials/run-progress", { run, stopping: isStopping(run.id) });
   });
 
   // On-demand criteria detail for one captured page (available as soon as the

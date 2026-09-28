@@ -231,6 +231,19 @@ kiabi.com. **Restart `npm run web` after changing detection code.**
      one site, DONE ones included, and rebuilds only its aggregate. Resume *finishes* a run,
      recapture *refreshes* one site of it — hence the different page selection. Like a resume it
      reuses the run's stored `configJson`, so the refreshed site stays comparable to its siblings.
+  5. `stopRun(id)` (`POST /runs/:id/stop`, « ⏹ Arrêter » on the run detail and on the active row
+     of the run list) aborts the `AbortController` that `launch` creates with every run. The
+     executor's `captureBuckets` checks it before each page: the captures in flight run to their
+     end (a capture is never cut — its result is as good as any), nothing else starts. A page
+     whose first attempt fails after the stop gets NO escalated retry, and the block cooldown
+     gives way to the stop, so the drain is one capture long (< 1 min). If any page was skipped,
+     the run ends `FAILED` with « Arrêté à la demande (N/M pages capturées) », its skipped pages
+     stay `PENDING` and their sites unaggregated — the same state as after a server stop, so
+     « Reprendre » (not « Relancer les échecs », which a DONE run offers) finishes it. The diag
+     end-of-run CrUX rank query is left to that resume. A stop that skipped nothing (it came
+     after the last page started) changes nothing: the run completes normally. While draining,
+     `isStopping(id)` turns the button into « Arrêt en cours… » and the live progress says so.
+     Tests: `tests/runner-stop.test.ts`.
 - **Bot-challenge wait**: `collector/challenge.ts` (`waitForChallengeToSettle`) runs right after
   the post-navigation `networkidle`. An interstitial is a tiny page, so `networkidle` settles ON
   IT within a second and everything after would measure the challenge; a self-clearing
@@ -571,7 +584,7 @@ npm run db:studio                         # Prisma Studio (inspect DB)
 
 # Quality
 npm run typecheck                         # tsc --noEmit
-npm test                                  # vitest (608 tests)
+npm test                                  # vitest (905 tests)
 
 # CLI (no DB, writes out/ reports)
 npm run audit -- --browser cloak          # full audit over data/WEBSITES.csv

@@ -67,6 +67,41 @@ describe("run-detail, diagnostic run", () => {
   })
 })
 
+describe("run-detail, stop button", () => {
+  const liveRun = { ...run, status: "RUNNING", donePages: 1, totalPages: 18, finishedAt: null }
+
+  it("offers « ⏹ Arrêter » on the live run only", async () => {
+    const live = await render({ ...viewHelpers, ...base, run: liveRun, isLive: true, stopping: false })
+    expect(live).toContain(`action="/runs/40/stop"`)
+    expect(live).toContain("⏹ Arrêter")
+    const finished = await render({ ...viewHelpers, ...base })
+    expect(finished).not.toContain("/stop")
+  })
+
+  it("shows the drain once the stop is requested", async () => {
+    const html = await render({ ...viewHelpers, ...base, run: liveRun, isLive: true, stopping: true })
+    expect(html).toContain("⏹ Arrêt en cours…")
+    expect(html).toContain("les suivantes ne partiront pas")
+    expect(html).not.toContain("Capture en cours…")
+  })
+
+  it("still renders a live run when the route passes no `stopping` (stale server)", async () => {
+    const html = await render({ ...viewHelpers, ...base, run: liveRun, isLive: true })
+    expect(html).toContain("⏹ Arrêter")
+    expect(html).toContain("Capture en cours…")
+  })
+})
+
+describe("url-paste preview", () => {
+  it("lists the duplicates merged under their canonical form", async () => {
+    const { parseUrlPaste } = await import("../src/web/url-paste")
+    const result = parseUrlPaste("https://www.shop.fr/a/\nhttp://www.shop.fr/a")
+    const html = await ejs.renderFile(path.join(ROOT, "partials", "url-paste-preview.ejs"), { result }, { root: ROOT })
+    expect(html).toContain("doublon fusionné")
+    expect(html).toContain("http://www.shop.fr/a</code> = https://www.shop.fr/a/")
+  })
+})
+
 describe("run-progress, live diagnostic run", () => {
   const liveRun = {
     ...run, status: "RUNNING", donePages: 1, totalPages: 18, finishedAt: null,

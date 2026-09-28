@@ -24,7 +24,11 @@
         <td><%= fmtDate(r.createdAt) %></td>
         <td class="actions">
           <% var left = pendingByRun.get(r.id) || 0; %>
-          <% if (left > 0 && activeRunId !== r.id) { %>
+          <% if (activeRunId === r.id) { %>
+            <form method="post" action="/runs/<%= r.id %>/stop">
+              <button type="submit" title="Les pages en cours de capture se terminent, les suivantes ne partent pas. Le run reste reprenable.">⏹ Arrêter</button>
+            </form>
+          <% } else if (left > 0) { %>
             <form method="post" action="/runs/<%= r.id %>/resume">
               <% if (r.status === 'DONE') { %>
                 <button type="submit" title="Recapture les <%= left %> page(s) en échec">↻ Relancer les échecs</button>
